@@ -18,6 +18,7 @@ from .core import (
 from .doctor import diagnose
 from .registry import WindowsRegistryBackend, is_windows
 from .report import render_doctor_human, render_operations_human, render_scan_human
+from .system_name import WindowsComputerNameBackend
 from .terminal import color_enabled
 
 
@@ -119,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         backend = _backend()
+        computer_backend = WindowsComputerNameBackend()
 
         if args.command == "scan":
             data = scan(backend)
@@ -141,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "backup":
-            out = save_backup(args.path, snapshot(backend))
+            out = save_backup(args.path, snapshot(backend, computer_backend))
             _print_json({"backup": str(out.resolve())})
             return 0
 
@@ -151,10 +153,18 @@ def main(argv: list[str] | None = None) -> int:
             backup_path: Path | None = None
             if not dry_run:
                 if not _is_admin():
-                    raise PermissionError("Administrator privileges are required for registry writes.")
-                backup_path = save_backup(args.backup, snapshot(backend)).resolve()
+                    raise PermissionError("Administrator privileges are required for system writes.")
+                backup_path = save_backup(
+                    args.backup,
+                    snapshot(backend, computer_backend),
+                ).resolve()
 
-            operations = apply_plan(backend, plan, dry_run=dry_run)
+            operations = apply_plan(
+                backend,
+                plan,
+                computer_backend=computer_backend,
+                dry_run=dry_run,
+            )
             payload = {
                 "plan": plan.to_dict(),
                 "operations": operations,
@@ -182,10 +192,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "restore":
             dry_run = not args.yes
             if not dry_run and not _is_admin():
-                raise PermissionError("Administrator privileges are required for registry writes.")
+                raise PermissionError("Administrator privileges are required for system writes.")
 
             data = load_backup(args.path)
-            operations = restore(backend, data, dry_run=dry_run)
+            operations = restore(
+                backend,
+                data,
+                computer_backend=computer_backend,
+                dry_run=dry_run,
+            )
             payload = {
                 "operations": operations,
                 "note": "Dry run only." if dry_run else "Restore completed.",
