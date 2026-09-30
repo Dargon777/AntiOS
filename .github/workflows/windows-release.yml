@@ -1,0 +1,67 @@
+name: AntiOS v2 Windows portable
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v2.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pyinstaller
+          python -m pip install -e .
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Build portable executable
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm --onefile --console --name AntiOS antios_entry.py
+
+      - name: Smoke-test executable
+        shell: pwsh
+        run: |
+          .\dist\AntiOS.exe version
+          .\dist\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
+          .\dist\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
+
+      - name: Package portable release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package | Out-Null
+          Copy-Item .\dist\AntiOS.exe .\package\AntiOS.exe
+          Copy-Item .\scripts\install.ps1 .\package\install.ps1
+          Copy-Item .\scripts\uninstall.ps1 .\package\uninstall.ps1
+          Copy-Item .\README.md .\package\README.md
+          Compress-Archive -Path .\package\* -DestinationPath .\AntiOS-windows-x64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AntiOS-windows-x64
+          path: AntiOS-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release for version tag
+        if: startsWith(github.ref, 'refs/tags/v2.')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" .\AntiOS-windows-x64.zip --generate-notes --title "AntiOS $env:GITHUB_REF_NAME"
