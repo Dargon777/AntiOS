@@ -39,7 +39,7 @@ Then:
   -IdentityName "VALUE_FROM_PARTNER_CENTER" `
   -Publisher "VALUE_FROM_PARTNER_CENTER" `
   -PublisherDisplayName "Dargon777" `
-  -PackageVersion "2.0.8.0"
+  -PackageVersion "2.0.9.0"
 ```
 
 Output:
