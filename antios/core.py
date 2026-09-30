@@ -47,8 +47,14 @@ def random_registered_owner() -> str:
 def generate_plan(
     computer_name: str | None = None,
     registered_owner: str | None = None,
+    *,
+    computer_name_prefix: str = "LAB",
 ) -> IdentityPlan:
-    chosen_name = random_computer_name() if computer_name is None else computer_name
+    chosen_name = (
+        random_computer_name(computer_name_prefix)
+        if computer_name is None
+        else computer_name
+    )
     chosen_owner = random_registered_owner() if registered_owner is None else registered_owner
     return IdentityPlan(
         computer_name=validate_computer_name(chosen_name),
