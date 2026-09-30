@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from .build_info import render_version, version_info
+from .config import default_config_path, load_config, write_default_config
 from .core import (
     apply_plan,
     generate_plan,
@@ -16,6 +18,7 @@ from .core import (
     snapshot,
 )
 from .doctor import diagnose
+from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .report import render_doctor_human, render_operations_human, render_scan_human
 from .system_name import WindowsComputerNameBackend
@@ -50,34 +53,50 @@ def build_parser() -> argparse.ArgumentParser:
         prog="antios",
         description="AntiOS v2: auditable Windows privacy/system identity laboratory",
     )
+    parser.add_argument(
+        "--config",
+        help="Path to antios.toml. Defaults to the per-user configuration path.",
+    )
+    parser.add_argument(
+        "--log-file",
+        help="Override the configured log file for this invocation.",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI colors for this invocation.",
+    )
+
     sub = parser.add_subparsers(dest="command", required=True)
+
+    version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
+    version_cmd.add_argument("--json", action="store_true")
+
+    config_cmd = sub.add_parser("config", help="Inspect or initialize AntiOS configuration.")
+    config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
+    config_show = config_sub.add_parser("show", help="Show effective configuration.")
+    config_show.add_argument("--json", action="store_true")
+    config_init = config_sub.add_parser("init", help="Create a default configuration file.")
+    config_init.add_argument("--force", action="store_true", help="Overwrite an existing config.")
 
     scan_cmd = sub.add_parser(
         "scan",
         help="Read Windows identity, version and platform-security metadata.",
     )
-    scan_cmd.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit machine-readable JSON instead of the human report.",
-    )
+    scan_cmd.add_argument("--json", action="store_true")
 
     doctor_cmd = sub.add_parser(
         "doctor",
-        help="Check the AntiOS runtime and report useful Windows security/inventory warnings.",
+        help="Check the runtime and report Windows security/inventory warnings.",
     )
-    doctor_cmd.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit machine-readable JSON instead of the human report.",
-    )
+    doctor_cmd.add_argument("--json", action="store_true")
 
     plan = sub.add_parser("plan", help="Generate a reversible metadata-change plan.")
     plan.add_argument("--computer-name")
     plan.add_argument("--registered-owner")
 
     backup = sub.add_parser("backup", help="Back up v2-mutable metadata before a change.")
-    backup.add_argument("path", nargs="?", default="antios-backup.json")
+    backup.add_argument("path", nargs="?")
 
     apply_cmd = sub.add_parser("apply", help="Preview or apply a v2 plan.")
     apply_cmd.add_argument("--computer-name")
@@ -89,14 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     apply_cmd.add_argument(
         "--backup",
-        default="antios-backup.json",
         help="Backup path created immediately before a real write.",
     )
-    apply_cmd.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit machine-readable JSON instead of the change table.",
-    )
+    apply_cmd.add_argument("--json", action="store_true")
 
     restore_cmd = sub.add_parser("restore", help="Preview or restore from a v2 backup.")
     restore_cmd.add_argument("path")
@@ -105,20 +119,63 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Actually restore. Without --yes, restore is a dry run.",
     )
-    restore_cmd.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit machine-readable JSON instead of the change table.",
-    )
+    restore_cmd.add_argument("--json", action="store_true")
 
     return parser
 
 
+def _render_config(config_path: Path, config: object) -> str:
+    cfg = config.to_dict()
+    general = cfg["general"]
+    logging_cfg = cfg["logging"]
+    return "\n".join([
+        "AntiOS v2 configuration",
+        "=======================",
+        f"Path                 : {config_path}",
+        f"Computer name prefix : {general['computer_name_prefix']}",
+        f"Default backup path  : {general['backup_path']}",
+        f"Color                : {general['color']}",
+        f"Log level            : {logging_cfg['level']}",
+        f"Log file             : {logging_cfg['file'] or '(disabled)'}",
+    ])
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    use_color = color_enabled()
+    config_path = Path(args.config) if args.config else default_config_path()
 
     try:
+        if args.command == "config" and args.config_command == "init":
+            created = write_default_config(config_path, overwrite=args.force)
+            print(f"Created configuration: {created}")
+            return 0
+
+        config = load_config(config_path)
+        log_file = args.log_file if args.log_file is not None else config.logging.file
+        logger = configure_logging(config.logging.level, log_file)
+        logger.info("command=%s", args.command)
+
+        color_mode = "never" if args.no_color else config.general.color
+        use_color = color_enabled(mode=color_mode)
+
+        if args.command == "version":
+            if args.json:
+                _print_json(version_info())
+            else:
+                print(render_version())
+            return 0
+
+        if args.command == "config":
+            if args.config_command == "show":
+                if args.json:
+                    _print_json({
+                        "path": str(config_path),
+                        "config": config.to_dict(),
+                    })
+                else:
+                    print(_render_config(config_path, config))
+                return 0
+
         backend = _backend()
         computer_backend = WindowsComputerNameBackend()
 
@@ -139,34 +196,53 @@ def main(argv: list[str] | None = None) -> int:
             return int(data.get("exit_code", 0))
 
         if args.command == "plan":
-            _print_json(generate_plan(args.computer_name, args.registered_owner).to_dict())
+            _print_json(generate_plan(
+                args.computer_name,
+                args.registered_owner,
+                computer_name_prefix=config.general.computer_name_prefix,
+            ).to_dict())
             return 0
 
         if args.command == "backup":
-            out = save_backup(args.path, snapshot(backend, computer_backend))
+            target = args.path or config.general.backup_path
+            out = save_backup(target, snapshot(backend, computer_backend))
+            logger.info("backup-created path=%s", out)
             _print_json({"backup": str(out.resolve())})
             return 0
 
         if args.command == "apply":
-            plan = generate_plan(args.computer_name, args.registered_owner)
+            plan_data = generate_plan(
+                args.computer_name,
+                args.registered_owner,
+                computer_name_prefix=config.general.computer_name_prefix,
+            )
             dry_run = not args.yes
             backup_path: Path | None = None
+            backup_target = args.backup or config.general.backup_path
+
             if not dry_run:
                 if not _is_admin():
                     raise PermissionError("Administrator privileges are required for system writes.")
                 backup_path = save_backup(
-                    args.backup,
+                    backup_target,
                     snapshot(backend, computer_backend),
                 ).resolve()
+                logger.info("apply backup-created path=%s", backup_path)
 
             operations = apply_plan(
                 backend,
-                plan,
+                plan_data,
                 computer_backend=computer_backend,
                 dry_run=dry_run,
             )
+            logger.info(
+                "apply dry_run=%s changed=%d reboot=%s",
+                dry_run,
+                sum(1 for item in operations if item.get("changed")),
+                any(item.get("changed") and item.get("requires_reboot") for item in operations),
+            )
             payload = {
-                "plan": plan.to_dict(),
+                "plan": plan_data.to_dict(),
                 "operations": operations,
                 "backup": str(backup_path) if backup_path else None,
                 "note": (
@@ -201,6 +277,12 @@ def main(argv: list[str] | None = None) -> int:
                 computer_backend=computer_backend,
                 dry_run=dry_run,
             )
+            logger.info(
+                "restore dry_run=%s changed=%d reboot=%s",
+                dry_run,
+                sum(1 for item in operations if item.get("changed")),
+                any(item.get("changed") and item.get("requires_reboot") for item in operations),
+            )
             payload = {
                 "operations": operations,
                 "note": "Dry run only." if dry_run else "Restore completed.",
@@ -218,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     except (OSError, RuntimeError, PermissionError, ValueError) as exc:
+        try:
+            logger.error("command failed: %s", exc)
+        except UnboundLocalError:
+            pass
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
