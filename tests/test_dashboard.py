@@ -49,5 +49,5 @@ def test_every_health_level_has_visual_status_mapping():
 
 
 def test_dashboard_self_test_accepts_all_locales():
-    for language in ("en", "ru", "es", "zh-CN"):
+    for language in ("en", "ru", "es", "zh-CN", "fi", "pl", "mn"):
         assert main(["--self-test", "--lang", language]) == 0

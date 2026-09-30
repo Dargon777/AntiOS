@@ -4,6 +4,32 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a8] - 2026-10-01
+
+### Added
+
+- GUI quick-action strip for Windows Security, Startup Apps and Storage.
+- Dashboard keyboard shortcuts: `F5`, `Ctrl+E`, and `Ctrl+1…4`.
+- Visible application version/channel in the dashboard sidebar.
+- Hover/focus states for navigation and action buttons.
+- Optional Azure Artifact Signing integration for direct-download EXE releases.
+- Authenticode verification gate before packaging when signing is enabled.
+- Dedicated GUI-only Microsoft Store MSIX manifest/template.
+- Reproducible Store MSIX build script.
+- Store-package CI workflow with Partner Center identity inputs.
+- Windows signing and Store packaging documentation.
+
+### Changed
+
+- Dashboard window sizing, spacing and header actions were refined for a more native desktop feel.
+- Store packaging excludes the advanced CLI and ships the read-only GUI only.
+- Release build metadata now records whether the direct-download binaries were signed.
+
+### Security
+
+- Production code signing uses GitHub OIDC with Azure Artifact Signing; no long-lived Azure client secret is required.
+- Self-signed certificates remain explicitly limited to development/testing.
+
 ## [2.0.0a7] - 2026-10-01
 
 ### Added
@@ -151,6 +177,7 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
+[2.0.0a8]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.8
 [2.0.0a7]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.7\n[2.0.0a6]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.6
 [2.0.0a5]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.5
 [2.0.0a4]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.4
