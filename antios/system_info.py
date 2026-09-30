@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+import getpass
+import json
+import os
+import platform
+import socket
+import subprocess
+from typing import Any, Callable
+
+from .registry import RegistryBackend, is_windows
+from .targets import ALL_TARGETS
+
+Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def _registry_map(backend: RegistryBackend) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for target in ALL_TARGETS:
+        value = backend.read(target)
+        result[target.name] = value.value if value.exists else None
+    return result
+
+
+def infer_windows_generation(
+    product_name: str | None,
+    build: str | int | None,
+) -> str | None:
+    """Infer the Windows marketing generation without mutating anything.
+
+    Desktop Windows 11 starts at build 22000. Server products keep their
+    registry product name because build thresholds overlap with server releases.
+    """
+    if product_name and "server" in product_name.lower():
+        return product_name
+
+    try:
+        build_number = int(str(build)) if build is not None else None
+    except ValueError:
+        build_number = None
+
+    if build_number is not None:
+        if build_number >= 22000:
+            return "Windows 11"
+        if build_number >= 10240:
+            return "Windows 10"
+
+    return product_name
+
+
+def _powershell(script: str, runner: Runner = subprocess.run) -> tuple[bool, str]:
+    if not is_windows():
+        return False, "not-windows"
+    try:
+        proc = runner(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    if proc.returncode != 0:
+        return False, stderr or stdout or f"exit-{proc.returncode}"
+    return True, stdout
+
+
+def secure_boot_status(runner: Runner = subprocess.run) -> dict[str, Any]:
+    ok, output = _powershell(
+        "$ErrorActionPreference='Stop'; "
+        "try { [bool](Confirm-SecureBootUEFI) } "
+        "catch { Write-Output ('UNAVAILABLE:' + $_.Exception.Message); exit 0 }",
+        runner=runner,
+    )
+    if not ok:
+        return {"available": False, "enabled": None, "detail": output}
+    if output.lower() == "true":
+        return {"available": True, "enabled": True, "detail": None}
+    if output.lower() == "false":
+        return {"available": True, "enabled": False, "detail": None}
+    if output.startswith("UNAVAILABLE:"):
+        return {"available": False, "enabled": None, "detail": output[12:]}
+    return {"available": False, "enabled": None, "detail": output or "unknown"}
+
+
+def tpm_status(runner: Runner = subprocess.run) -> dict[str, Any]:
+    ok, output = _powershell(
+        "$ErrorActionPreference='Stop'; "
+        "Get-Tpm | Select-Object TpmPresent,TpmReady,TpmEnabled,TpmActivated,ManufacturerIdTxt,ManufacturerVersion | "
+        "ConvertTo-Json -Compress",
+        runner=runner,
+    )
+    if not ok:
+        return {"available": False, "detail": output}
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        return {"available": False, "detail": output or "invalid-json"}
+
+    return {
+        "available": bool(data.get("TpmPresent")),
+        "present": data.get("TpmPresent"),
+        "ready": data.get("TpmReady"),
+        "enabled": data.get("TpmEnabled"),
+        "activated": data.get("TpmActivated"),
+        "manufacturer": data.get("ManufacturerIdTxt"),
+        "version": data.get("ManufacturerVersion"),
+    }
+
+
+def collect_system_info(
+    backend: RegistryBackend,
+    runner: Runner = subprocess.run,
+) -> dict[str, Any]:
+    reg = _registry_map(backend)
+    build = reg.get("CurrentBuild") or reg.get("CurrentBuildNumber")
+    ubr = reg.get("UBR")
+    full_build = str(build) if build is not None else None
+    if full_build and ubr is not None:
+        full_build = f"{full_build}.{ubr}"
+
+    return {
+        "host": {
+            "computer_name": socket.gethostname(),
+            "user": getpass.getuser(),
+            "architecture": platform.machine() or None,
+            "processor": platform.processor() or None,
+        },
+        "windows": {
+            "generation": infer_windows_generation(reg.get("ProductName"), build),
+            "product_name": reg.get("ProductName"),
+            "edition_id": reg.get("EditionID"),
+            "display_version": reg.get("DisplayVersion"),
+            "build": build,
+            "ubr": ubr,
+            "full_build": full_build,
+            "installation_type": reg.get("InstallationType"),
+            "registered_owner": reg.get("RegisteredOwner"),
+            "platform_release": platform.release(),
+            "platform_version": platform.version(),
+        },
+        "security": {
+            "secure_boot": secure_boot_status(runner=runner),
+            "tpm": tpm_status(runner=runner),
+        },
+        "runtime": {
+            "python": platform.python_version(),
+            "python_implementation": platform.python_implementation(),
+            "os_name": os.name,
+        },
+    }
