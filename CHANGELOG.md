@@ -4,6 +4,36 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a3] - 2026-09-30
+
+### Added
+
+- Consumer-oriented `quick-check` / `check` command.
+- Read-only Microsoft Defender status check.
+- Read-only BitLocker/device-encryption status check.
+- System-drive free-space check.
+- Common Windows pending-restart detection.
+- Common startup-app inventory from Run/RunOnce keys and Startup folders.
+- New Tkinter-based Windows Health & Privacy dashboard.
+- Separate windowed `AntiOS-GUI.exe` portable binary.
+- Installed `antios-gui` Python GUI entry point.
+- JSON report export from the dashboard.
+- Buttons to open Windows Security, Startup Apps and Storage settings.
+- Start Menu shortcut creation in the user-scope installer.
+- Optional desktop shortcut.
+
+### Changed
+
+- README and package metadata now lead with the consumer Health & Privacy use case.
+- Release ZIP now includes both GUI and CLI executables.
+- Installer installs both executables while advanced CLI changes remain opt-in.
+- Startup inventory no longer depends on WMI enumeration privileges.
+
+### Safety
+
+- The GUI exposes read-only diagnostics only.
+- System-changing identity operations remain CLI-only and dry-run by default.
+
 ## [2.0.0a2] - 2026-09-30
 
 ### Added
@@ -58,5 +88,5 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
-[2.0.0a2]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.2
+[2.0.0a3]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.3\n[2.0.0a2]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.2
 [2.0.0a1]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.1
