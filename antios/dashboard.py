@@ -18,7 +18,7 @@ RELEASES_URL = PROJECT_URL + "/releases"
 BUG_URL = PROJECT_URL + "/issues/new?template=bug_report.yml"
 FEATURE_URL = PROJECT_URL + "/issues/new?template=feature_request.yml"
 PRIVACY_URL = PROJECT_URL + "/blob/master/PRIVACY.md"
-SUPPORT_URL = "https://github.com/sponsors/Dargon777"
+SUPPORT_URL = PROJECT_URL + "/blob/master/SUPPORT.md"
 
 
 def _open_url(url: str) -> None:
