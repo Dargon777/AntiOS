@@ -68,10 +68,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     if len(prefix) > 6:
         raise ValueError("general.computer_name_prefix must be 6 characters or fewer")
 
+    backup_path = str(general.get("backup_path", "antios-backup.json")).strip()
+    if not backup_path:
+        raise ValueError("general.backup_path must not be empty")
+
     return AppConfig(
         general=GeneralConfig(
             computer_name_prefix=prefix,
-            backup_path=str(general.get("backup_path", "antios-backup.json")),
+            backup_path=backup_path,
             color=_color(general.get("color", "auto")),
         ),
         logging=LoggingConfig(
