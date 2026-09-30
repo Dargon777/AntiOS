@@ -9,9 +9,9 @@ def test_release_version_matches_package_version():
     assert release_version == __version__
 
 
-def test_release_tag_is_alpha_3():
+def test_release_tag_is_alpha_4():
     tag = Path("release/TAG").read_text(encoding="utf-8").strip()
-    assert tag == "v2.0.0-alpha.3"
+    assert tag == "v2.0.0-alpha.4"
 
 
 def test_package_declares_apache_2_license():
@@ -24,6 +24,17 @@ def test_package_declares_apache_2_license():
 def test_package_exposes_gui_script():
     metadata = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     assert metadata["project"]["gui-scripts"]["antios-gui"] == "antios.dashboard:main"
+
+
+def test_trust_docs_are_present():
+    assert Path("PRIVACY.md").is_file()
+    assert Path("SUPPORT.md").is_file()
+
+    privacy = Path("PRIVACY.md").read_text(encoding="utf-8")
+    assert "does not include automatic telemetry" in privacy
+
+    support = Path("SUPPORT.md").read_text(encoding="utf-8")
+    assert "Star the repository" in support
 
 
 def test_license_and_notice_are_present():
