@@ -11,6 +11,9 @@ The original 2019 code is still present at the repository root for historical re
 ### What v2 does
 
 - reads a documented set of Windows identity metadata with `scan`;
+- detects Windows 10/11 from the actual build number and reports edition/version/build;
+- reports architecture, processor, TPM state and Secure Boot state in read-only mode;
+- prints a human-readable report by default, with `--json` for scripting;
 - generates a small reversible metadata plan with `plan`;
 - defaults all writes to **dry-run**;
 - creates a backup immediately before a real `apply`;
@@ -31,11 +34,26 @@ python -m pip install -e .
 
 ### Commands
 
-Read-only scan:
+Human-readable, read-only system scan:
 
 ```powershell
 antios scan
 ```
+
+Machine-readable scan:
+
+```powershell
+antios scan --json
+```
+
+The scan currently includes:
+
+- host/user/architecture/processor;
+- Windows generation, product, edition, display version and full build;
+- installation type and registered owner;
+- Secure Boot state;
+- TPM present/ready/enabled/activated state, vendor and version;
+- a documented set of registry identity values in read-only mode.
 
 Generate a proposed metadata identity:
 
