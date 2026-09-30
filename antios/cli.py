@@ -54,6 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="AntiOS v2: auditable Windows privacy/system identity laboratory",
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=render_version(),
+        help="Show AntiOS version and exit.",
+    )
+    parser.add_argument(
         "--config",
         help="Path to antios.toml. Defaults to the per-user configuration path.",
     )
