@@ -22,6 +22,32 @@ def _registry_map(backend: RegistryBackend) -> dict[str, Any]:
     return result
 
 
+def infer_windows_generation(
+    product_name: str | None,
+    build: str | int | None,
+) -> str | None:
+    """Infer the Windows marketing generation without mutating anything.
+
+    Desktop Windows 11 starts at build 22000. Server products keep their
+    registry product name because build thresholds overlap with server releases.
+    """
+    if product_name and "server" in product_name.lower():
+        return product_name
+
+    try:
+        build_number = int(str(build)) if build is not None else None
+    except ValueError:
+        build_number = None
+
+    if build_number is not None:
+        if build_number >= 22000:
+            return "Windows 11"
+        if build_number >= 10240:
+            return "Windows 10"
+
+    return product_name
+
+
 def _powershell(script: str, runner: Runner = subprocess.run) -> tuple[bool, str]:
     if not is_windows():
         return False, "not-windows"
@@ -114,6 +140,7 @@ def collect_system_info(
             "processor": platform.processor() or None,
         },
         "windows": {
+            "generation": infer_windows_generation(reg.get("ProductName"), build),
             "product_name": reg.get("ProductName"),
             "edition_id": reg.get("EditionID"),
             "display_version": reg.get("DisplayVersion"),
