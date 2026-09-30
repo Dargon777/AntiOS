@@ -51,3 +51,14 @@ def test_every_health_level_has_visual_status_mapping():
 def test_dashboard_self_test_accepts_all_locales():
     for language in ("en", "ru", "es", "zh-CN", "fi", "pl", "mn"):
         assert main(["--self-test", "--lang", language]) == 0
+
+
+
+def test_storage_cleanup_translation_keys_exist_for_all_locales():
+    from antios.i18n import SUPPORTED_LANGUAGES, Translator
+
+    for language in SUPPORTED_LANGUAGES:
+        tr = Translator(language)
+        assert tr.t("nav.cleanup") != "nav.cleanup"
+        assert tr.t("cleanup.scan") != "cleanup.scan"
+        assert tr.t("cleanup.note", days=180) != "cleanup.note"

@@ -6,6 +6,7 @@ import json
 import os
 import threading
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,6 +16,12 @@ from .core import scan
 from .health import collect_health
 from .i18n import LANGUAGE_NAMES, Translator, detect_language, normalize_language
 from .registry import WindowsRegistryBackend, is_windows
+from .storage_cleanup import (
+    DEFAULT_OLD_DAYS,
+    default_scan_path,
+    format_bytes,
+    scan_storage,
+)
 
 PROJECT_URL = "https://github.com/Dargon777/AntiOS"
 RELEASES_URL = PROJECT_URL + "/releases"
@@ -194,6 +201,9 @@ class Dashboard:
         self.nav_buttons: dict[str, Any] = {}
         self.active_page = "overview"
         self._check_rows: list[Any] = []
+        self.storage_path = default_scan_path()
+        self.storage_result: dict[str, Any] | None = None
+        self._storage_cancel = threading.Event()
 
         self._configure_root()
         self._configure_ttk()
@@ -219,6 +229,7 @@ class Dashboard:
         root.bind("<Control-2>", lambda _event: self.show_page("security"))
         root.bind("<Control-3>", lambda _event: self.show_page("startup"))
         root.bind("<Control-4>", lambda _event: self.show_page("system"))
+        root.bind("<Control-5>", lambda _event: self.show_page("cleanup"))
         _enable_dark_titlebar(root)
 
     def _configure_ttk(self) -> None:
@@ -323,6 +334,7 @@ class Dashboard:
             ("security", self.t("nav.security")),
             ("startup", self.t("nav.startup")),
             ("system", self.t("nav.system")),
+            ("cleanup", self.t("nav.cleanup")),
         ]:
             self._create_nav_button(key, label)
 
@@ -384,7 +396,7 @@ class Dashboard:
         ).pack(anchor="w", padx=12, pady=(0, 7))
         tk.Label(
             trust,
-            text="F5  •  Ctrl+E  •  Ctrl+1…4",
+            text="F5  •  Ctrl+E  •  Ctrl+1…5",
             bg=THEME["surface"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 8),
@@ -459,7 +471,7 @@ class Dashboard:
         )
 
     def _build_pages(self) -> None:
-        for name in ("overview", "security", "startup", "system"):
+        for name in ("overview", "security", "startup", "system", "cleanup"):
             frame = self.tk.Frame(self.page_host, bg=THEME["bg"])
             frame.place(relx=0, rely=0, relwidth=1, relheight=1)
             self.pages[name] = frame
@@ -468,6 +480,7 @@ class Dashboard:
         self._build_security(self.pages["security"])
         self._build_startup(self.pages["startup"])
         self._build_system(self.pages["system"])
+        self._build_cleanup(self.pages["cleanup"])
 
     def _build_overview(self, parent: Any) -> None:
         tk = self.tk
@@ -736,6 +749,380 @@ class Dashboard:
             kind="secondary",
         ).pack(side="left")
 
+    def _build_cleanup(self, parent: Any) -> None:
+        tk = self.tk
+
+        controls = tk.Frame(
+            parent,
+            bg=THEME["surface"],
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
+        controls.pack(fill="x", pady=(0, 14))
+
+        left = tk.Frame(controls, bg=THEME["surface"])
+        left.pack(side="left", fill="x", expand=True, padx=18, pady=14)
+
+        tk.Label(
+            left,
+            text=self.t("cleanup.path"),
+            bg=THEME["surface"],
+            fg=THEME["muted_2"],
+            font=("Segoe UI Semibold", 8),
+        ).pack(anchor="w")
+
+        self.cleanup_path_label = tk.Label(
+            left,
+            text=str(self.storage_path),
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            font=("Segoe UI", 10),
+            anchor="w",
+        )
+        self.cleanup_path_label.pack(fill="x", pady=(4, 0))
+
+        buttons = tk.Frame(controls, bg=THEME["surface"])
+        buttons.pack(side="right", padx=14, pady=12)
+
+        self.cleanup_choose_button = self._button(
+            buttons,
+            self.t("cleanup.choose"),
+            self._choose_cleanup_folder,
+            kind="secondary",
+        )
+        self.cleanup_choose_button.pack(side="left")
+
+        self.cleanup_scan_button = self._button(
+            buttons,
+            self.t("cleanup.scan"),
+            self._start_cleanup_scan,
+            kind="primary",
+        )
+        self.cleanup_scan_button.pack(side="left", padx=(8, 0))
+
+        self.cleanup_cancel_button = self._button(
+            buttons,
+            self.t("cleanup.cancel"),
+            self._cancel_cleanup_scan,
+            kind="secondary",
+        )
+        self.cleanup_cancel_button.configure(state="disabled")
+        self.cleanup_cancel_button.pack(side="left", padx=(8, 0))
+
+        self.cleanup_status = tk.Label(
+            parent,
+            text=self.t("cleanup.status.ready"),
+            bg=THEME["bg"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 9),
+            anchor="w",
+        )
+        self.cleanup_status.pack(fill="x", pady=(0, 10))
+
+        summary = tk.Frame(parent, bg=THEME["bg"])
+        summary.pack(fill="x", pady=(0, 14))
+        for column in range(5):
+            summary.grid_columnconfigure(column, weight=1, uniform="cleanup")
+
+        self.cleanup_summary: dict[str, Any] = {}
+        summary_specs = [
+            ("duplicate_groups", self.t("cleanup.summary.duplicates")),
+            ("duplicate_reclaimable_bytes", self.t("cleanup.summary.reclaimable")),
+            ("old_large_files", self.t("cleanup.summary.old")),
+            ("installer_archives", self.t("cleanup.summary.archives")),
+            ("empty_files", self.t("cleanup.summary.empty")),
+        ]
+        for column, (key, title) in enumerate(summary_specs):
+            card = tk.Frame(
+                summary,
+                bg=THEME["surface"],
+                highlightthickness=1,
+                highlightbackground=THEME["border"],
+            )
+            card.grid(
+                row=0,
+                column=column,
+                sticky="nsew",
+                padx=(0 if column == 0 else 4, 0 if column == 4 else 4),
+            )
+            value = tk.Label(
+                card,
+                text="—",
+                bg=THEME["surface"],
+                fg=THEME["text"],
+                font=("Segoe UI", 15, "bold"),
+            )
+            value.pack(anchor="w", padx=13, pady=(11, 2))
+            tk.Label(
+                card,
+                text=title,
+                bg=THEME["surface"],
+                fg=THEME["muted"],
+                font=("Segoe UI", 8),
+                wraplength=150,
+                justify="left",
+            ).pack(anchor="w", padx=13, pady=(0, 11))
+            self.cleanup_summary[key] = value
+
+        tk.Label(
+            parent,
+            text=self.t("cleanup.note", days=DEFAULT_OLD_DAYS),
+            bg=THEME["bg"],
+            fg=THEME["muted_2"],
+            font=("Segoe UI", 9),
+            anchor="w",
+            justify="left",
+            wraplength=850,
+        ).pack(fill="x", pady=(0, 10))
+
+        table = tk.Frame(
+            parent,
+            bg=THEME["surface"],
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
+        table.pack(fill="both", expand=True)
+
+        self.cleanup_tree = self.ttk.Treeview(
+            table,
+            columns=("type", "size", "modified", "path"),
+            show="headings",
+            style="AntiOS.Treeview",
+            selectmode="browse",
+        )
+        self.cleanup_tree.heading("type", text=self.t("cleanup.column.type"))
+        self.cleanup_tree.heading("size", text=self.t("cleanup.column.size"))
+        self.cleanup_tree.heading("modified", text=self.t("cleanup.column.modified"))
+        self.cleanup_tree.heading("path", text=self.t("cleanup.column.path"))
+        self.cleanup_tree.column("type", width=155, stretch=False)
+        self.cleanup_tree.column("size", width=100, stretch=False)
+        self.cleanup_tree.column("modified", width=115, stretch=False)
+        self.cleanup_tree.column("path", width=520)
+
+        scrollbar = tk.Scrollbar(
+            table,
+            orient="vertical",
+            command=self.cleanup_tree.yview,
+            width=10,
+            bd=0,
+            relief="flat",
+        )
+        self.cleanup_tree.configure(yscrollcommand=scrollbar.set)
+        self.cleanup_tree.pack(side="left", fill="both", expand=True, padx=1, pady=1)
+        scrollbar.pack(side="right", fill="y")
+        self.cleanup_tree.bind("<Double-1>", lambda _event: self._open_cleanup_selection())
+
+        bottom = tk.Frame(parent, bg=THEME["bg"])
+        bottom.pack(fill="x", pady=(12, 0))
+        self.cleanup_open_button = self._button(
+            bottom,
+            self.t("cleanup.open_folder"),
+            self._open_cleanup_selection,
+            kind="secondary",
+        )
+        self.cleanup_open_button.pack(side="left")
+
+        if self.storage_result:
+            self._render_cleanup_result(self.storage_result)
+
+    def _choose_cleanup_folder(self) -> None:
+        from tkinter import filedialog
+
+        selected = filedialog.askdirectory(
+            title=self.t("cleanup.dialog.title"),
+            initialdir=str(self.storage_path),
+            mustexist=True,
+        )
+        if not selected:
+            return
+        self.storage_path = Path(selected)
+        self.cleanup_path_label.configure(text=str(self.storage_path))
+        self.cleanup_status.configure(text=self.t("cleanup.status.ready"))
+
+    def _start_cleanup_scan(self) -> None:
+        self._storage_cancel = threading.Event()
+        self.cleanup_scan_button.configure(
+            state="disabled",
+            text=self.t("cleanup.scanning"),
+        )
+        self.cleanup_choose_button.configure(state="disabled")
+        self.cleanup_cancel_button.configure(state="normal")
+        self.cleanup_status.configure(
+            text=self.t("cleanup.status.progress", count=0)
+        )
+
+        def progress(payload: dict[str, Any]) -> None:
+            phase = payload.get("phase")
+            if phase == "hashing":
+                message = self.t(
+                    "cleanup.status.hashing",
+                    count=payload.get("files_hashed", 0),
+                )
+            else:
+                message = self.t(
+                    "cleanup.status.progress",
+                    count=payload.get("files_scanned", 0),
+                )
+            self.root.after(
+                0,
+                lambda text=message: self.cleanup_status.configure(text=text)
+                if self.cleanup_status.winfo_exists()
+                else None,
+            )
+
+        def worker() -> None:
+            try:
+                result = scan_storage(
+                    self.storage_path,
+                    progress=progress,
+                    cancelled=self._storage_cancel.is_set,
+                )
+            except Exception as exc:
+                self.root.after(
+                    0,
+                    lambda error=str(exc): self._finish_cleanup_error(error),
+                )
+                return
+            self.root.after(0, lambda: self._finish_cleanup_scan(result))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _cancel_cleanup_scan(self) -> None:
+        self._storage_cancel.set()
+        self.cleanup_status.configure(text=self.t("cleanup.status.cancelled"))
+
+    def _finish_cleanup_error(self, error: str) -> None:
+        self.cleanup_scan_button.configure(
+            state="normal",
+            text=self.t("cleanup.scan"),
+        )
+        self.cleanup_choose_button.configure(state="normal")
+        self.cleanup_cancel_button.configure(state="disabled")
+        self.cleanup_status.configure(
+            text=self.t("cleanup.status.error", error=error)
+        )
+
+    def _finish_cleanup_scan(self, result: dict[str, Any]) -> None:
+        self.cleanup_scan_button.configure(
+            state="normal",
+            text=self.t("cleanup.scan"),
+        )
+        self.cleanup_choose_button.configure(state="normal")
+        self.cleanup_cancel_button.configure(state="disabled")
+
+        if result.get("cancelled"):
+            self.cleanup_status.configure(text=self.t("cleanup.status.cancelled"))
+            return
+
+        self.storage_result = result
+        self._render_cleanup_result(result)
+        self.cleanup_status.configure(
+            text=self.t(
+                "cleanup.status.done",
+                count=result.get("summary", {}).get("files_scanned", 0),
+            )
+        )
+
+    def _render_cleanup_result(self, result: dict[str, Any]) -> None:
+        summary = result.get("summary", {})
+        self.cleanup_summary["duplicate_groups"].configure(
+            text=str(summary.get("duplicate_groups", 0))
+        )
+        self.cleanup_summary["duplicate_reclaimable_bytes"].configure(
+            text=format_bytes(summary.get("duplicate_reclaimable_bytes", 0))
+        )
+        for key in ("old_large_files", "installer_archives", "empty_files"):
+            self.cleanup_summary[key].configure(text=str(summary.get(key, 0)))
+
+        for item in self.cleanup_tree.get_children():
+            self.cleanup_tree.delete(item)
+
+        rows: dict[str, dict[str, Any]] = {}
+
+        def add_row(
+            path: str,
+            kind: str,
+            size: int,
+            modified: float | None,
+        ) -> None:
+            row = rows.setdefault(
+                path,
+                {
+                    "types": [],
+                    "size": size,
+                    "modified": modified,
+                    "path": path,
+                },
+            )
+            if kind not in row["types"]:
+                row["types"].append(kind)
+
+        for group in result.get("duplicates", []):
+            for path in group.get("paths", []):
+                try:
+                    modified = Path(path).stat().st_mtime
+                except OSError:
+                    modified = None
+                add_row(
+                    path,
+                    self.t("cleanup.type.duplicate"),
+                    int(group.get("size_bytes", 0)),
+                    modified,
+                )
+
+        for key, type_key in (
+            ("old_large_files", "cleanup.type.old"),
+            ("installer_archives", "cleanup.type.archive"),
+            ("empty_files", "cleanup.type.empty"),
+        ):
+            for item in result.get(key, []):
+                add_row(
+                    str(item.get("path", "")),
+                    self.t(type_key),
+                    int(item.get("size_bytes", 0)),
+                    item.get("modified"),
+                )
+
+        ordered = sorted(
+            rows.values(),
+            key=lambda row: (-int(row["size"]), str(row["path"]).casefold()),
+        )
+        for index, row in enumerate(ordered):
+            modified = (
+                datetime.fromtimestamp(float(row["modified"])).strftime("%Y-%m-%d")
+                if isinstance(row["modified"], (int, float))
+                else "—"
+            )
+            self.cleanup_tree.insert(
+                "",
+                "end",
+                values=(
+                    " + ".join(row["types"]),
+                    format_bytes(row["size"]),
+                    modified,
+                    row["path"],
+                ),
+                tags=("even" if index % 2 == 0 else "odd",),
+            )
+
+        self.cleanup_tree.tag_configure("even", background=THEME["surface"])
+        self.cleanup_tree.tag_configure("odd", background=THEME["surface_alt"])
+
+        if not ordered:
+            self.cleanup_status.configure(text=self.t("cleanup.none"))
+
+    def _open_cleanup_selection(self) -> None:
+        selection = self.cleanup_tree.selection()
+        if not selection:
+            return
+        values = self.cleanup_tree.item(selection[0], "values")
+        if len(values) < 4:
+            return
+        path = Path(str(values[3]))
+        target = path.parent if path.parent.exists() else self.storage_path
+        if os.name == "nt":
+            os.startfile(str(target))  # type: ignore[attr-defined]
+
     def _create_nav_button(self, key: str, text: str) -> None:
         button = self.tk.Button(
             self.sidebar,
@@ -1003,6 +1390,7 @@ class Dashboard:
 
         existing = self.data
         active_page = self.active_page
+        self._storage_cancel.set()
 
         self.language = code
         self.tr = Translator(code)
@@ -1043,6 +1431,7 @@ class Dashboard:
             "security": (self.t("nav.security"), self.t("page.security.subtitle")),
             "startup": (self.t("nav.startup"), self.t("page.startup.subtitle")),
             "system": (self.t("nav.system"), self.t("page.system.subtitle")),
+            "cleanup": (self.t("nav.cleanup"), self.t("page.cleanup.subtitle")),
         }
 
         self.active_page = name
@@ -1331,8 +1720,12 @@ class Dashboard:
         if not target:
             return
 
+        payload = dict(self.data)
+        if self.storage_result is not None:
+            payload["storage_cleanup"] = self.storage_result
+
         Path(target).write_text(
-            json.dumps(self.data, indent=2, ensure_ascii=False),
+            json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         messagebox.showinfo(

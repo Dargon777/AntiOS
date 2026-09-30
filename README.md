@@ -6,7 +6,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 8
+> **Pre-release:** 2.0.0 alpha 9
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -32,7 +32,9 @@ AntiOS checks common things that are scattered across different Windows screens:
 - common pending-restart markers;
 - common startup applications;
 - Windows edition, version and build;
-- architecture, processor and uptime.
+- architecture, processor and uptime;
+- duplicate files and potential duplicate-space savings;
+- old large files, installers/archives and empty-file cleanup candidates.
 
 Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. Alpha 8 further polishes the dashboard with tighter spacing, quick actions on the Overview page, improved hover/focus states, keyboard shortcuts and visible build/version information.
 

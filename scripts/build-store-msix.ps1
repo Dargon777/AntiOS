@@ -2,7 +2,7 @@ param(
     [string]$IdentityName = "Dargon777.AntiOS.Development",
     [string]$Publisher = "CN=AntiOS Development",
     [string]$PublisherDisplayName = "Dargon777",
-    [string]$PackageVersion = "2.0.8.0",
+    [string]$PackageVersion = "2.0.9.0",
     [string]$GuiPath = ".\dist\AntiOS-GUI.exe",
     [string]$OutputPath = ".\store-output\AntiOS.msix"
 )
