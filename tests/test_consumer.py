@@ -99,3 +99,26 @@ def test_quick_check_is_human_readable():
     assert "AntiOS quick check" in report
     assert "[OK]" in report
     assert "Your PC looks good" in report
+
+
+def test_russian_health_output_is_localized():
+    result = evaluate_health(_scan(), _health(), language="ru")
+    report = render_quick_check(result, language="ru")
+
+    assert "Быстрая проверка AntiOS" in report
+    assert "С компьютером всё выглядит хорошо" in report
+    assert any(item["title"] == "Свободное место" for item in result["checks"])
+
+
+def test_spanish_health_output_is_localized():
+    result = evaluate_health(_scan(), _health(), language="es")
+
+    assert result["headline"] == "Tu PC parece estar bien"
+    assert any(item["title"] == "Espacio de almacenamiento" for item in result["checks"])
+
+
+def test_chinese_health_output_is_localized():
+    result = evaluate_health(_scan(), _health(), language="zh-CN")
+
+    assert result["headline"] == "电脑状态看起来不错"
+    assert any(item["title"] == "存储空间" for item in result["checks"])
