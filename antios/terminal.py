@@ -6,7 +6,6 @@ from typing import TextIO
 
 
 RESET = "\x1b[0m"
-BOLD = "\x1b[1m"
 COLORS = {
     "ok": "\x1b[32m",
     "info": "\x1b[36m",
@@ -17,10 +16,19 @@ COLORS = {
 }
 
 
-def color_enabled(stream: TextIO | None = None) -> bool:
-    stream = stream or sys.stdout
+def color_enabled(
+    stream: TextIO | None = None,
+    mode: str = "auto",
+) -> bool:
+    mode = mode.lower()
+    if mode == "never":
+        return False
     if os.environ.get("NO_COLOR") is not None:
         return False
+    if mode == "always":
+        return True
+
+    stream = stream or sys.stdout
     if os.environ.get("TERM", "").lower() == "dumb":
         return False
     return bool(getattr(stream, "isatty", lambda: False)())
