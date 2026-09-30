@@ -4,6 +4,23 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a7] - 2026-10-01
+
+### Added
+
+- Finnish (`fi`) localization.
+- Polish (`pl`) localization.
+- Mongolian (`mn`) localization using modern Mongolian Cyrillic.
+- Automatic locale detection for `fi-FI`, `pl-PL` and `mn-MN`.
+- Finnish, Polish and Mongolian quick-start README files.
+- Localization tests expanded from four to seven supported languages.
+
+### Changed
+
+- Dashboard language selector now exposes seven languages.
+- `quick-check --lang` and `dashboard --lang` accept `fi`, `pl` and `mn`.
+- Windows release ZIP now includes all seven language quick-start guides.
+
 ## [2.0.0a6] - 2026-09-30
 
 ### Added
@@ -134,7 +151,7 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
-[2.0.0a6]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.6
+[2.0.0a7]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.7\n[2.0.0a6]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.6
 [2.0.0a5]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.5
 [2.0.0a4]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.4
 [2.0.0a3]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.3\n[2.0.0a2]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.2
