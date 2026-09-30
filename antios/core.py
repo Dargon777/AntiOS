@@ -5,26 +5,28 @@ import platform
 import re
 import secrets
 import string
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .models import IdentityPlan, RegistryTarget
 from .registry import RegistryBackend
+from .system_info import collect_system_info
 from .targets import ALL_TARGETS, MUTABLE_BY_KEY, MUTABLE_TARGETS
 
 BACKUP_SCHEMA = "antios-v2-backup-1"
 
 
+def _registry_entries(backend: RegistryBackend) -> list[dict[str, Any]]:
+    return [backend.read(target).to_dict() for target in ALL_TARGETS]
+
+
 def scan(backend: RegistryBackend) -> dict[str, Any]:
-    values = [backend.read(target).to_dict() for target in ALL_TARGETS]
     return {
         "antios_version": "2.0.0a1",
         "platform": platform.platform(),
-        "python": platform.python_version(),
-        "machine": platform.machine(),
-        "registry": values,
+        "system": collect_system_info(backend),
+        "registry": _registry_entries(backend),
     }
 
 
@@ -32,7 +34,6 @@ def random_computer_name(prefix: str = "LAB") -> str:
     clean = re.sub(r"[^A-Za-z0-9-]", "", prefix.upper())[:6] or "LAB"
     alphabet = string.ascii_uppercase + string.digits
     suffix = "".join(secrets.choice(alphabet) for _ in range(8))
-    # Windows computer names should remain short and uncomplicated.
     return f"{clean}-{suffix}"[:15]
 
 
@@ -109,7 +110,6 @@ def restore(backend: RegistryBackend, backup: dict[str, Any], dry_run: bool = Tr
         key = f"{target_data.get('hive')}\\{target_data.get('path')}::{target_data.get('name')}"
         target = MUTABLE_BY_KEY.get(key)
         if target is None:
-            # Never trust arbitrary paths from a backup file.
             continue
         if not entry.get("exists"):
             continue
