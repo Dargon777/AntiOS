@@ -67,11 +67,7 @@ def test_storage_scan_does_not_follow_symlinks(tmp_path):
         duplicate_min_bytes=1,
     )
 
-    paths = [
-        Path(item["path"])
-        for item in result["old_large_files"]
-    ]
-    assert all("link" not in path.parts for path in paths)
+    assert result["summary"]["files_scanned"] == 1
 
 
 def test_storage_scan_rejects_file_path(tmp_path):
