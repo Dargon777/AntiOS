@@ -1,55 +1,62 @@
 # AntiOS
 
-**Windows Health, Privacy & Diagnostics — with a friendly dashboard and an auditable advanced CLI.**
+**Windows Health, Privacy & Diagnostics — a friendly read-only dashboard with an auditable advanced CLI.**
 
-AntiOS is designed to answer a simple question first: **“Does anything on my Windows PC need attention?”**
+AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 3
+> **Pre-release:** 2.0.0 alpha 4
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
 [![CodeQL](https://github.com/Dargon777/AntiOS/actions/workflows/codeql.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## For most people
+## Download
 
-1. Open the latest GitHub Release.
-2. Download `AntiOS-windows-x64.zip`.
-3. Extract it.
-4. Double-click **`AntiOS-GUI.exe`**.
-
-Latest releases:
+**Recommended for most people:** download the latest Windows ZIP, extract it and double-click **`AntiOS-GUI.exe`**.
 
 https://github.com/Dargon777/AntiOS/releases
 
-The dashboard is read-only. It does not change Windows settings by itself.
+The dashboard is read-only and does not require Administrator elevation just to open.
 
-No Administrator elevation is required just to open the dashboard. Individual status checks may be unavailable when Windows, firmware or security policy does not expose them.
+### Why people may find it useful
 
-## What the dashboard checks
+AntiOS checks common things that are scattered across different Windows screens:
 
-AntiOS currently shows:
-
-- Microsoft Defender antivirus and real-time protection;
-- BitLocker/device-encryption status;
-- Secure Boot;
-- TPM presence/readiness;
-- system-drive free space;
-- common Windows pending-restart markers;
+- Microsoft Defender and real-time protection;
+- BitLocker/device encryption;
+- Secure Boot and TPM;
+- free space on the system drive;
+- common pending-restart markers;
 - common startup applications;
 - Windows edition, version and build;
 - architecture, processor and uptime.
 
-Results are grouped into simple states:
+Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible.
 
-- **OK** — nothing obvious needs attention;
-- **Review** — worth looking at, but not necessarily a problem;
-- **Warning** — something important may need attention;
-- **Info** — a check is informational or unavailable.
+AntiOS deliberately avoids a fake all-knowing “PC health score”.
 
-AntiOS does not pretend that a single health score can describe an entire PC. It shows the individual checks and why each result was produced.
+## Privacy
 
-## Dashboard actions
+**No automatic telemetry.**
+
+AntiOS performs its checks locally. It does not automatically upload health results, startup entries, Windows identifiers, exported reports or other diagnostic data.
+
+Read the policy: [PRIVACY.md](PRIVACY.md)
+
+## Help shape AntiOS
+
+The project is still early, so real user feedback matters more than adding a paywall.
+
+- [Report a problem](https://github.com/Dargon777/AntiOS/issues/new?template=bug_report.yml)
+- [Suggest a feature](https://github.com/Dargon777/AntiOS/issues/new?template=feature_request.yml)
+- [View releases](https://github.com/Dargon777/AntiOS/releases)
+- [Support the project](SUPPORT.md)
+- [Star / share / contribute](https://github.com/Dargon777/AntiOS)
+
+The GUI exposes the same feedback, project, privacy and support links directly from the dashboard.
+
+## What the dashboard can do
 
 The GUI can open the relevant built-in Windows pages for:
 
@@ -57,11 +64,13 @@ The GUI can open the relevant built-in Windows pages for:
 - Startup Apps;
 - Storage.
 
-It can also export the collected report to JSON.
+It can export the collected report to JSON for your own use.
+
+Review an exported report before posting it publicly: it may contain local system information such as your computer name, Windows build and startup entries.
 
 ## Install
 
-The release ZIP contains:
+The Windows release contains:
 
 ```text
 AntiOS-GUI.exe
@@ -69,6 +78,8 @@ AntiOS.exe
 install.ps1
 uninstall.ps1
 README.md
+PRIVACY.md
+SUPPORT.md
 SECURITY.md
 CHANGELOG.md
 CODE_OF_CONDUCT.md
@@ -77,7 +88,7 @@ NOTICE
 BUILD_INFO.txt
 ```
 
-To install for the current Windows user and create a Start Menu shortcut:
+Install for the current Windows user and create a Start Menu shortcut:
 
 ```powershell
 .\install.ps1
@@ -95,23 +106,13 @@ Optional CLI PATH entry:
 .\install.ps1 -AddToPath
 ```
 
-Both switches can be combined.
-
 Uninstall:
 
 ```powershell
 .\uninstall.ps1
 ```
 
-Remove the PATH entry too:
-
-```powershell
-.\uninstall.ps1 -RemoveFromPath
-```
-
 ## Quick Check from the terminal
-
-For a compact consumer-oriented check:
 
 ```powershell
 .\AntiOS.exe quick-check
@@ -123,7 +124,7 @@ Short alias:
 .\AntiOS.exe check
 ```
 
-Machine-readable:
+JSON:
 
 ```powershell
 .\AntiOS.exe quick-check --json
@@ -131,43 +132,39 @@ Machine-readable:
 
 ## Advanced CLI
 
-The CLI retains the technical AntiOS v2 functionality.
-
-### System inventory
+Technical system inventory:
 
 ```powershell
 antios scan
 antios scan --json
 ```
 
-### Technical diagnostics
+Technical diagnostics:
 
 ```powershell
 antios doctor
 antios doctor --json
 ```
 
-### Reversible metadata plan
+Generate a reversible metadata plan:
 
 ```powershell
 antios plan
 ```
 
-Preview changes:
+Preview changes without writing:
 
 ```powershell
 antios apply
 ```
 
-A preview does not write anything.
-
-Real apply requires an Administrator terminal and explicitly supplied `--yes`:
+Real apply requires an Administrator terminal and explicit `--yes`:
 
 ```powershell
 antios apply --yes
 ```
 
-A backup is written before a real apply.
+A backup is created before a real apply.
 
 Restore preview:
 
@@ -185,7 +182,7 @@ antios restore antios-backup.json --yes
 
 The consumer dashboard is read-only.
 
-The advanced CLI deliberately keeps its write surface narrow.
+The advanced CLI keeps its write surface intentionally narrow.
 
 Writable state:
 
@@ -201,18 +198,18 @@ Read-only / out of scope:
 - Windows telemetry/update identifier changes;
 - anti-cheat, ban or licensing bypasses.
 
-Additional safeguards:
+Safeguards:
 
 - writes are dry-run by default;
 - real apply creates a backup first;
 - backup files are treated as untrusted input;
-- restore only accepts explicit allowlisted Registry targets;
+- restore accepts only explicit allowlisted Registry targets;
 - computer names are validated before use;
 - logs exclude scanned/generated identity values and backup contents.
 
 ## Verify downloads
 
-The Windows ZIP is published with a SHA-256 checksum.
+SHA-256:
 
 ```powershell
 (Get-FileHash .\AntiOS-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
@@ -229,10 +226,10 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 
 ## Python installation
 
-AntiOS releases also include a wheel and source distribution.
+Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a3-py3-none-any.whl
+python -m pip install .\antios-2.0.0a4-py3-none-any.whl
 antios-gui
 ```
 
@@ -242,25 +239,11 @@ CLI:
 antios quick-check
 ```
 
-## Configuration
+## Project landing page
 
-Create the default per-user config:
+A telemetry-free static landing page lives in `docs/index.html`.
 
-```powershell
-antios config init
-```
-
-Show effective configuration:
-
-```powershell
-antios config show
-```
-
-Windows default location:
-
-```text
-%APPDATA%\AntiOS\antios.toml
-```
+A manually triggered GitHub Pages workflow is included in `.github/workflows/pages.yml`. Once GitHub Pages is enabled for the repository with **GitHub Actions** as the source, that workflow can publish the site.
 
 ## Development
 
@@ -272,38 +255,15 @@ python -m pip install -e .
 python -m pytest
 ```
 
-Build Python distributions:
-
-```powershell
-python -m pip install build twine
-python -m build
-python -m twine check dist/*
-```
-
 Build both Windows executables:
 
 ```powershell
 python -m pip install pyinstaller
 pyinstaller --clean --noconfirm --onefile --console --name AntiOS antios_entry.py
 pyinstaller --clean --noconfirm --onefile --windowed --name AntiOS-GUI antios_gui_entry.py
-.\dist\AntiOS.exe --version
-.\dist\AntiOS-GUI.exe --self-test
 ```
 
-CI validates:
-
-- Windows latest × Python 3.11 / 3.12 / 3.13;
-- Ubuntu latest × Python 3.11 / 3.12 / 3.13;
-- CodeQL;
-- wheel and source-distribution metadata;
-- Apache LICENSE/NOTICE inside Python distributions;
-- clean wheel installation;
-- installed GUI entry-point self-test;
-- CLI PyInstaller executable;
-- GUI PyInstaller executable;
-- executable smoke tests;
-- release version synchronization;
-- GitHub provenance attestations on master releases.
+CI validates Windows/Linux Python matrices, CodeQL, wheel/sdist metadata, clean wheel installation, GUI entry points, both PyInstaller executables, smoke tests, release metadata and provenance attestations.
 
 ## License
 
@@ -311,4 +271,4 @@ The current AntiOS v2 source tree is licensed under the **Apache License 2.0**. 
 
 The repository is historically a fork. Legacy v1 material remains in Git history only; Apache-2.0 for the current v2 rewrite does not retroactively relicense historical third-party material for which the v2 contributors do not hold the necessary rights.
 
-See also [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [CHANGELOG.md](CHANGELOG.md).
+See also [PRIVACY.md](PRIVACY.md), [SUPPORT.md](SUPPORT.md), [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [CHANGELOG.md](CHANGELOG.md).
