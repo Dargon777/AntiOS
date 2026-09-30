@@ -49,3 +49,12 @@ Keep pull requests focused. Describe:
 - safety/reversibility implications;
 - test coverage;
 - whether a Windows restart or Administrator privileges are involved.
+
+
+## Licensing contributions
+
+The current AntiOS v2 source tree is licensed under the Apache License 2.0.
+
+Unless you explicitly state otherwise when submitting a contribution, contributions intentionally submitted for inclusion in AntiOS v2 are made under the Apache License 2.0, consistent with Section 5 of the license.
+
+Do not submit code you do not have the right to license. If a contribution incorporates third-party material, clearly identify its origin and license.
