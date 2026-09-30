@@ -67,10 +67,22 @@ READ_ONLY_TARGETS: tuple[RegistryTarget, ...] = (
         "RegisteredOwner",
         description="Registered owner display metadata",
     ),
+    RegistryTarget(
+        "HKLM",
+        r"SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName",
+        "ComputerName",
+        description="Configured computer name (read-only inventory)",
+    ),
+    RegistryTarget(
+        "HKLM",
+        r"SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName",
+        "ComputerName",
+        description="Active computer name (read-only inventory)",
+    ),
 )
 
-# v2 writes only ordinary user-facing system metadata, through a small explicit
-# allowlist. This is intentionally much narrower than the 2019 implementation.
+# Registry writes are intentionally narrow. Computer renaming is performed via
+# the supported Windows SetComputerNameExW API instead of direct registry edits.
 MUTABLE_TARGETS: tuple[RegistryTarget, ...] = (
     RegistryTarget(
         "HKLM",
@@ -79,25 +91,7 @@ MUTABLE_TARGETS: tuple[RegistryTarget, ...] = (
         mutable=True,
         description="Registered owner display metadata",
     ),
-    RegistryTarget(
-        "HKLM",
-        r"SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName",
-        "ComputerName",
-        mutable=True,
-        description="Configured computer name",
-    ),
-    RegistryTarget(
-        "HKLM",
-        r"SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName",
-        "ComputerName",
-        mutable=True,
-        description="Active computer name",
-    ),
 )
 
-# Deduplicate RegisteredOwner while retaining the mutable target for writes.
-ALL_TARGETS = READ_ONLY_TARGETS + tuple(
-    target for target in MUTABLE_TARGETS
-    if target.key not in {item.key for item in READ_ONLY_TARGETS}
-)
+ALL_TARGETS = READ_ONLY_TARGETS
 MUTABLE_BY_KEY = {target.key: target for target in MUTABLE_TARGETS}
