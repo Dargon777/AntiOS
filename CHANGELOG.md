@@ -4,6 +4,23 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a4] - 2026-09-30
+
+### Added
+
+- Transparent no-telemetry privacy policy.
+- Project support/feedback guide.
+- Dashboard links for bug reports, feature requests, GitHub, support and privacy.
+- Telemetry-free static landing page source.
+- Manually triggered GitHub Pages deployment workflow.
+- GitHub funding configuration for future Sponsors support.
+
+### Changed
+
+- README now leads with download, privacy, feedback and trust.
+- Windows release ZIP includes privacy and support documentation.
+- Growth work intentionally avoids adding telemetry or a paywall before real user feedback exists.
+
 ## [2.0.0a3] - 2026-09-30
 
 ### Added
@@ -88,5 +105,6 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
+[2.0.0a4]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.4
 [2.0.0a3]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.3\n[2.0.0a2]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.2
 [2.0.0a1]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.1

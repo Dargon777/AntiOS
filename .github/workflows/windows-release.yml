@@ -107,6 +107,8 @@ jobs:
           Copy-Item .\scripts\install.ps1 .\package\install.ps1
           Copy-Item .\scripts\uninstall.ps1 .\package\uninstall.ps1
           Copy-Item .\README.md .\package\README.md
+          Copy-Item .\PRIVACY.md .\package\PRIVACY.md
+          Copy-Item .\SUPPORT.md .\package\SUPPORT.md
           Copy-Item .\SECURITY.md .\package\SECURITY.md
           Copy-Item .\CHANGELOG.md .\package\CHANGELOG.md
           Copy-Item .\CODE_OF_CONDUCT.md .\package\CODE_OF_CONDUCT.md

@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import threading
+import webbrowser
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,17 @@ from .consumer import evaluate_health
 from .core import scan
 from .health import collect_health
 from .registry import WindowsRegistryBackend, is_windows
+
+PROJECT_URL = "https://github.com/Dargon777/AntiOS"
+RELEASES_URL = PROJECT_URL + "/releases"
+BUG_URL = PROJECT_URL + "/issues/new?template=bug_report.yml"
+FEATURE_URL = PROJECT_URL + "/issues/new?template=feature_request.yml"
+PRIVACY_URL = PROJECT_URL + "/blob/master/PRIVACY.md"
+SUPPORT_URL = PROJECT_URL + "/blob/master/SUPPORT.md"
+
+
+def _open_url(url: str) -> None:
+    webbrowser.open(url, new=2)
 
 
 def collect_dashboard_data() -> dict[str, Any]:
@@ -169,11 +181,40 @@ class Dashboard:
             command=self.export_report,
         ).pack(side="right")
 
+        community = ttk.Frame(outer)
+        community.pack(fill="x", pady=(10, 0))
+
+        ttk.Button(
+            community,
+            text="Report a problem",
+            command=lambda: _open_url(BUG_URL),
+        ).pack(side="left")
+        ttk.Button(
+            community,
+            text="Suggest a feature",
+            command=lambda: _open_url(FEATURE_URL),
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            community,
+            text="GitHub / Star",
+            command=lambda: _open_url(PROJECT_URL),
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            community,
+            text="Support development",
+            command=lambda: _open_url(SUPPORT_URL),
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            community,
+            text="Privacy",
+            command=lambda: _open_url(PRIVACY_URL),
+        ).pack(side="right")
+
         ttk.Label(
             outer,
             text=(
-                "Dashboard checks are read-only. Advanced identity changes remain "
-                "available in the CLI and are dry-run by default."
+                "No telemetry: checks run locally. Dashboard checks are read-only. "
+                "Advanced identity changes remain CLI-only and dry-run by default."
             ),
             font=("Segoe UI", 9),
         ).pack(anchor="w", pady=(10, 0))
