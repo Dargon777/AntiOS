@@ -64,3 +64,27 @@ def test_root_version_flag(capsys):
         assert exc.code == 0
     captured = capsys.readouterr()
     assert f"AntiOS {__version__}" in captured.out
+
+
+
+def test_storage_scan_command_works_without_windows(capsys, tmp_path):
+    first = tmp_path / "first.bin"
+    second = tmp_path / "second.bin"
+    first.write_bytes(b"same-data" * 200)
+    second.write_bytes(b"same-data" * 200)
+
+    code = main([
+        "--config",
+        str(tmp_path / "missing.toml"),
+        "storage-scan",
+        str(tmp_path),
+        "--duplicate-min-mb",
+        "0",
+        "--json",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["summary"]["files_scanned"] == 2
+    assert payload["summary"]["duplicate_groups"] == 1
+    assert payload["summary"]["duplicate_files"] == 2
