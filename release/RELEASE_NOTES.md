@@ -1,45 +1,31 @@
-# AntiOS v2.0.0 alpha 3
+# AntiOS v2.0.0 alpha 4
 
-Alpha 3 turns AntiOS from a mostly technical CLI into a more approachable Windows Health & Privacy utility.
+Alpha 4 focuses on trust, discoverability and user feedback rather than adding more system-changing features.
 
-## New for everyday users
+## New
 
-- New **AntiOS-GUI.exe** desktop dashboard.
-- One-click read-only health/privacy overview.
-- Friendly **Quick Check** with OK / Review / Warning states.
-- Microsoft Defender and real-time protection status.
-- BitLocker/device-encryption status.
-- Storage free-space check.
-- Pending-restart detection.
-- Startup application inventory.
-- Secure Boot and TPM overview.
-- Buttons that open the relevant Windows Security, Startup Apps and Storage settings pages.
-- JSON report export from the GUI.
-- Start Menu shortcut created by the installer.
-- Optional desktop shortcut.
-- New CLI command: `antios quick-check` (alias: `antios check`).
-- New installed GUI command: `antios-gui`.
-
-## Safety
-
-The new dashboard is read-only. It does not expose system-changing actions.
-
-Advanced identity changes remain in the CLI and keep the existing dry-run, backup and allowlist safeguards.
-
-AntiOS v2 still does not provide anti-cheat, ban, licensing, hardware/storage serial, MAC/network identity, telemetry/update-ID or similar bypass functionality.
+- Transparent `PRIVACY.md`: AntiOS has no automatic telemetry or analytics.
+- `SUPPORT.md` with the current ways to help the project.
+- Dashboard buttons for:
+  - Report a problem
+  - Suggest a feature
+  - GitHub / Star
+  - Support development
+  - Privacy
+- Telemetry-free static landing page source in `docs/index.html`.
+- Manually triggered GitHub Pages deployment workflow.
+- GitHub funding configuration prepared for GitHub Sponsors.
+- Public README rewritten around download, trust, feedback and everyday-user value.
 
 ## Distribution
 
-The release contains:
+The Windows ZIP now also includes:
 
-- `AntiOS-GUI.exe` — recommended for most users;
-- `AntiOS.exe` — advanced CLI;
-- installer/uninstaller PowerShell helpers;
-- Python wheel and source distribution;
-- Apache-2.0 LICENSE and NOTICE;
-- SHA-256 checksum;
-- GitHub provenance attestations.
+- `PRIVACY.md`
+- `SUPPORT.md`
 
-## Windows warning
+The dashboard itself remains read-only.
 
-The executables are not Authenticode-signed yet, so Windows SmartScreen may show an unknown-publisher warning. Verify the published checksum and GitHub provenance if desired.
+## Why this release exists
+
+AntiOS is not introducing a paywall yet. Alpha 4 is designed to make it easier to collect genuine bug reports and feature requests before deciding which future capabilities, if any, belong in a paid edition.
