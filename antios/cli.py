@@ -24,6 +24,14 @@ from .i18n import LANGUAGE_NAMES, detect_language
 from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .report import render_doctor_human, render_operations_human, render_scan_human
+from .storage_cleanup import (
+    DEFAULT_DUPLICATE_MIN_BYTES,
+    DEFAULT_LARGE_BYTES,
+    DEFAULT_OLD_DAYS,
+    default_scan_path,
+    render_storage_scan,
+    scan_storage,
+)
 from .system_name import WindowsComputerNameBackend
 from .terminal import color_enabled
 
@@ -109,6 +117,36 @@ def build_parser() -> argparse.ArgumentParser:
         choices=list(LANGUAGE_NAMES),
         help="UI language: en, ru, es, zh-CN, fi, pl, mn. Defaults to Windows locale.",
     )
+
+    storage_cmd = sub.add_parser(
+        "storage-scan",
+        aliases=["cleanup-scan"],
+        help="Read-only scan for duplicate and cleanup-candidate files.",
+    )
+    storage_cmd.add_argument(
+        "path",
+        nargs="?",
+        help="Folder to scan. Defaults to Downloads, or the user profile if Downloads is unavailable.",
+    )
+    storage_cmd.add_argument(
+        "--old-days",
+        type=int,
+        default=DEFAULT_OLD_DAYS,
+        help=f"Old-file threshold in days (default: {DEFAULT_OLD_DAYS}).",
+    )
+    storage_cmd.add_argument(
+        "--large-mb",
+        type=int,
+        default=DEFAULT_LARGE_BYTES // (1024 * 1024),
+        help=f"Large-file threshold in MB (default: {DEFAULT_LARGE_BYTES // (1024 * 1024)}).",
+    )
+    storage_cmd.add_argument(
+        "--duplicate-min-mb",
+        type=int,
+        default=DEFAULT_DUPLICATE_MIN_BYTES // (1024 * 1024),
+        help=f"Minimum duplicate file size in MB (default: {DEFAULT_DUPLICATE_MIN_BYTES // (1024 * 1024)}).",
+    )
+    storage_cmd.add_argument("--json", action="store_true")
 
     scan_cmd = sub.add_parser(
         "scan",
@@ -214,6 +252,26 @@ def main(argv: list[str] | None = None) -> int:
             if args.lang:
                 dashboard_args.extend(["--lang", args.lang])
             return dashboard_main(dashboard_args)
+
+        if args.command in {"storage-scan", "cleanup-scan"}:
+            target = Path(args.path).expanduser() if args.path else default_scan_path()
+            result = scan_storage(
+                target,
+                old_days=args.old_days,
+                large_bytes=args.large_mb * 1024 * 1024,
+                duplicate_min_bytes=args.duplicate_min_mb * 1024 * 1024,
+            )
+            logger.info(
+                "storage-scan path=%s files=%d duplicate_groups=%d",
+                target,
+                result.get("summary", {}).get("files_scanned", 0),
+                result.get("summary", {}).get("duplicate_groups", 0),
+            )
+            if args.json:
+                _print_json(result)
+            else:
+                print(render_storage_scan(result))
+            return 0
 
         backend = _backend()
         computer_backend = WindowsComputerNameBackend()
