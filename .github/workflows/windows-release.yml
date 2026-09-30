@@ -110,6 +110,9 @@ jobs:
           Copy-Item .\README.ru.md .\package\README.ru.md
           Copy-Item .\README.es.md .\package\README.es.md
           Copy-Item .\README.zh-CN.md .\package\README.zh-CN.md
+          Copy-Item .\README.fi.md .\package\README.fi.md
+          Copy-Item .\README.pl.md .\package\README.pl.md
+          Copy-Item .\README.mn.md .\package\README.mn.md
           Copy-Item .\PRIVACY.md .\package\PRIVACY.md
           Copy-Item .\SUPPORT.md .\package\SUPPORT.md
           Copy-Item .\SECURITY.md .\package\SECURITY.md

@@ -7,8 +7,16 @@ from antios.i18n import (
 )
 
 
-def test_four_supported_languages_are_exposed():
-    assert SUPPORTED_LANGUAGES == ("en", "ru", "es", "zh-CN")
+def test_seven_supported_languages_are_exposed():
+    assert SUPPORTED_LANGUAGES == (
+        "en",
+        "ru",
+        "es",
+        "zh-CN",
+        "fi",
+        "pl",
+        "mn",
+    )
     assert set(LANGUAGE_NAMES) == set(SUPPORTED_LANGUAGES)
 
 
@@ -17,6 +25,9 @@ def test_locale_normalization():
     assert normalize_language("ru-RU") == "ru"
     assert normalize_language("es-MX") == "es"
     assert normalize_language("zh_CN") == "zh-CN"
+    assert normalize_language("fi-FI") == "fi"
+    assert normalize_language("pl-PL") == "pl"
+    assert normalize_language("mn-MN") == "mn"
     assert normalize_language("fr-FR") == "en"
 
 
@@ -40,6 +51,24 @@ def test_translation_formats_dynamic_values():
         "overview.completed",
         count=3,
     )
+    assert "12.5" in Translator("fi").t(
+        "health.storage.ok",
+        pct=12.5,
+    )
+    assert "7" in Translator("pl").t(
+        "health.startup.count",
+        count=7,
+    )
+    assert "3" in Translator("mn").t(
+        "overview.completed",
+        count=3,
+    )
+
+
+def test_new_locales_translate_core_ui_strings():
+    assert Translator("fi").t("nav.overview") == "Yleiskatsaus"
+    assert Translator("pl").t("nav.security") == "Bezpieczeństwo"
+    assert Translator("mn").t("language.label") == "Хэл"
 
 
 def test_unknown_key_falls_back_to_key_name():
