@@ -97,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     quick.add_argument(
         "--lang",
         choices=list(LANGUAGE_NAMES),
-        help="Output language: en, ru, es, zh-CN. Defaults to Windows locale.",
+        help="Output language: en, ru, es, zh-CN, fi, pl, mn. Defaults to Windows locale.",
     )
 
     dashboard_cmd = sub.add_parser(
@@ -107,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard_cmd.add_argument(
         "--lang",
         choices=list(LANGUAGE_NAMES),
-        help="UI language: en, ru, es, zh-CN. Defaults to Windows locale.",
+        help="UI language: en, ru, es, zh-CN, fi, pl, mn. Defaults to Windows locale.",
     )
 
     scan_cmd = sub.add_parser(
