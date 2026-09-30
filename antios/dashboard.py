@@ -1720,8 +1720,12 @@ class Dashboard:
         if not target:
             return
 
+        payload = dict(self.data)
+        if self.storage_result is not None:
+            payload["storage_cleanup"] = self.storage_result
+
         Path(target).write_text(
-            json.dumps(self.data, indent=2, ensure_ascii=False),
+            json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         messagebox.showinfo(
