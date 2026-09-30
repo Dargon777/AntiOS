@@ -4,11 +4,12 @@ A small Windows privacy/system-identity lab focused on **transparent, reversible
 
 AntiOS v2 is a rewrite of the project. The current v2 tree does not contain the legacy v1 fingerprint-spoofing implementation; that code remains only in the repository history.
 
-> **Pre-release:** 2.0.0 alpha 1. Use dry-run first and keep backups.
+> **Pre-release:** 2.0.0 alpha 2. Use dry-run first and keep backups.
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
 [![CodeQL](https://github.com/Dargon777/AntiOS/actions/workflows/codeql.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/codeql.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ## Download
 
@@ -25,8 +26,13 @@ uninstall.ps1
 README.md
 SECURITY.md
 CHANGELOG.md
+CODE_OF_CONDUCT.md
+LICENSE
+NOTICE
 BUILD_INFO.txt
 ```
+
+The release also publishes a Python wheel and source distribution.
 
 A matching `AntiOS-windows-x64.zip.sha256` file is published beside the ZIP.
 
@@ -47,13 +53,15 @@ The values should match.
 
 ### GitHub build provenance
 
-Release archives built from `master` receive a GitHub artifact attestation.
+Release archives built from `master` receive GitHub artifact attestations.
 
 With a current GitHub CLI:
 
 ```powershell
 gh attestation verify .\AntiOS-windows-x64.zip --repo Dargon777/AntiOS
 ```
+
+Python distributions published with the release are attested as well.
 
 ## Quick start
 
@@ -73,6 +81,13 @@ py -3.11 -m venv .venv
 python -m pip install -e .
 antios --version
 antios doctor
+```
+
+Install a release wheel:
+
+```powershell
+python -m pip install .\antios-2.0.0a2-py3-none-any.whl
+antios --version
 ```
 
 ## Safety model
@@ -287,6 +302,14 @@ python -m pip install -e .
 python -m pytest
 ```
 
+Build Python distributions:
+
+```powershell
+python -m pip install build twine
+python -m build
+python -m twine check dist/*
+```
+
 Build the portable executable locally on Windows:
 
 ```powershell
@@ -299,28 +322,34 @@ CI currently validates:
 
 - Windows latest × Python 3.11 / 3.12 / 3.13;
 - Ubuntu latest × Python 3.11 / 3.12 / 3.13;
+- wheel and source-distribution metadata;
+- installation from the built wheel;
 - PyInstaller Windows build;
 - executable smoke tests;
 - CodeQL analysis;
 - release version synchronization.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Release process
 
 `release/VERSION` must match `antios.__version__`.
 
-The Windows release workflow builds and tests every PR. When the release-ready commit lands on `master`, it:
+The Windows release workflow builds and tests every PR. When a release-ready commit lands on `master`, it:
 
-1. builds the portable executable;
-2. smoke-tests the executable itself;
-3. packages the ZIP;
-4. creates SHA-256 checksums;
-5. creates GitHub build provenance;
-6. publishes the alpha release if the tag in `release/TAG` does not already exist.
+1. validates package/release version synchronization;
+2. runs the test suite;
+3. builds and validates wheel + sdist;
+4. installs and smoke-tests the built wheel;
+5. builds `AntiOS.exe`;
+6. smoke-tests the executable itself;
+7. packages the Windows ZIP;
+8. creates SHA-256 checksums;
+9. creates GitHub build provenance for release artifacts;
+10. publishes the pre-release if the tag in `release/TAG` does not already exist.
 
 ## License
 
-No open-source license has been selected for AntiOS v2 yet. Until the repository owner adds one, do not assume permission to redistribute or incorporate the source into other projects.
+The current AntiOS v2 source tree is licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-The repository is historically a fork, but the current v2 tree contains only the rewritten v2 implementation; legacy v1 remains in Git history.
+The repository is historically a fork. Legacy v1 material remains in Git history only; adopting Apache-2.0 for the current v2 rewrite does not retroactively relicense historical third-party material for which the v2 contributors do not hold the necessary rights.

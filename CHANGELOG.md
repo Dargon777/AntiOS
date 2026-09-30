@@ -4,6 +4,25 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a2] - 2026-09-30
+
+### Added
+
+- Apache License 2.0 for the current AntiOS v2 source tree.
+- `NOTICE` with provenance clarification for historical legacy material.
+- Code of Conduct.
+- Python wheel and source-distribution builds in release CI.
+- `twine check` validation for Python distributions.
+- Clean-wheel installation and smoke test.
+- GitHub provenance attestations for Windows and Python release artifacts.
+- Python wheel and source distribution attached to GitHub pre-releases.
+
+### Changed
+
+- Public release ZIP now includes `LICENSE`, `NOTICE` and `CODE_OF_CONDUCT.md`.
+- Package metadata now exposes SPDX license expression `Apache-2.0`.
+- Release documentation now distinguishes the licensed current v2 tree from historical third-party material.
+
 ## [2.0.0a1] - 2026-09-30
 
 ### Added
@@ -39,4 +58,5 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
+[2.0.0a2]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.2
 [2.0.0a1]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.1
