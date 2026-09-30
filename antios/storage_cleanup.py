@@ -333,3 +333,47 @@ def scan_storage(
         })
 
     return result
+
+
+def format_bytes(value: int | float) -> str:
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(size) < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def render_storage_scan(result: dict[str, Any]) -> str:
+    summary = result.get("summary", {})
+    lines = [
+        "AntiOS storage scan",
+        "===================",
+        f"Path: {result.get('root', '')}",
+        f"Files scanned: {summary.get('files_scanned', 0)}",
+        f"Data scanned: {format_bytes(summary.get('bytes_scanned', 0))}",
+        "",
+        (
+            f"Duplicate groups: {summary.get('duplicate_groups', 0)} "
+            f"({format_bytes(summary.get('duplicate_reclaimable_bytes', 0))} "
+            "potentially reclaimable)"
+        ),
+        f"Old large files: {summary.get('old_large_files', 0)}",
+        f"Installer/archive candidates: {summary.get('installer_archives', 0)}",
+        f"Empty files: {summary.get('empty_files', 0)}",
+        "",
+        "Note: old files are classified by last-modified time, not by a claim that they are unused.",
+    ]
+
+    duplicates = result.get("duplicates", [])
+    if duplicates:
+        lines.extend(["", "Duplicates:"])
+        for group in duplicates[:20]:
+            lines.append(
+                f"- {format_bytes(group.get('size_bytes', 0))} × "
+                f"{group.get('count', 0)}"
+            )
+            for path in group.get("paths", []):
+                lines.append(f"    {path}")
+
+    return "\n".join(lines)
