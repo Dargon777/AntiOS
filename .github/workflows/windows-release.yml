@@ -11,6 +11,7 @@ on:
       - "LICENSE"
       - "NOTICE"
       - "antios_entry.py"
+      - "antios_gui_entry.py"
       - "pyproject.toml"
       - ".github/workflows/windows-release.yml"
   push:
@@ -77,25 +78,32 @@ jobs:
           .\wheel-smoke\Scripts\python.exe -m pip install $wheel
           .\wheel-smoke\Scripts\antios.exe --version
           .\wheel-smoke\Scripts\antios.exe version --json | ConvertFrom-Json | Out-Null
+          .\wheel-smoke\Scripts\antios-gui.exe --self-test
 
-      - name: Build portable executable
+      - name: Build CLI executable
         shell: pwsh
         run: |
           pyinstaller --clean --noconfirm --onefile --console --name AntiOS antios_entry.py
 
-      - name: Smoke-test executable
+      - name: Build GUI executable
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm --onefile --windowed --name AntiOS-GUI antios_gui_entry.py
+
+      - name: Smoke-test executables
         shell: pwsh
         run: |
           .\dist\AntiOS.exe --version
-          .\dist\AntiOS.exe version
           .\dist\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
           .\dist\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
+          .\dist\AntiOS-GUI.exe --self-test
 
       - name: Package portable release
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force package | Out-Null
           Copy-Item .\dist\AntiOS.exe .\package\AntiOS.exe
+          Copy-Item .\dist\AntiOS-GUI.exe .\package\AntiOS-GUI.exe
           Copy-Item .\scripts\install.ps1 .\package\install.ps1
           Copy-Item .\scripts\uninstall.ps1 .\package\uninstall.ps1
           Copy-Item .\README.md .\package\README.md
