@@ -1,131 +1,132 @@
-# AntiOS
+# AntiOS v2
 
-AntiOS is being modernized.
+A small Windows privacy/system-identity lab focused on **transparent, reversible and auditable** operations.
 
-The `v2-modernization` branch contains a new Python 3.11+ implementation focused on **auditable, reversible Windows privacy/system-lab workflows**. The original 2019 implementation remains at the repository root for historical reference.
+AntiOS v2 is a rewrite of the project. The current v2 tree does not contain the legacy v1 fingerprint-spoofing implementation; that code remains only in the repository history.
 
-> v2 is intentionally narrow: it does not implement anti-cheat, ban, licensing, hardware-serial, storage-serial or network-adapter identity bypasses.
+> **Pre-release:** 2.0.0 alpha 1. Use dry-run first and keep backups.
 
-## AntiOS v2
+[![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
+[![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
+[![CodeQL](https://github.com/Dargon777/AntiOS/actions/workflows/codeql.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/codeql.yml)
 
-### Highlights
+## Download
 
-- read-only Windows inventory with `scan`;
-- Windows 10/11 generation detection from the actual build number;
-- edition, version, full build, architecture and processor reporting;
-- read-only TPM and Secure Boot status;
-- `doctor` checks with OK / INFO / NOTE / WARN results;
-- human-readable output by default and `--json` for scripting;
-- reversible `plan`, `backup`, `apply` and `restore` workflows;
-- dry-run by default;
-- Before/After tables for changes;
-- restart markers for computer-name changes;
-- computer rename through Windows `SetComputerNameExW`, not direct registry editing;
-- strict mutable Registry allowlist;
-- backup files treated as untrusted input during restore;
-- TOML configuration;
-- optional privacy-conscious file logging;
-- Python tests across Windows/Linux on 3.11, 3.12 and 3.13;
-- tested Windows portable `.exe` build via PyInstaller.
+Public builds are published on the GitHub Releases page:
 
-## Install from source
+https://github.com/Dargon777/AntiOS/releases
 
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e .
-```
-
-Check the installation:
-
-```powershell
-antios version
-antios doctor
-```
-
-## Portable Windows build
-
-The `AntiOS v2 Windows portable` GitHub Actions workflow builds a single-file `AntiOS.exe`, runs the full test suite, then smoke-tests the executable itself.
-
-The resulting artifact contains:
+The Windows release contains:
 
 ```text
 AntiOS.exe
 install.ps1
 uninstall.ps1
 README.md
+SECURITY.md
+CHANGELOG.md
+BUILD_INFO.txt
 ```
 
-A SHA-256 checksum file is produced alongside the ZIP.
+A matching `AntiOS-windows-x64.zip.sha256` file is published beside the ZIP.
 
-For tag names matching `v2.*`, the workflow is prepared to create a GitHub release containing the ZIP and checksum. Merely merging the branch does **not** publish a release.
+The executable is currently **not Authenticode-signed**, so Windows SmartScreen may show an unknown-publisher warning. Verify the checksum and GitHub build provenance before running it.
 
-### Optional user-scope install
+## Verify a release
 
-From the extracted portable ZIP:
+### SHA-256
+
+PowerShell:
 
 ```powershell
-.\install.ps1
+(Get-FileHash .\AntiOS-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+Get-Content .\AntiOS-windows-x64.zip.sha256
 ```
 
-This copies `AntiOS.exe` to:
+The values should match.
 
-```text
-%LOCALAPPDATA%\Programs\AntiOS
-```
+### GitHub build provenance
 
-To also add that directory to your **user** PATH:
+Release archives built from `master` receive a GitHub artifact attestation.
+
+With a current GitHub CLI:
 
 ```powershell
-.\install.ps1 -AddToPath
+gh attestation verify .\AntiOS-windows-x64.zip --repo Dargon777/AntiOS
 ```
 
-PATH is not changed unless `-AddToPath` is explicitly supplied.
+## Quick start
 
-Uninstall:
+Portable:
 
 ```powershell
-.\uninstall.ps1
+.\AntiOS.exe --version
+.\AntiOS.exe scan
+.\AntiOS.exe doctor
 ```
 
-To also remove the directory from user PATH:
+Source install:
 
 ```powershell
-.\uninstall.ps1 -RemoveFromPath
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+antios --version
+antios doctor
 ```
+
+## Safety model
+
+AntiOS v2 deliberately keeps its write surface small.
+
+Writable state:
+
+- `RegisteredOwner` through the Windows Registry;
+- computer name through the supported Windows `SetComputerNameExW` API.
+
+Read-only / out of scope:
+
+- `MachineGuid`;
+- `ProductId`;
+- hardware and storage serials;
+- MAC-address changes;
+- Windows telemetry/update identifiers;
+- anti-cheat, ban or licensing bypasses.
+
+Additional safeguards:
+
+- system changes are **dry-run by default**;
+- a real `apply` creates a backup first;
+- backup files are treated as untrusted input;
+- restore only accepts explicit allowlisted Registry targets;
+- computer names are validated before use;
+- identity values and fingerprint data are intentionally excluded from file logs.
 
 ## Commands
 
 ### Version
 
 ```powershell
+antios --version
 antios version
 antios version --json
 ```
 
 ### Scan
 
-Human-readable read-only system scan:
+Read-only inventory:
 
 ```powershell
 antios scan
 ```
 
-Machine-readable output:
+JSON:
 
 ```powershell
 antios scan --json
 ```
 
-The scan currently covers:
-
-- computer name and current user;
-- architecture and processor;
-- Windows generation, product, edition, display version and full build;
-- installation type and registered owner;
-- Secure Boot;
-- TPM present/ready/enabled/activated state, vendor and version;
-- a documented set of Registry identity values in read-only mode.
+The scan includes Windows generation/edition/build, architecture, processor, TPM, Secure Boot and documented Registry identity metadata.
 
 ### Doctor
 
@@ -134,17 +135,15 @@ antios doctor
 antios doctor --json
 ```
 
-`doctor` also checks runtime compatibility and Registry-read failures. Informational/advisory findings do not make the command fail; actual warnings return a non-zero status for automation.
+`doctor` reports OK / INFO / NOTE / WARN checks. Actual warnings return a non-zero exit status for automation.
 
 ### Plan
-
-Generate a proposed identity:
 
 ```powershell
 antios plan
 ```
 
-Specify values explicitly:
+Explicit values:
 
 ```powershell
 antios plan --computer-name LAB-PC --registered-owner "Lab User"
@@ -158,33 +157,19 @@ Preview only:
 antios apply
 ```
 
-The default output is a Before/After table. No system values are written unless `--yes` is present.
-
-Preview explicit values:
-
-```powershell
-antios apply --computer-name LAB-PC --registered-owner "Lab User"
-```
-
-JSON:
-
-```powershell
-antios apply --json
-```
-
 Real apply from an Administrator terminal:
 
 ```powershell
 antios apply --yes
 ```
 
-A backup is written **before** a real apply. Override its path with:
+Choose a backup path:
 
 ```powershell
 antios apply --yes --backup .\backups\before-change.json
 ```
 
-A computer-name change requires a Windows restart before every component observes the new name.
+Computer-name changes require a Windows restart before all components observe the new name.
 
 ### Backup
 
@@ -201,40 +186,27 @@ Preview:
 antios restore antios-backup.json
 ```
 
-Real restore from an Administrator terminal:
+Real restore:
 
 ```powershell
 antios restore antios-backup.json --yes
 ```
 
-Machine-readable preview/result:
+### Configuration
 
-```powershell
-antios restore antios-backup.json --json
-```
-
-## Configuration
-
-Show the effective configuration:
-
-```powershell
-antios config show
-antios config show --json
-```
-
-Create the default config:
+Create a per-user config:
 
 ```powershell
 antios config init
 ```
 
-Overwrite it intentionally:
+Show effective config:
 
 ```powershell
-antios config init --force
+antios config show
 ```
 
-On Windows, the default location is:
+On Windows the default path is:
 
 ```text
 %APPDATA%\AntiOS\antios.toml
@@ -246,85 +218,63 @@ Example:
 [general]
 computer_name_prefix = "LAB"
 backup_path = "antios-backup.json"
-color = "auto" # auto | always | never
+color = "auto"
 
 [logging]
 level = "INFO"
-file = "" # empty disables file logging
+file = ""
 ```
 
-Use a different config for one invocation:
+Use a one-off config:
 
 ```powershell
 antios --config .\lab.toml doctor
 ```
 
-Disable ANSI colors:
-
-```powershell
-antios --no-color scan
-```
-
-The conventional `NO_COLOR` environment variable is also respected.
+Disable ANSI colors with `--no-color` or the conventional `NO_COLOR` environment variable.
 
 ## Logging
 
-File logging is off by default.
+File logging is disabled by default.
 
-Enable it in config:
-
-```toml
-[logging]
-level = "INFO"
-file = "C:\\Temp\\antios.log"
-```
-
-Or for one command:
+Enable it for one command:
 
 ```powershell
 antios --log-file .\antios.log doctor
 ```
 
-The v2 logger records operational metadata such as command name, dry-run state, change count and backup path. It intentionally does **not** log generated identity values or scanned fingerprint values.
+The logger records operational metadata such as command name, dry-run state, change count and backup path. It does not log scanned/generated identity values or backup contents.
 
-## Safety model
+## Portable install
 
-Registry writes are currently limited to:
-
-- `RegisteredOwner`.
-
-Computer renaming is handled separately through the supported Windows `SetComputerNameExW` API.
-
-Read-only values such as `MachineGuid`, `ProductId`, Windows build data and the configured/active computer-name Registry values are inventory only.
-
-Computer names are conservatively validated:
-
-- letters, digits and hyphens only;
-- no leading/trailing hyphen;
-- not digits-only;
-- maximum 15 characters in v2.
-
-Backup restore does not trust arbitrary Registry paths from the backup JSON: only v2's explicit mutable allowlist can be restored.
-
-## START_V2.bat
-
-`START_V2.bat` performs:
-
-1. `scan`
-2. `doctor`
-
-It makes no changes.
-
-## Legacy v1 (2019)
-
-The original scripts directly modify a much broader set of Windows/system identifiers and do not have the v2 safety guarantees.
-
-If you are studying the old implementation, use a disposable VM.
-
-Legacy entry point:
+From the extracted release ZIP:
 
 ```powershell
-python generate_fingerprint.py --help
+.\install.ps1
+```
+
+This installs to:
+
+```text
+%LOCALAPPDATA%\Programs\AntiOS
+```
+
+Add it to your **user** PATH only when requested:
+
+```powershell
+.\install.ps1 -AddToPath
+```
+
+Uninstall:
+
+```powershell
+.\uninstall.ps1
+```
+
+Remove the directory from user PATH too:
+
+```powershell
+.\uninstall.ps1 -RemoveFromPath
 ```
 
 ## Development
@@ -333,6 +283,7 @@ Run tests:
 
 ```powershell
 python -m pip install pytest
+python -m pip install -e .
 python -m pytest
 ```
 
@@ -341,9 +292,35 @@ Build the portable executable locally on Windows:
 ```powershell
 python -m pip install pyinstaller
 pyinstaller --clean --noconfirm --onefile --console --name AntiOS antios_entry.py
-.\dist\AntiOS.exe version
+.\dist\AntiOS.exe --version
 ```
 
-## Licensing note
+CI currently validates:
 
-This repository is a fork of `vektort13/AntiOS`, and the upstream repository does not currently expose a recognized license through GitHub metadata. AntiOS v2 therefore does not claim a package license in `pyproject.toml`; licensing/provenance should be clarified before treating the repository as redistributable software.
+- Windows latest × Python 3.11 / 3.12 / 3.13;
+- Ubuntu latest × Python 3.11 / 3.12 / 3.13;
+- PyInstaller Windows build;
+- executable smoke tests;
+- CodeQL analysis;
+- release version synchronization.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CHANGELOG.md](CHANGELOG.md).
+
+## Release process
+
+`release/VERSION` must match `antios.__version__`.
+
+The Windows release workflow builds and tests every PR. When the release-ready commit lands on `master`, it:
+
+1. builds the portable executable;
+2. smoke-tests the executable itself;
+3. packages the ZIP;
+4. creates SHA-256 checksums;
+5. creates GitHub build provenance;
+6. publishes the alpha release if the tag in `release/TAG` does not already exist.
+
+## License
+
+No open-source license has been selected for AntiOS v2 yet. Until the repository owner adds one, do not assume permission to redistribute or incorporate the source into other projects.
+
+The repository is historically a fork, but the current v2 tree contains only the rewritten v2 implementation; legacy v1 remains in Git history.
