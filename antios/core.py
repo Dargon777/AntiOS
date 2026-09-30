@@ -85,6 +85,10 @@ def load_backup(path: str | Path) -> dict[str, Any]:
     return data
 
 
+def _requires_reboot(target: RegistryTarget) -> bool:
+    return target.name == "ComputerName"
+
+
 def apply_plan(backend: RegistryBackend, plan: IdentityPlan, dry_run: bool = True) -> list[dict[str, Any]]:
     operations: list[dict[str, Any]] = []
     for target, new_value in plan_changes(plan):
@@ -95,6 +99,7 @@ def apply_plan(backend: RegistryBackend, plan: IdentityPlan, dry_run: bool = Tru
             "before": before.value if before.exists else None,
             "after": new_value,
             "changed": before.value != new_value,
+            "requires_reboot": _requires_reboot(target),
             "dry_run": dry_run,
         }
         operations.append(item)
@@ -120,6 +125,7 @@ def restore(backend: RegistryBackend, backup: dict[str, Any], dry_run: bool = Tr
             "before": current.value if current.exists else None,
             "after": new_value,
             "changed": current.value != new_value,
+            "requires_reboot": _requires_reboot(target),
             "dry_run": dry_run,
         }
         operations.append(item)
