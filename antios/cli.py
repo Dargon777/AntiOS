@@ -20,6 +20,7 @@ from .core import (
 )
 from .doctor import diagnose
 from .health import collect_health
+from .i18n import LANGUAGE_NAMES, detect_language
 from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .report import render_doctor_human, render_operations_human, render_scan_human
@@ -93,10 +94,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a friendly Windows health and privacy check.",
     )
     quick.add_argument("--json", action="store_true")
+    quick.add_argument(
+        "--lang",
+        choices=list(LANGUAGE_NAMES),
+        help="Output language: en, ru, es, zh-CN. Defaults to Windows locale.",
+    )
 
-    sub.add_parser(
+    dashboard_cmd = sub.add_parser(
         "dashboard",
         help="Open the AntiOS Windows Health & Privacy dashboard.",
+    )
+    dashboard_cmd.add_argument(
+        "--lang",
+        choices=list(LANGUAGE_NAMES),
+        help="UI language: en, ru, es, zh-CN. Defaults to Windows locale.",
     )
 
     scan_cmd = sub.add_parser(
@@ -199,15 +210,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "dashboard":
             _require_windows()
             from .dashboard import main as dashboard_main
-            return dashboard_main([])
+            dashboard_args = []
+            if args.lang:
+                dashboard_args.extend(["--lang", args.lang])
+            return dashboard_main(dashboard_args)
 
         backend = _backend()
         computer_backend = WindowsComputerNameBackend()
 
         if args.command in {"quick-check", "check"}:
+            language = args.lang or detect_language()
             scan_data = scan(backend)
             health_data = collect_health()
-            result = evaluate_health(scan_data, health_data)
+            result = evaluate_health(
+                scan_data,
+                health_data,
+                language=language,
+            )
             payload = {
                 "scan": scan_data,
                 "health": health_data,
@@ -216,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 _print_json(payload)
             else:
-                print(render_quick_check(result))
+                print(render_quick_check(result, language=language))
             logger.info(
                 "quick-check overall=%s warnings=%d review=%d",
                 result.get("overall"),

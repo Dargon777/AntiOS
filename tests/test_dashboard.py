@@ -46,3 +46,8 @@ def test_every_health_level_has_visual_status_mapping():
         assert label
         assert foreground.startswith("#")
         assert background.startswith("#")
+
+
+def test_dashboard_self_test_accepts_all_locales():
+    for language in ("en", "ru", "es", "zh-CN"):
+        assert main(["--self-test", "--lang", language]) == 0

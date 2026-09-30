@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .i18n import Translator
+
 
 def _check(
     id: str,
@@ -35,7 +37,11 @@ def _bitlocker_on(value: Any) -> bool | None:
 def evaluate_health(
     scan_data: dict[str, Any],
     health_data: dict[str, Any],
+    *,
+    language: str = "en",
 ) -> dict[str, Any]:
+    tr = Translator(language)
+    t = tr.t
     checks: list[dict[str, Any]] = []
 
     storage = health_data.get("storage", {})
@@ -44,27 +50,37 @@ def evaluate_health(
         free_gb = (storage.get("free_bytes") or 0) / (1024 ** 3)
         if pct is not None and (pct < 10 or free_gb < 10):
             checks.append(_check(
-                "storage", "warn", "Storage space",
-                f"Only {pct:.1f}% ({free_gb:.1f} GB) is free on the system drive.",
-                "Free up storage space.",
+                "storage",
+                "warn",
+                t("health.storage.title"),
+                t("health.storage.low", pct=pct, free_gb=free_gb),
+                t("health.storage.action_free"),
                 "ms-settings:storagesense",
             ))
         elif pct is not None and pct < 20:
             checks.append(_check(
-                "storage", "advisory", "Storage space",
-                f"{pct:.1f}% ({free_gb:.1f} GB) is free on the system drive.",
-                "Review storage usage when convenient.",
+                "storage",
+                "advisory",
+                t("health.storage.title"),
+                t("health.storage.review", pct=pct, free_gb=free_gb),
+                t("health.storage.action_review"),
                 "ms-settings:storagesense",
             ))
         else:
             checks.append(_check(
-                "storage", "ok", "Storage space",
-                f"{pct:.1f}% free on the system drive." if pct is not None else "Storage is available.",
+                "storage",
+                "ok",
+                t("health.storage.title"),
+                t("health.storage.ok", pct=pct)
+                if pct is not None
+                else t("health.storage.available"),
             ))
     else:
         checks.append(_check(
-            "storage", "info", "Storage space",
-            "Storage status could not be read.",
+            "storage",
+            "info",
+            t("health.storage.title"),
+            t("health.storage.unavailable"),
         ))
 
     defender = health_data.get("defender", {})
@@ -73,29 +89,40 @@ def evaluate_health(
         realtime = defender.get("real_time_protection")
         if antivirus is False or realtime is False:
             checks.append(_check(
-                "defender", "warn", "Microsoft Defender",
-                "Microsoft Defender antivirus or real-time protection is not active.",
-                "Review Windows Security.",
+                "defender",
+                "warn",
+                t("health.defender.title"),
+                t("health.defender.off"),
+                t("health.defender.action"),
                 "windowsdefender:",
             ))
         elif antivirus is True and realtime is True:
             age = defender.get("signature_age_days")
-            detail = "Antivirus and real-time protection are active."
+            detail = t("health.defender.on")
             if isinstance(age, int):
-                detail += f" Signatures are {age} day(s) old."
-            checks.append(_check("defender", "ok", "Microsoft Defender", detail))
+                detail += t("health.defender.signatures", age=age)
+            checks.append(_check(
+                "defender",
+                "ok",
+                t("health.defender.title"),
+                detail,
+            ))
         else:
             checks.append(_check(
-                "defender", "info", "Microsoft Defender",
-                "Defender status is partially available; another security product may be active.",
-                "Review Windows Security.",
+                "defender",
+                "info",
+                t("health.defender.title"),
+                t("health.defender.partial"),
+                t("health.defender.action"),
                 "windowsdefender:",
             ))
     else:
         checks.append(_check(
-            "defender", "info", "Microsoft Defender",
-            "Defender status could not be queried. A third-party antivirus or Windows edition may affect this check.",
-            "Review Windows Security.",
+            "defender",
+            "info",
+            t("health.defender.title"),
+            t("health.defender.unavailable"),
+            t("health.defender.action"),
             "windowsdefender:",
         ))
 
@@ -104,44 +131,61 @@ def evaluate_health(
         protected = _bitlocker_on(bitlocker.get("protection_status"))
         if protected is True:
             checks.append(_check(
-                "bitlocker", "ok", "Device encryption",
-                "BitLocker protection is on for the system drive.",
+                "bitlocker",
+                "ok",
+                t("health.bitlocker.title"),
+                t("health.bitlocker.on"),
             ))
         elif protected is False:
             checks.append(_check(
-                "bitlocker", "advisory", "Device encryption",
-                "BitLocker protection is off for the system drive.",
-                "Review device encryption if you want protection for data at rest.",
+                "bitlocker",
+                "advisory",
+                t("health.bitlocker.title"),
+                t("health.bitlocker.off"),
+                t("health.bitlocker.action"),
                 "ms-settings:deviceencryption",
             ))
         else:
             checks.append(_check(
-                "bitlocker", "info", "Device encryption",
-                f"BitLocker status: {bitlocker.get('protection_status') or 'unknown'}.",
+                "bitlocker",
+                "info",
+                t("health.bitlocker.title"),
+                t(
+                    "health.bitlocker.status",
+                    status=bitlocker.get("protection_status") or t("value.unknown"),
+                ),
             ))
     else:
         checks.append(_check(
-            "bitlocker", "info", "Device encryption",
-            "BitLocker status is unavailable on this system.",
+            "bitlocker",
+            "info",
+            t("health.bitlocker.title"),
+            t("health.bitlocker.unavailable"),
         ))
 
     pending = health_data.get("pending_reboot", {})
     if pending.get("available") and pending.get("pending"):
         checks.append(_check(
-            "pending-reboot", "advisory", "Restart pending",
-            "Windows has changes waiting for a restart.",
-            "Restart when convenient to finish pending system work.",
+            "pending-reboot",
+            "advisory",
+            t("health.reboot.title"),
+            t("health.reboot.pending"),
+            t("health.reboot.action"),
             "ms-settings:windowsupdate",
         ))
     elif pending.get("available"):
         checks.append(_check(
-            "pending-reboot", "ok", "Restart pending",
-            "No common pending-restart markers were found.",
+            "pending-reboot",
+            "ok",
+            t("health.reboot.title"),
+            t("health.reboot.none"),
         ))
     else:
         checks.append(_check(
-            "pending-reboot", "info", "Restart pending",
-            "Pending-restart state could not be determined.",
+            "pending-reboot",
+            "info",
+            t("health.reboot.title"),
+            t("health.reboot.unavailable"),
         ))
 
     startup = health_data.get("startup", {})
@@ -149,60 +193,89 @@ def evaluate_health(
         count = int(startup.get("count") or 0)
         if count >= 20:
             checks.append(_check(
-                "startup", "advisory", "Startup apps",
-                f"{count} startup entries were found. A large startup set can make sign-in feel slower.",
-                "Review startup apps and disable only software you recognize and do not need.",
+                "startup",
+                "advisory",
+                t("health.startup.title"),
+                t("health.startup.many", count=count),
+                t("health.startup.action_many"),
                 "ms-settings:startupapps",
             ))
         else:
             checks.append(_check(
-                "startup", "ok", "Startup apps",
-                f"{count} startup entr{'y' if count == 1 else 'ies'} found.",
-                "Review startup apps if Windows sign-in feels slow." if count else None,
+                "startup",
+                "ok",
+                t("health.startup.title"),
+                t("health.startup.count", count=count),
+                t("health.startup.action_slow") if count else None,
                 "ms-settings:startupapps" if count else None,
             ))
     else:
         checks.append(_check(
-            "startup", "info", "Startup apps",
-            "Startup applications could not be enumerated.",
-            "Review startup apps in Windows Settings.",
+            "startup",
+            "info",
+            t("health.startup.title"),
+            t("health.startup.unavailable"),
+            t("health.startup.action_settings"),
             "ms-settings:startupapps",
         ))
 
     security = scan_data.get("system", {}).get("security", {})
     secure_boot = security.get("secure_boot", {})
     if secure_boot.get("enabled") is True:
-        checks.append(_check("secure-boot", "ok", "Secure Boot", "Secure Boot is enabled."))
+        checks.append(_check(
+            "secure-boot",
+            "ok",
+            t("health.secure_boot.title"),
+            t("health.secure_boot.on"),
+        ))
     elif secure_boot.get("enabled") is False:
         checks.append(_check(
-            "secure-boot", "advisory", "Secure Boot",
-            "Secure Boot is disabled.",
-            "Review firmware/security settings if your hardware supports Secure Boot.",
+            "secure-boot",
+            "advisory",
+            t("health.secure_boot.title"),
+            t("health.secure_boot.off"),
+            t("health.secure_boot.action"),
             "windowsdefender:",
         ))
     else:
         checks.append(_check(
-            "secure-boot", "info", "Secure Boot",
-            "Secure Boot status is unavailable.",
+            "secure-boot",
+            "info",
+            t("health.secure_boot.title"),
+            t("health.secure_boot.unavailable"),
         ))
 
     tpm = security.get("tpm", {})
     if tpm.get("present") is True and tpm.get("ready") is True:
-        checks.append(_check("tpm", "ok", "TPM", "TPM is present and ready."))
+        checks.append(_check(
+            "tpm",
+            "ok",
+            t("health.tpm.title"),
+            t("health.tpm.ready"),
+        ))
     elif tpm.get("present") is True:
         checks.append(_check(
-            "tpm", "advisory", "TPM",
-            "TPM is present but Windows does not report it as ready.",
-            "Review Windows Security or firmware TPM settings.",
+            "tpm",
+            "advisory",
+            t("health.tpm.title"),
+            t("health.tpm.not_ready"),
+            t("health.tpm.action"),
             "windowsdefender:",
         ))
     elif tpm.get("present") is False:
         checks.append(_check(
-            "tpm", "info", "TPM",
-            "TPM is not reported as present.",
+            "tpm",
+            "info",
+            t("health.tpm.title"),
+            t("health.tpm.not_present"),
         ))
     else:
-        checks.append(_check("tpm", "info", "TPM", "TPM status is unavailable."))
+        checks.append(_check(
+            "tpm",
+            "info",
+            t("health.tpm.title"),
+            t("health.tpm.unavailable"),
+        ))
 
     counts = {"ok": 0, "info": 0, "advisory": 0, "warn": 0}
     for item in checks:
@@ -210,49 +283,59 @@ def evaluate_health(
 
     if counts["warn"]:
         overall = "needs-attention"
-        headline = "Some items need attention"
+        headline = t("headline.attention")
     elif counts["advisory"]:
         overall = "review"
-        headline = "Your PC looks okay, with a few things to review"
+        headline = t("headline.review")
     else:
         overall = "good"
-        headline = "Your PC looks good"
+        headline = t("headline.good")
 
     return {
         "overall": overall,
         "headline": headline,
         "summary": counts,
         "checks": checks,
+        "language": language,
     }
 
 
-def render_quick_check(data: dict[str, Any]) -> str:
+def render_quick_check(
+    data: dict[str, Any],
+    *,
+    language: str = "en",
+) -> str:
+    tr = Translator(language)
+    t = tr.t
     summary = data.get("summary", {})
     lines = [
-        "AntiOS quick check",
-        "==================",
-        data.get("headline", "Windows check completed"),
-        (
-            f"OK {summary.get('ok', 0)}  |  "
-            f"Review {summary.get('advisory', 0)}  |  "
-            f"Warnings {summary.get('warn', 0)}  |  "
-            f"Info {summary.get('info', 0)}"
+        t("quick.title"),
+        "=" * len(t("quick.title")),
+        data.get("headline", t("quick.completed")),
+        t(
+            "quick.summary",
+            ok=summary.get("ok", 0),
+            review=summary.get("advisory", 0),
+            warn=summary.get("warn", 0),
+            info=summary.get("info", 0),
         ),
         "",
     ]
 
     labels = {
-        "ok": "OK",
-        "info": "INFO",
-        "advisory": "REVIEW",
-        "warn": "WARN",
+        "ok": t("status.ok"),
+        "info": t("status.info"),
+        "advisory": t("status.advisory"),
+        "warn": t("status.warn"),
     }
     for item in data.get("checks", []):
-        label = labels.get(str(item.get("level")), "INFO")
+        label = labels.get(str(item.get("level")), t("status.info"))
         lines.append(f"[{label}] {item.get('title')}")
         lines.append(f"  {item.get('detail')}")
         if item.get("action"):
-            lines.append(f"  Suggestion: {item.get('action')}")
+            lines.append(
+                "  " + t("quick.suggestion", action=item.get("action"))
+            )
         lines.append("")
 
     return "\n".join(lines).rstrip()

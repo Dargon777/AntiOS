@@ -1,21 +1,23 @@
-# AntiOS v2.0.0 alpha 5
+# AntiOS v2.0.0 alpha 6
 
-Alpha 5 is a visual redesign of the Windows dashboard.
+Alpha 6 adds first-class localization for four high-reach languages:
 
-## New dashboard design
+- English
+- Русский
+- Español
+- 简体中文
 
-- modern dark interface;
-- persistent left navigation instead of native notebook tabs;
-- large overall-status hero card;
-- separate OK / Review / Warning counters;
-- card-based health checks with colored status rails and badges;
-- contextual **Open** buttons for relevant Windows Settings pages;
-- dedicated Security cards for Defender, BitLocker, Secure Boot and TPM;
-- polished dark startup-app table with alternating rows;
-- card-based System page;
-- dark native Windows title bar when supported;
-- high-DPI awareness for sharper rendering on scaled displays;
-- cleaner hierarchy, spacing and typography;
-- local/no-telemetry trust indicator in the sidebar.
+## Localization
 
-The dashboard remains read-only. This release changes presentation, not the system-write safety model.
+- automatic language detection from the Windows/user locale;
+- live language switcher in the dashboard without restarting the app;
+- localized navigation, buttons, status badges, cards and system labels;
+- localized dynamic health-check explanations and recommendations;
+- localized quick-check CLI output;
+- `--lang en|ru|es|zh-CN` for dashboard and quick-check commands;
+- English fallback for unsupported locales or missing keys;
+- translated quick-start README files for Russian, Spanish and Simplified Chinese.
+
+Changing the dashboard language re-renders already collected results and does not repeat the system scan.
+
+The dashboard remains read-only and the advanced CLI safety model is unchanged.

@@ -12,6 +12,7 @@ from typing import Any, Callable
 from .consumer import evaluate_health
 from .core import scan
 from .health import collect_health
+from .i18n import LANGUAGE_NAMES, Translator, detect_language, normalize_language
 from .registry import WindowsRegistryBackend, is_windows
 
 PROJECT_URL = "https://github.com/Dargon777/AntiOS"
@@ -55,13 +56,18 @@ def _open_url(url: str) -> None:
     webbrowser.open(url, new=2)
 
 
-def collect_dashboard_data() -> dict[str, Any]:
+def collect_dashboard_data(language: str = "en") -> dict[str, Any]:
+    tr = Translator(language)
     if not is_windows():
-        raise RuntimeError("AntiOS Dashboard currently requires Windows.")
+        raise RuntimeError(tr.t("error.dashboard_windows"))
     backend = WindowsRegistryBackend()
     scan_data = scan(backend)
     health_data = collect_health()
-    evaluation = evaluate_health(scan_data, health_data)
+    evaluation = evaluate_health(
+        scan_data,
+        health_data,
+        language=language,
+    )
     return {
         "scan": scan_data,
         "health": health_data,
@@ -69,19 +75,20 @@ def collect_dashboard_data() -> dict[str, Any]:
     }
 
 
-def _format_bytes(value: Any) -> str:
+def _format_bytes(value: Any, tr: Translator | None = None) -> str:
     if not isinstance(value, (int, float)):
-        return "Unknown"
+        return (tr or Translator("en")).t("value.unknown")
     gb = float(value) / (1024 ** 3)
     return f"{gb:.1f} GB"
 
 
-def _friendly_bool(value: Any) -> str:
+def _friendly_bool(value: Any, tr: Translator | None = None) -> str:
+    translator = tr or Translator("en")
     if value is True:
-        return "On"
+        return translator.t("value.on")
     if value is False:
-        return "Off"
-    return "Unknown"
+        return translator.t("value.off")
+    return translator.t("value.unknown")
 
 
 def _open_settings(uri: str) -> None:
@@ -167,13 +174,20 @@ class ScrollFrame:
 
 
 class Dashboard:
-    def __init__(self, root: Any) -> None:
+    def __init__(
+        self,
+        root: Any,
+        *,
+        language: str | None = None,
+    ) -> None:
         import tkinter as tk
         from tkinter import ttk
 
         self.root = root
         self.tk = tk
         self.ttk = ttk
+        self.language = normalize_language(language or detect_language())
+        self.tr = Translator(self.language)
         self.data: dict[str, Any] | None = None
         self.pages: dict[str, Any] = {}
         self.nav_buttons: dict[str, Any] = {}
@@ -187,9 +201,12 @@ class Dashboard:
         self.show_page("overview")
         self.refresh()
 
+    def t(self, key: str, **values: Any) -> str:
+        return self.tr.t(key, **values)
+
     def _configure_root(self) -> None:
         root = self.root
-        root.title("AntiOS — Windows Health & Privacy")
+        root.title(self.t("app.title"))
         root.geometry("1120x760")
         root.minsize(920, 640)
         root.configure(bg=THEME["bg"])
@@ -272,7 +289,7 @@ class Dashboard:
         ).pack(anchor="w")
         tk.Label(
             brand_text,
-            text="Health & Privacy",
+            text=self.t("brand.subtitle"),
             bg=THEME["sidebar"],
             fg=THEME["muted"],
             font=("Segoe UI", 9),
@@ -280,19 +297,49 @@ class Dashboard:
 
         tk.Label(
             self.sidebar,
-            text="DASHBOARD",
+            text=self.t("sidebar.dashboard"),
             bg=THEME["sidebar"],
             fg=THEME["muted_2"],
             font=("Segoe UI Semibold", 8),
         ).pack(anchor="w", padx=22, pady=(0, 8))
 
         for key, label in [
-            ("overview", "Overview"),
-            ("security", "Security"),
-            ("startup", "Startup apps"),
-            ("system", "System"),
+            ("overview", self.t("nav.overview")),
+            ("security", self.t("nav.security")),
+            ("startup", self.t("nav.startup")),
+            ("system", self.t("nav.system")),
         ]:
             self._create_nav_button(key, label)
+
+        language_box = tk.Frame(self.sidebar, bg=THEME["sidebar"])
+        language_box.pack(fill="x", padx=14, pady=(18, 8))
+
+        tk.Label(
+            language_box,
+            text=self.t("language.label"),
+            bg=THEME["sidebar"],
+            fg=THEME["muted_2"],
+            font=("Segoe UI Semibold", 8),
+        ).pack(anchor="w", padx=8, pady=(0, 6))
+
+        self.language_display_to_code = {
+            label: code for code, label in LANGUAGE_NAMES.items()
+        }
+        self.language_var = tk.StringVar(
+            value=LANGUAGE_NAMES[self.language]
+        )
+        self.language_combo = self.ttk.Combobox(
+            language_box,
+            textvariable=self.language_var,
+            values=list(self.language_display_to_code),
+            state="readonly",
+            width=18,
+        )
+        self.language_combo.pack(fill="x", padx=8)
+        self.language_combo.bind(
+            "<<ComboboxSelected>>",
+            self._on_language_selected,
+        )
 
         spacer = tk.Frame(self.sidebar, bg=THEME["sidebar"])
         spacer.pack(fill="both", expand=True)
@@ -307,14 +354,14 @@ class Dashboard:
 
         tk.Label(
             trust,
-            text="●  LOCAL MODE",
+            text=self.t("sidebar.local_mode"),
             bg=THEME["surface"],
             fg=THEME["ok"],
             font=("Segoe UI Semibold", 8),
         ).pack(anchor="w", padx=12, pady=(11, 4))
         tk.Label(
             trust,
-            text="No automatic telemetry\nDashboard is read-only",
+            text=self.t("sidebar.no_telemetry"),
             justify="left",
             bg=THEME["surface"],
             fg=THEME["muted"],
@@ -326,12 +373,12 @@ class Dashboard:
 
         self._text_link(
             sidebar_links,
-            "GitHub",
+            self.t("sidebar.github"),
             lambda: _open_url(PROJECT_URL),
         ).pack(side="left")
         self._text_link(
             sidebar_links,
-            "Privacy",
+            self.t("sidebar.privacy"),
             lambda: _open_url(PRIVACY_URL),
         ).pack(side="right")
 
@@ -346,7 +393,7 @@ class Dashboard:
 
         self.page_title = tk.Label(
             title_block,
-            text="Overview",
+            text=self.t("nav.overview"),
             bg=THEME["bg"],
             fg=THEME["text"],
             font=("Segoe UI", 22, "bold"),
@@ -355,7 +402,7 @@ class Dashboard:
 
         self.page_subtitle = tk.Label(
             title_block,
-            text="A quick read-only look at your Windows PC.",
+            text=self.t("page.overview.subtitle"),
             bg=THEME["bg"],
             fg=THEME["muted"],
             font=("Segoe UI", 10),
@@ -367,7 +414,7 @@ class Dashboard:
 
         self.export_button = self._button(
             header_actions,
-            "Export report",
+            self.t("button.export"),
             self.export_report,
             kind="secondary",
         )
@@ -375,7 +422,7 @@ class Dashboard:
 
         self.refresh_button = self._button(
             header_actions,
-            "Refresh",
+            self.t("button.refresh"),
             self.refresh,
             kind="primary",
         )
@@ -416,7 +463,7 @@ class Dashboard:
 
         self.hero_kicker = tk.Label(
             hero_left,
-            text="CHECKING",
+            text=self.t("overview.checking_kicker"),
             bg=THEME["surface"],
             fg=THEME["accent"],
             font=("Segoe UI Semibold", 9),
@@ -425,7 +472,7 @@ class Dashboard:
 
         self.status_title = tk.Label(
             hero_left,
-            text="Checking your PC…",
+            text=self.t("overview.checking_title"),
             bg=THEME["surface"],
             fg=THEME["text"],
             font=("Segoe UI", 20, "bold"),
@@ -434,7 +481,7 @@ class Dashboard:
 
         self.status_summary = tk.Label(
             hero_left,
-            text="AntiOS is collecting read-only system information.",
+            text=self.t("overview.checking_detail"),
             bg=THEME["surface"],
             fg=THEME["muted"],
             font=("Segoe UI", 10),
@@ -446,9 +493,9 @@ class Dashboard:
 
         self.summary_chips: dict[str, Any] = {}
         for key, label, fg, bg in [
-            ("ok", "OK", THEME["ok"], THEME["ok_bg"]),
-            ("advisory", "REVIEW", THEME["review"], THEME["review_bg"]),
-            ("warn", "WARN", THEME["warn"], THEME["warn_bg"]),
+            ("ok", self.t("summary.ok"), THEME["ok"], THEME["ok_bg"]),
+            ("advisory", self.t("summary.review"), THEME["review"], THEME["review_bg"]),
+            ("warn", self.t("summary.warn"), THEME["warn"], THEME["warn_bg"]),
         ]:
             chip = tk.Frame(hero_right, bg=bg)
             chip.pack(side="left", padx=(8, 0))
@@ -474,7 +521,7 @@ class Dashboard:
 
         tk.Label(
             section,
-            text="Checks",
+            text=self.t("overview.checks"),
             bg=THEME["bg"],
             fg=THEME["text"],
             font=("Segoe UI", 13, "bold"),
@@ -482,7 +529,7 @@ class Dashboard:
 
         tk.Label(
             section,
-            text="Why each result was produced",
+            text=self.t("overview.why"),
             bg=THEME["bg"],
             fg=THEME["muted"],
             font=("Segoe UI", 9),
@@ -500,10 +547,10 @@ class Dashboard:
 
         self.security_cards: dict[str, dict[str, Any]] = {}
         specs = [
-            ("defender", "Microsoft Defender", "Built-in antivirus protection", 0, 0),
-            ("encryption", "Device encryption", "BitLocker protection status", 0, 1),
-            ("secure_boot", "Secure Boot", "Boot-chain protection", 1, 0),
-            ("tpm", "TPM", "Hardware-backed security", 1, 1),
+            ("defender", self.t("security.defender.title"), self.t("security.defender.subtitle"), 0, 0),
+            ("encryption", self.t("security.encryption.title"), self.t("security.encryption.subtitle"), 0, 1),
+            ("secure_boot", self.t("security.secure_boot.title"), self.t("security.secure_boot.subtitle"), 1, 0),
+            ("tpm", self.t("security.tpm.title"), self.t("security.tpm.subtitle"), 1, 1),
         ]
         for key, title, subtitle, row, col in specs:
             card = self._metric_card(
@@ -525,7 +572,7 @@ class Dashboard:
         actions.pack(fill="x", pady=(18, 0))
         self._button(
             actions,
-            "Open Windows Security",
+            self.t("button.windows_security"),
             lambda: _open_settings("windowsdefender:"),
             kind="primary",
         ).pack(side="left")
@@ -555,7 +602,7 @@ class Dashboard:
 
         tk.Label(
             left,
-            text=" startup entries detected",
+            text=self.t("startup.entries"),
             bg=THEME["surface"],
             fg=THEME["muted"],
             font=("Segoe UI", 10),
@@ -563,7 +610,7 @@ class Dashboard:
 
         self._button(
             summary,
-            "Open Startup Apps",
+            self.t("button.startup_apps"),
             lambda: _open_settings("ms-settings:startupapps"),
             kind="secondary",
         ).pack(side="right", padx=14, pady=12)
@@ -582,9 +629,9 @@ class Dashboard:
             show="headings",
             style="AntiOS.Treeview",
         )
-        self.startup_tree.heading("name", text="APPLICATION")
-        self.startup_tree.heading("location", text="LOCATION")
-        self.startup_tree.heading("user", text="USER")
+        self.startup_tree.heading("name", text=self.t("startup.application"))
+        self.startup_tree.heading("location", text=self.t("startup.location"))
+        self.startup_tree.heading("user", text=self.t("startup.user"))
         self.startup_tree.column("name", width=280)
         self.startup_tree.column("location", width=360)
         self.startup_tree.column("user", width=170)
@@ -613,10 +660,10 @@ class Dashboard:
 
         self.system_cards: dict[str, dict[str, Any]] = {}
         specs = [
-            ("windows", "Windows", "Operating system", 0, 0),
-            ("computer", "Computer", "Hardware overview", 0, 1),
-            ("storage", "Storage", "System drive", 1, 0),
-            ("session", "Session", "Current Windows session", 1, 1),
+            ("windows", self.t("system.windows.title"), self.t("system.windows.subtitle"), 0, 0),
+            ("computer", self.t("system.computer.title"), self.t("system.computer.subtitle"), 0, 1),
+            ("storage", self.t("system.storage.title"), self.t("system.storage.subtitle"), 1, 0),
+            ("session", self.t("system.session.title"), self.t("system.session.subtitle"), 1, 1),
         ]
         for key, title, subtitle, row, col in specs:
             card = self._metric_card(
@@ -640,7 +687,7 @@ class Dashboard:
 
         self._button(
             actions,
-            "Storage settings",
+            self.t("button.storage_settings"),
             lambda: _open_settings("ms-settings:storagesense"),
             kind="secondary",
         ).pack(side="left")
@@ -790,10 +837,12 @@ class Dashboard:
     ) -> Any:
         tk = self.tk
         level = str(check.get("level") or "info")
-        label, color, badge_bg = STATUS_STYLE.get(
+        _fallback_label, color, badge_bg = STATUS_STYLE.get(
             level,
             STATUS_STYLE["info"],
         )
+        status_key = "advisory" if level == "advisory" else level
+        label = self.t(f"status.{status_key}")
 
         card = tk.Frame(
             parent,
@@ -860,22 +909,61 @@ class Dashboard:
         if uri:
             self._button(
                 card,
-                "Open",
+                self.t("button.open"),
                 lambda u=str(uri): _open_settings(u),
                 kind="secondary",
             ).pack(side="right", padx=14, pady=14)
 
         return card
 
+    def _on_language_selected(self, _event: Any = None) -> None:
+        selected = self.language_var.get()
+        code = self.language_display_to_code.get(selected)
+        if not code or code == self.language:
+            return
+
+        existing = self.data
+        active_page = self.active_page
+
+        self.language = code
+        self.tr = Translator(code)
+
+        for child in self.root.winfo_children():
+            child.destroy()
+
+        self.pages = {}
+        self.nav_buttons = {}
+        self._check_rows = []
+
+        self._configure_root()
+        self._configure_ttk()
+        self._build_shell()
+        self._build_pages()
+        self.show_page(active_page)
+
+        if existing:
+            localized = {
+                "scan": existing["scan"],
+                "health": existing["health"],
+                "evaluation": evaluate_health(
+                    existing["scan"],
+                    existing["health"],
+                    language=self.language,
+                ),
+            }
+            self._render(localized)
+        else:
+            self.refresh()
+
     def show_page(self, name: str) -> None:
         if name not in self.pages:
             return
 
         titles = {
-            "overview": ("Overview", "A quick read-only look at your Windows PC."),
-            "security": ("Security", "Protection features reported by Windows."),
-            "startup": ("Startup apps", "Common applications configured to start with Windows."),
-            "system": ("System", "Windows, hardware and session information."),
+            "overview": (self.t("nav.overview"), self.t("page.overview.subtitle")),
+            "security": (self.t("nav.security"), self.t("page.security.subtitle")),
+            "startup": (self.t("nav.startup"), self.t("page.startup.subtitle")),
+            "system": (self.t("nav.system"), self.t("page.system.subtitle")),
         }
 
         self.active_page = name
@@ -895,32 +983,48 @@ class Dashboard:
     def refresh(self) -> None:
         self.refresh_button.configure(
             state="disabled",
-            text="Checking…",
+            text=self.t("button.checking"),
         )
-        self.hero_kicker.configure(text="CHECKING", fg=THEME["accent"])
-        self.status_title.configure(text="Checking your PC…")
+        self.hero_kicker.configure(
+            text=self.t("overview.checking_kicker"),
+            fg=THEME["accent"],
+        )
+        self.status_title.configure(
+            text=self.t("overview.checking_title")
+        )
         self.status_summary.configure(
-            text="AntiOS is collecting read-only system information."
+            text=self.t("overview.checking_detail")
         )
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self) -> None:
         try:
-            data = collect_dashboard_data()
+            data = collect_dashboard_data(self.language)
         except Exception as exc:
             self.root.after(0, lambda: self._show_error(str(exc)))
             return
         self.root.after(0, lambda: self._render(data))
 
     def _show_error(self, message: str) -> None:
-        self.refresh_button.configure(state="normal", text="Refresh")
-        self.hero_kicker.configure(text="CHECK FAILED", fg=THEME["warn"])
-        self.status_title.configure(text="AntiOS could not complete the check")
+        self.refresh_button.configure(
+            state="normal",
+            text=self.t("button.refresh"),
+        )
+        self.hero_kicker.configure(
+            text=self.t("overview.check_failed"),
+            fg=THEME["warn"],
+        )
+        self.status_title.configure(
+            text=self.t("error.failed_title")
+        )
         self.status_summary.configure(text=message)
 
     def _render(self, data: dict[str, Any]) -> None:
         self.data = data
-        self.refresh_button.configure(state="normal", text="Refresh")
+        self.refresh_button.configure(
+            state="normal",
+            text=self.t("button.refresh"),
+        )
 
         evaluation = data["evaluation"]
         health = data["health"]
@@ -928,11 +1032,11 @@ class Dashboard:
 
         overall = evaluation.get("overall")
         if overall == "needs-attention":
-            kicker = ("NEEDS ATTENTION", THEME["warn"])
+            kicker = (self.t("overview.needs_attention"), THEME["warn"])
         elif overall == "review":
-            kicker = ("REVIEW", THEME["review"])
+            kicker = (self.t("overview.review"), THEME["review"])
         else:
-            kicker = ("ALL CLEAR", THEME["ok"])
+            kicker = (self.t("overview.all_clear"), THEME["ok"])
 
         self.hero_kicker.configure(text=kicker[0], fg=kicker[1])
         self.status_title.configure(
@@ -941,9 +1045,9 @@ class Dashboard:
 
         summary = evaluation.get("summary", {})
         self.status_summary.configure(
-            text=(
-                "Read-only check completed. "
-                f"{summary.get('info', 0)} informational item(s)."
+            text=self.t(
+                "overview.completed",
+                count=summary.get("info", 0),
             )
         )
         for key, widget in self.summary_chips.items():
@@ -974,21 +1078,24 @@ class Dashboard:
         defender_enabled = defender.get("antivirus_enabled")
         realtime = defender.get("real_time_protection")
         defender_value = (
-            "Protected"
+            self.t("security.protected")
             if defender_enabled is True and realtime is True
-            else "Needs review"
+            else self.t("security.needs_review")
             if defender.get("available")
-            else "Unavailable"
+            else self.t("security.unavailable")
         )
-        defender_detail = (
-            f"Antivirus: {_friendly_bool(defender_enabled)}   •   "
-            f"Real-time: {_friendly_bool(realtime)}   •   "
-            f"Signatures: {defender.get('signature_age_days', 'Unknown')} day(s) old"
+        defender_detail = self.t(
+            "security.defender.detail",
+            antivirus=_friendly_bool(defender_enabled, self.tr),
+            realtime=_friendly_bool(realtime, self.tr),
+            age=defender.get("signature_age_days", self.t("value.unknown")),
         )
 
         self.security_cards["defender"]["value"].configure(
             text=defender_value,
-            fg=THEME["ok"] if defender_value == "Protected" else THEME["review"],
+            fg=THEME["ok"]
+            if defender_enabled is True and realtime is True
+            else THEME["review"],
         )
         self.security_cards["defender"]["detail"].configure(text=defender_detail)
 
@@ -999,36 +1106,43 @@ class Dashboard:
             fg=THEME["ok"] if str(protection).lower() == "on" else THEME["review"],
         )
         self.security_cards["encryption"]["detail"].configure(
-            text=f"Encryption: {encryption if encryption is not None else 'Unknown'}%"
+            text=self.t(
+                "security.encryption.detail",
+                percent=encryption
+                if encryption is not None
+                else self.t("value.unknown"),
+            )
         )
 
         secure_boot = security.get("secure_boot", {}).get("enabled")
         self.security_cards["secure_boot"]["value"].configure(
-            text=_friendly_bool(secure_boot),
+            text=_friendly_bool(secure_boot, self.tr),
             fg=THEME["ok"] if secure_boot is True else THEME["review"],
         )
         self.security_cards["secure_boot"]["detail"].configure(
-            text="Secure Boot helps protect the Windows boot chain."
+            text=self.t("security.secure_boot.detail")
         )
 
         tpm = security.get("tpm", {})
         tpm_ready = tpm.get("ready")
         tpm_present = tpm.get("present")
         tpm_value = (
-            "Ready"
+            self.t("security.tpm.ready")
             if tpm_present is True and tpm_ready is True
-            else "Present, not ready"
+            else self.t("security.tpm.present_not_ready")
             if tpm_present is True
-            else "Not detected"
+            else self.t("security.tpm.not_detected")
             if tpm_present is False
-            else "Unknown"
+            else self.t("security.tpm.unknown")
         )
         self.security_cards["tpm"]["value"].configure(
             text=tpm_value,
-            fg=THEME["ok"] if tpm_value == "Ready" else THEME["review"],
+            fg=THEME["ok"]
+            if tpm_present is True and tpm_ready is True
+            else THEME["review"],
         )
         self.security_cards["tpm"]["detail"].configure(
-            text="Trusted Platform Module state reported by Windows."
+            text=self.t("security.tpm.detail")
         )
 
     def _render_startup(self, health: dict[str, Any]) -> None:
@@ -1070,63 +1184,69 @@ class Dashboard:
         reboot = health.get("pending_reboot", {})
 
         self.system_cards["windows"]["value"].configure(
-            text=(
-                f"{win.get('generation') or 'Windows'}\n"
-                f"{win.get('edition_id') or 'Edition unknown'}\n"
-                f"Version {win.get('display_version') or 'Unknown'}\n"
-                f"Build {win.get('full_build') or 'Unknown'}"
+            text=self.t(
+                "system.windows.value",
+                generation=win.get("generation") or self.t("value.windows"),
+                edition=win.get("edition_id") or self.t("value.edition_unknown"),
+                version=win.get("display_version") or self.t("value.unknown"),
+                build=win.get("full_build") or self.t("value.unknown"),
             )
         )
         self.system_cards["windows"]["detail"].configure(
-            text="Windows version information read from the local system."
+            text=self.t("system.windows.detail")
         )
 
         self.system_cards["computer"]["value"].configure(
-            text=(
-                f"{host.get('computer_name') or 'Unknown computer'}\n"
-                f"{host.get('architecture') or 'Unknown architecture'}\n"
-                f"{host.get('processor') or 'Processor unavailable'}"
+            text=self.t(
+                "system.computer.value",
+                name=host.get("computer_name") or self.t("value.computer_unknown"),
+                architecture=host.get("architecture") or self.t("value.arch_unknown"),
+                processor=host.get("processor") or self.t("value.processor_unknown"),
             )
         )
         self.system_cards["computer"]["detail"].configure(
-            text="Local computer identity and hardware overview."
+            text=self.t("system.computer.detail")
         )
 
-        free = _format_bytes(storage.get("free_bytes"))
-        total = _format_bytes(storage.get("total_bytes"))
+        free = _format_bytes(storage.get("free_bytes"), self.tr)
+        total = _format_bytes(storage.get("total_bytes"), self.tr)
         percent = storage.get("percent_free")
         self.system_cards["storage"]["value"].configure(
-            text=(
-                f"{free} free\n"
-                f"{total} total\n"
-                f"{percent if percent is not None else 'Unknown'}% available"
+            text=self.t(
+                "system.storage.value",
+                free=free,
+                total=total,
+                percent=percent
+                if percent is not None
+                else self.t("value.unknown"),
             )
         )
         self.system_cards["storage"]["detail"].configure(
-            text="System-drive capacity reported by Windows."
+            text=self.t("system.storage.detail")
         )
 
         self.system_cards["session"]["value"].configure(
-            text=(
-                f"Uptime: {uptime.get('days', 'Unknown')} day(s)\n"
-                f"Restart pending: {_friendly_bool(reboot.get('pending'))}"
+            text=self.t(
+                "system.session.value",
+                days=uptime.get("days", self.t("value.unknown")),
+                pending=_friendly_bool(reboot.get("pending"), self.tr),
             )
         )
         self.system_cards["session"]["detail"].configure(
-            text="Current Windows session and common restart markers."
+            text=self.t("system.session.detail")
         )
 
     def export_report(self) -> None:
         from tkinter import filedialog, messagebox
 
         if not self.data:
-            messagebox.showinfo("AntiOS", "Run a check before exporting a report.")
+            messagebox.showinfo("AntiOS", self.t("export.no_data"))
             return
 
         target = filedialog.asksaveasfilename(
-            title="Export AntiOS report",
+            title=self.t("export.title"),
             defaultextension=".json",
-            filetypes=[("JSON report", "*.json")],
+            filetypes=[(self.t("export.filetype"), "*.json")],
             initialfile="antios-report.json",
         )
         if not target:
@@ -1136,12 +1256,16 @@ class Dashboard:
             json.dumps(self.data, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        messagebox.showinfo("AntiOS", f"Report saved to:\n{target}")
+        messagebox.showinfo(
+            "AntiOS",
+            self.t("export.saved", path=target),
+        )
 
 
-def launch() -> int:
+def launch(language: str | None = None) -> int:
+    tr = Translator(normalize_language(language or detect_language()))
     if not is_windows():
-        raise RuntimeError("AntiOS Dashboard currently requires Windows.")
+        raise RuntimeError(tr.t("error.dashboard_windows"))
 
     import tkinter as tk
 
@@ -1152,7 +1276,7 @@ def launch() -> int:
             pass
 
     root = tk.Tk()
-    Dashboard(root)
+    Dashboard(root, language=language)
     root.mainloop()
     return 0
 
@@ -1166,9 +1290,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Validate dashboard imports without opening a window.",
     )
+    parser.add_argument(
+        "--lang",
+        choices=list(LANGUAGE_NAMES),
+        help="UI language: en, ru, es, zh-CN. Defaults to Windows locale.",
+    )
     args = parser.parse_args(argv)
     if args.self_test:
-        # Also validates that the theme/status structures are importable.
         assert "bg" in THEME and "ok" in STATUS_STYLE
         return 0
-    return launch()
+    return launch(args.lang)
