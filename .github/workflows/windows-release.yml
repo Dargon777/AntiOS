@@ -90,6 +90,41 @@ jobs:
         run: |
           pyinstaller --clean --noconfirm --onefile --windowed --name AntiOS-GUI antios_gui_entry.py
 
+      - name: Azure login for Artifact Signing
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign Windows executables
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: AntiOS Windows Health Privacy and Diagnostics
+          description-url: https://github.com/Dargon777/AntiOS
+
+      - name: Verify Authenticode signatures
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          foreach ($file in @(".\dist\AntiOS.exe", ".\dist\AntiOS-GUI.exe")) {
+            $signature = Get-AuthenticodeSignature $file
+            Write-Host "$file => $($signature.Status) / $($signature.SignerCertificate.Subject)"
+            if ($signature.Status -ne "Valid") {
+              throw "Invalid Authenticode signature: $file ($($signature.Status))"
+            }
+          }
+
       - name: Smoke-test executables
         shell: pwsh
         run: |
@@ -120,15 +155,22 @@ jobs:
           Copy-Item .\CODE_OF_CONDUCT.md .\package\CODE_OF_CONDUCT.md
           Copy-Item .\LICENSE .\package\LICENSE
           Copy-Item .\NOTICE .\package\NOTICE
+          Copy-Item .\docs\SIGNING.md .\package\SIGNING.md
           $version = (Get-Content .\release\VERSION -Raw).Trim()
           $commit = "$env:GITHUB_SHA"
           $python = (python --version 2>&1).Trim()
+          $signing = if ("${{ vars.ENABLE_ARTIFACT_SIGNING }}" -eq "true") {
+            "Azure Artifact Signing"
+          } else {
+            "Unsigned direct-download build"
+          }
           @(
             "AntiOS version: $version",
             "Commit: $commit",
             "Build runner: windows-latest",
             "Python: $python",
-            "License: Apache-2.0"
+            "License: Apache-2.0",
+            "Code signing: $signing"
           ) | Set-Content .\package\BUILD_INFO.txt
           Compress-Archive -Path .\package\* -DestinationPath .\AntiOS-windows-x64.zip -Force
           $hash = (Get-FileHash .\AntiOS-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
