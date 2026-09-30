@@ -1,31 +1,21 @@
-# AntiOS v2.0.0 alpha 4
+# AntiOS v2.0.0 alpha 5
 
-Alpha 4 focuses on trust, discoverability and user feedback rather than adding more system-changing features.
+Alpha 5 is a visual redesign of the Windows dashboard.
 
-## New
+## New dashboard design
 
-- Transparent `PRIVACY.md`: AntiOS has no automatic telemetry or analytics.
-- `SUPPORT.md` with the current ways to help the project.
-- Dashboard buttons for:
-  - Report a problem
-  - Suggest a feature
-  - GitHub / Star
-  - Support development
-  - Privacy
-- Telemetry-free static landing page source in `docs/index.html`.
-- Manually triggered GitHub Pages deployment workflow.
-- GitHub funding configuration prepared for GitHub Sponsors.
-- Public README rewritten around download, trust, feedback and everyday-user value.
+- modern dark interface;
+- persistent left navigation instead of native notebook tabs;
+- large overall-status hero card;
+- separate OK / Review / Warning counters;
+- card-based health checks with colored status rails and badges;
+- contextual **Open** buttons for relevant Windows Settings pages;
+- dedicated Security cards for Defender, BitLocker, Secure Boot and TPM;
+- polished dark startup-app table with alternating rows;
+- card-based System page;
+- dark native Windows title bar when supported;
+- high-DPI awareness for sharper rendering on scaled displays;
+- cleaner hierarchy, spacing and typography;
+- local/no-telemetry trust indicator in the sidebar.
 
-## Distribution
-
-The Windows ZIP now also includes:
-
-- `PRIVACY.md`
-- `SUPPORT.md`
-
-The dashboard itself remains read-only.
-
-## Why this release exists
-
-AntiOS is not introducing a paywall yet. Alpha 4 is designed to make it easier to collect genuine bug reports and feature requests before deciding which future capabilities, if any, belong in a paid edition.
+The dashboard remains read-only. This release changes presentation, not the system-write safety model.

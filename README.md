@@ -4,7 +4,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 4
+> **Pre-release:** 2.0.0 alpha 5
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -32,7 +32,7 @@ AntiOS checks common things that are scattered across different Windows screens:
 - Windows edition, version and build;
 - architecture, processor and uptime.
 
-Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible.
+Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. Alpha 5 adds a redesigned dark dashboard with sidebar navigation, status cards, colored badges and dedicated Security/System views.
 
 AntiOS deliberately avoids a fake all-knowing “PC health score”.
 
@@ -229,7 +229,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a4-py3-none-any.whl
+python -m pip install .\antios-2.0.0a5-py3-none-any.whl
 antios-gui
 ```
 

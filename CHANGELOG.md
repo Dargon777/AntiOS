@@ -4,6 +4,21 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a5] - 2026-09-30
+
+### Changed
+
+- Rebuilt the dashboard around a modern dark card-based layout.
+- Replaced native notebook tabs with a persistent left navigation rail.
+- Added a large overall-status hero card and separate OK/Review/Warning counters.
+- Replaced the Overview table with colored health-check cards and contextual actions.
+- Added dedicated Security cards for Defender, BitLocker, Secure Boot and TPM.
+- Restyled the Startup Apps table for the dark interface.
+- Reworked the System page into structured cards.
+- Added dark Windows title-bar integration when supported.
+- Added Windows DPI-awareness for sharper rendering on scaled displays.
+- Kept the dashboard read-only; the release is a presentation redesign only.
+
 ## [2.0.0a4] - 2026-09-30
 
 ### Added
@@ -105,6 +120,7 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
+[2.0.0a5]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.5
 [2.0.0a4]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.4
 [2.0.0a3]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.3\n[2.0.0a2]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.2
 [2.0.0a1]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.1
