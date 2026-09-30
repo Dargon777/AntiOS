@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+import os
+import time
+from pathlib import Path
+
+import pytest
+
+from antios.storage_cleanup import scan_storage
+
+
+def _write(path: Path, size: int, byte: bytes = b"x") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(byte * size)
+
+
+def test_storage_scan_finds_duplicates_old_large_archives_and_empty(tmp_path):
+    now = time.time()
+
+    _write(tmp_path / "a.bin", 2048, b"a")
+    _write(tmp_path / "nested" / "b.bin", 2048, b"a")
+    _write(tmp_path / "same-size-different.bin", 2048, b"b")
+    _write(tmp_path / "old.iso", 4096, b"c")
+    (tmp_path / "empty.txt").write_bytes(b"")
+    _write(tmp_path / "archive.zip", 1024, b"z")
+
+    old_timestamp = now - (400 * 86400)
+    os.utime(tmp_path / "old.iso", (old_timestamp, old_timestamp))
+
+    result = scan_storage(
+        tmp_path,
+        old_days=180,
+        large_bytes=3000,
+        duplicate_min_bytes=1000,
+        now=now,
+    )
+
+    assert result["cancelled"] is False
+    assert result["summary"]["files_scanned"] == 6
+    assert result["summary"]["duplicate_groups"] == 1
+    assert result["summary"]["duplicate_files"] == 2
+    assert result["summary"]["duplicate_reclaimable_bytes"] == 2048
+    assert result["summary"]["old_large_files"] == 1
+    assert result["summary"]["installer_archives"] == 2
+    assert result["summary"]["empty_files"] == 1
+
+    group = result["duplicates"][0]
+    assert group["count"] == 2
+    assert {Path(path).name for path in group["paths"]} == {"a.bin", "b.bin"}
+    assert Path(result["old_large_files"][0]["path"]).name == "old.iso"
+
+
+def test_storage_scan_does_not_follow_symlinks(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    _write(target / "file.bin", 1024)
+
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks unavailable in this test environment")
+
+    result = scan_storage(
+        tmp_path,
+        large_bytes=1,
+        duplicate_min_bytes=1,
+    )
+
+    paths = [
+        Path(item["path"])
+        for item in result["old_large_files"]
+    ]
+    assert all("link" not in path.parts for path in paths)
+
+
+def test_storage_scan_rejects_file_path(tmp_path):
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("x", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not a directory"):
+        scan_storage(file_path)
+
+
+def test_storage_scan_can_be_cancelled(tmp_path):
+    for index in range(10):
+        _write(tmp_path / f"{index}.bin", 256)
+
+    result = scan_storage(
+        tmp_path,
+        cancelled=lambda: True,
+    )
+
+    assert result["cancelled"] is True
+    assert result["duplicates"] == []
+
+
+def test_old_file_rule_is_explicitly_not_an_unused_claim(tmp_path):
+    _write(tmp_path / "old.bin", 4096)
+    result = scan_storage(
+        tmp_path,
+        old_days=1,
+        large_bytes=1,
+        duplicate_min_bytes=1,
+    )
+
+    assert result["rules"]["unused_claim"] is False
+    assert "last-modified" in result["rules"]["note"]
