@@ -56,3 +56,11 @@ def test_log_file_records_command_not_identity_values(capsys, tmp_path):
     content = log.read_text(encoding="utf-8")
     assert "command=version" in content
     assert secret_marker not in content
+
+def test_root_version_flag(capsys):
+    try:
+        main(["--version"])
+    except SystemExit as exc:
+        assert exc.code == 0
+    captured = capsys.readouterr()
+    assert f"AntiOS {__version__}" in captured.out
