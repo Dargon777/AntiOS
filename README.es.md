@@ -1,6 +1,6 @@
 # AntiOS
 
-[English](README.md) · [Русский](README.ru.md) · **Español** · [简体中文](README.zh-CN.md)
+[English](README.md) · [Русский](README.ru.md) · **Español** · [简体中文](README.zh-CN.md) · [Suomi](README.fi.md) · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
 **AntiOS — Salud, privacidad y diagnóstico de Windows.**
 
@@ -19,7 +19,7 @@ https://github.com/Dargon777/AntiOS/releases
 - versión y compilación de Windows;
 - arquitectura, procesador y tiempo de actividad.
 
-La interfaz detecta automáticamente Windows en español y también permite cambiar manualmente entre **English / Русский / Español / 简体中文**.
+La interfaz detecta automáticamente Windows en español y también permite cambiar manualmente entre **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**.
 
 El panel es de solo lectura y no incluye telemetría automática.
 
