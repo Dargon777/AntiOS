@@ -16,9 +16,10 @@ from .core import (
     snapshot,
 )
 from .registry import WindowsRegistryBackend, is_windows
+from .report import render_scan_human
 
 
-def _print(data: object) -> None:
+def _print_json(data: object) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
@@ -48,7 +49,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("scan", help="Read a small, documented set of Windows identity metadata.")
+    scan_cmd = sub.add_parser(
+        "scan",
+        help="Read Windows identity, version and platform-security metadata.",
+    )
+    scan_cmd.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of the human report.",
+    )
 
     plan = sub.add_parser("plan", help="Generate a reversible metadata-change plan.")
     plan.add_argument("--computer-name")
@@ -88,16 +97,20 @@ def main(argv: list[str] | None = None) -> int:
         backend = _backend()
 
         if args.command == "scan":
-            _print(scan(backend))
+            data = scan(backend)
+            if args.json:
+                _print_json(data)
+            else:
+                print(render_scan_human(data))
             return 0
 
         if args.command == "plan":
-            _print(generate_plan(args.computer_name, args.registered_owner).to_dict())
+            _print_json(generate_plan(args.computer_name, args.registered_owner).to_dict())
             return 0
 
         if args.command == "backup":
             out = save_backup(args.path, snapshot(backend))
-            _print({"backup": str(out.resolve())})
+            _print_json({"backup": str(out.resolve())})
             return 0
 
         if args.command == "apply":
@@ -107,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
                 if not _is_admin():
                     raise PermissionError("Administrator privileges are required for registry writes.")
                 save_backup(args.backup, snapshot(backend))
-            _print({
+            _print_json({
                 "plan": plan.to_dict(),
                 "operations": apply_plan(backend, plan, dry_run=dry_run),
                 "note": (
@@ -123,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
             if not dry_run and not _is_admin():
                 raise PermissionError("Administrator privileges are required for registry writes.")
             data = load_backup(args.path)
-            _print({
+            _print_json({
                 "operations": restore(backend, data, dry_run=dry_run),
                 "note": "Dry run only." if dry_run else "Restore completed.",
             })
