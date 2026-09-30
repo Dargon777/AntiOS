@@ -12,9 +12,11 @@ from typing import Any
 from .models import IdentityPlan, RegistryTarget
 from .registry import RegistryBackend
 from .system_info import collect_system_info
+from .system_name import ComputerNameBackend, validate_computer_name
 from .targets import ALL_TARGETS, MUTABLE_BY_KEY, MUTABLE_TARGETS
 
-BACKUP_SCHEMA = "antios-v2-backup-1"
+BACKUP_SCHEMA = "antios-v2-backup-2"
+SUPPORTED_BACKUP_SCHEMAS = {BACKUP_SCHEMA, "antios-v2-backup-1"}
 
 
 def _registry_entries(backend: RegistryBackend) -> list[dict[str, Any]]:
@@ -34,7 +36,7 @@ def random_computer_name(prefix: str = "LAB") -> str:
     clean = re.sub(r"[^A-Za-z0-9-]", "", prefix.upper())[:6] or "LAB"
     alphabet = string.ascii_uppercase + string.digits
     suffix = "".join(secrets.choice(alphabet) for _ in range(8))
-    return f"{clean}-{suffix}"[:15]
+    return validate_computer_name(f"{clean}-{suffix}"[:15])
 
 
 def random_registered_owner() -> str:
@@ -46,8 +48,9 @@ def generate_plan(
     computer_name: str | None = None,
     registered_owner: str | None = None,
 ) -> IdentityPlan:
+    chosen_name = computer_name or random_computer_name()
     return IdentityPlan(
-        computer_name=computer_name or random_computer_name(),
+        computer_name=validate_computer_name(chosen_name),
         registered_owner=registered_owner or random_registered_owner(),
     )
 
@@ -57,16 +60,22 @@ def plan_changes(plan: IdentityPlan) -> list[tuple[RegistryTarget, str]]:
     for target in MUTABLE_TARGETS:
         if target.name == "RegisteredOwner" and plan.registered_owner is not None:
             changes.append((target, plan.registered_owner))
-        elif target.name == "ComputerName" and plan.computer_name is not None:
-            changes.append((target, plan.computer_name))
     return changes
 
 
-def snapshot(backend: RegistryBackend) -> dict[str, Any]:
+def snapshot(
+    backend: RegistryBackend,
+    computer_backend: ComputerNameBackend | None = None,
+) -> dict[str, Any]:
     entries = [backend.read(target).to_dict() for target in MUTABLE_TARGETS]
     return {
         "schema": BACKUP_SCHEMA,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "computer_name": (
+            computer_backend.current_name()
+            if computer_backend is not None
+            else None
+        ),
         "entries": entries,
     }
 
@@ -80,55 +89,117 @@ def save_backup(path: str | Path, data: dict[str, Any]) -> Path:
 
 def load_backup(path: str | Path) -> dict[str, Any]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if data.get("schema") != BACKUP_SCHEMA:
+    if data.get("schema") not in SUPPORTED_BACKUP_SCHEMAS:
         raise ValueError("Unsupported or invalid AntiOS backup schema")
     return data
 
 
-def _requires_reboot(target: RegistryTarget) -> bool:
-    return target.name == "ComputerName"
-
-
-def apply_plan(backend: RegistryBackend, plan: IdentityPlan, dry_run: bool = True) -> list[dict[str, Any]]:
+def apply_plan(
+    backend: RegistryBackend,
+    plan: IdentityPlan,
+    *,
+    computer_backend: ComputerNameBackend,
+    dry_run: bool = True,
+) -> list[dict[str, Any]]:
     operations: list[dict[str, Any]] = []
+    registry_actions: list[tuple[RegistryTarget, str, int | None, bool]] = []
+
     for target, new_value in plan_changes(plan):
         before = backend.read(target)
-        item = {
+        changed = before.value != new_value
+        operations.append({
             "target": target.key,
             "description": target.description,
             "before": before.value if before.exists else None,
             "after": new_value,
-            "changed": before.value != new_value,
-            "requires_reboot": _requires_reboot(target),
+            "changed": changed,
+            "requires_reboot": False,
             "dry_run": dry_run,
-        }
-        operations.append(item)
-        if not dry_run and item["changed"]:
-            backend.write(target, new_value, before.reg_type)
+        })
+        registry_actions.append((target, new_value, before.reg_type, changed))
+
+    if plan.computer_name is not None:
+        current_name = computer_backend.current_name()
+        changed = current_name.casefold() != plan.computer_name.casefold()
+        operations.append({
+            "target": "SYSTEM::ComputerName",
+            "description": "Windows computer name via SetComputerNameExW",
+            "before": current_name,
+            "after": plan.computer_name,
+            "changed": changed,
+            "requires_reboot": True,
+            "dry_run": dry_run,
+        })
+
+    if not dry_run:
+        computer_op = next(
+            (item for item in operations if item["target"] == "SYSTEM::ComputerName"),
+            None,
+        )
+        if computer_op and computer_op["changed"]:
+            computer_backend.set_name(str(computer_op["after"]))
+
+        for target, new_value, reg_type, changed in registry_actions:
+            if changed:
+                backend.write(target, new_value, reg_type)
+
     return operations
 
 
-def restore(backend: RegistryBackend, backup: dict[str, Any], dry_run: bool = True) -> list[dict[str, Any]]:
+def restore(
+    backend: RegistryBackend,
+    backup: dict[str, Any],
+    *,
+    computer_backend: ComputerNameBackend,
+    dry_run: bool = True,
+) -> list[dict[str, Any]]:
     operations: list[dict[str, Any]] = []
+    registry_actions: list[tuple[RegistryTarget, Any, int | None, bool]] = []
+
+    backup_name = backup.get("computer_name")
+    if backup_name:
+        backup_name = validate_computer_name(str(backup_name))
+        current_name = computer_backend.current_name()
+        changed = current_name.casefold() != backup_name.casefold()
+        operations.append({
+            "target": "SYSTEM::ComputerName",
+            "before": current_name,
+            "after": backup_name,
+            "changed": changed,
+            "requires_reboot": True,
+            "dry_run": dry_run,
+        })
+
     for entry in backup.get("entries", []):
         target_data = entry.get("target", {})
         key = f"{target_data.get('hive')}\\{target_data.get('path')}::{target_data.get('name')}"
         target = MUTABLE_BY_KEY.get(key)
-        if target is None:
+        if target is None or not entry.get("exists"):
             continue
-        if not entry.get("exists"):
-            continue
+
         current = backend.read(target)
         new_value = entry.get("value")
-        item = {
+        changed = current.value != new_value
+        operations.append({
             "target": target.key,
             "before": current.value if current.exists else None,
             "after": new_value,
-            "changed": current.value != new_value,
-            "requires_reboot": _requires_reboot(target),
+            "changed": changed,
+            "requires_reboot": False,
             "dry_run": dry_run,
-        }
-        operations.append(item)
-        if not dry_run and item["changed"]:
-            backend.write(target, new_value, entry.get("reg_type"))
+        })
+        registry_actions.append((target, new_value, entry.get("reg_type"), changed))
+
+    if not dry_run:
+        computer_op = next(
+            (item for item in operations if item["target"] == "SYSTEM::ComputerName"),
+            None,
+        )
+        if computer_op and computer_op["changed"]:
+            computer_backend.set_name(str(computer_op["after"]))
+
+        for target, new_value, reg_type, changed in registry_actions:
+            if changed:
+                backend.write(target, new_value, reg_type)
+
     return operations
