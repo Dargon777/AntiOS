@@ -21,14 +21,51 @@ READ_ONLY_TARGETS: tuple[RegistryTarget, ...] = (
     RegistryTarget(
         "HKLM",
         r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-        "CurrentBuild",
-        description="Current Windows build",
+        "ProductName",
+        description="Windows product name",
+    ),
+    RegistryTarget(
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "EditionID",
+        description="Windows edition identifier",
     ),
     RegistryTarget(
         "HKLM",
         r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
         "DisplayVersion",
         description="Windows display version",
+    ),
+    RegistryTarget(
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "CurrentBuild",
+        description="Current Windows build",
+    ),
+    RegistryTarget(
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "CurrentBuildNumber",
+        description="Current Windows build number",
+    ),
+    RegistryTarget(
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "UBR",
+        kind="dword",
+        description="Windows update build revision",
+    ),
+    RegistryTarget(
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "InstallationType",
+        description="Windows installation type",
+    ),
+    RegistryTarget(
+        "HKLM",
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "RegisteredOwner",
+        description="Registered owner display metadata",
     ),
 )
 
@@ -58,5 +95,9 @@ MUTABLE_TARGETS: tuple[RegistryTarget, ...] = (
     ),
 )
 
-ALL_TARGETS = READ_ONLY_TARGETS + MUTABLE_TARGETS
+# Deduplicate RegisteredOwner while retaining the mutable target for writes.
+ALL_TARGETS = READ_ONLY_TARGETS + tuple(
+    target for target in MUTABLE_TARGETS
+    if target.key not in {item.key for item in READ_ONLY_TARGETS}
+)
 MUTABLE_BY_KEY = {target.key: target for target in MUTABLE_TARGETS}
