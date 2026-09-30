@@ -1,6 +1,6 @@
 # AntiOS
 
-[English](README.md) · [Русский](README.ru.md) · [Español](README.es.md) · **简体中文**
+[English](README.md) · [Русский](README.ru.md) · [Español](README.es.md) · **简体中文** · [Suomi](README.fi.md) · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
 **AntiOS — Windows 健康、隐私与诊断工具。**
 
@@ -19,7 +19,7 @@ https://github.com/Dargon777/AntiOS/releases
 - Windows 版本与内部版本；
 - 架构、处理器和运行时间。
 
-简体中文 Windows 会自动使用中文界面，也可以手动切换 **English / Русский / Español / 简体中文**。
+简体中文 Windows 会自动使用中文界面，也可以手动切换 **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**。
 
 控制面板仅以只读方式工作，不包含自动遥测。
 
