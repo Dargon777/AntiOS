@@ -4,6 +4,28 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a9] - 2026-10-01
+
+### Added
+
+- Read-only **Storage Cleanup** dashboard page.
+- Folder picker with background scanning, progress reporting and cancellation.
+- Exact duplicate-file detection using size pre-filtering, quick fingerprints and full SHA-256 verification.
+- Potential duplicate-space savings calculation.
+- Old large-file candidates based on last-modified time.
+- Installer/archive candidates for common package and archive formats.
+- Empty-file candidates.
+- Open-containing-folder action from cleanup results.
+- Storage cleanup results in exported JSON reports.
+- `storage-scan` / `cleanup-scan` CLI command with configurable thresholds.
+- Storage Cleanup localization across all seven supported languages.
+
+### Safety
+
+- Storage Cleanup is read-only and never deletes files automatically.
+- Symlinks are not followed during recursive scans.
+- AntiOS explicitly does not label files “unused” from Windows last-access timestamps; old-file candidates use last-modified time only.
+
 ## [2.0.0a8] - 2026-10-01
 
 ### Added
@@ -177,6 +199,7 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
+[2.0.0a9]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.9
 [2.0.0a8]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.8
 [2.0.0a7]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.7\n[2.0.0a6]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.6
 [2.0.0a5]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.5
