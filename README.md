@@ -1,10 +1,12 @@
 # AntiOS
 
+**Languages:** English · [Русский](README.ru.md) · [Español](README.es.md) · [简体中文](README.zh-CN.md)
+
 **Windows Health, Privacy & Diagnostics — a friendly read-only dashboard with an auditable advanced CLI.**
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 5
+> **Pre-release:** 2.0.0 alpha 6
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -229,7 +231,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a5-py3-none-any.whl
+python -m pip install .\antios-2.0.0a6-py3-none-any.whl
 antios-gui
 ```
 
