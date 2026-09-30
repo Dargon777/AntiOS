@@ -1,51 +1,45 @@
-# AntiOS v2.0.0 alpha 2
+# AntiOS v2.0.0 alpha 3
 
-Alpha 2 is the recommended public preview.
+Alpha 3 turns AntiOS from a mostly technical CLI into a more approachable Windows Health & Privacy utility.
 
-It keeps the same narrow, reversible AntiOS v2 safety model and finishes the public open-source release layer.
+## New for everyday users
 
-## New in alpha 2
+- New **AntiOS-GUI.exe** desktop dashboard.
+- One-click read-only health/privacy overview.
+- Friendly **Quick Check** with OK / Review / Warning states.
+- Microsoft Defender and real-time protection status.
+- BitLocker/device-encryption status.
+- Storage free-space check.
+- Pending-restart detection.
+- Startup application inventory.
+- Secure Boot and TPM overview.
+- Buttons that open the relevant Windows Security, Startup Apps and Storage settings pages.
+- JSON report export from the GUI.
+- Start Menu shortcut created by the installer.
+- Optional desktop shortcut.
+- New CLI command: `antios quick-check` (alias: `antios check`).
+- New installed GUI command: `antios-gui`.
 
-- AntiOS v2 is licensed under the Apache License 2.0.
-- The release includes LICENSE and NOTICE files.
-- Python wheel and source distribution are published alongside the Windows ZIP.
-- Python package metadata declares SPDX `Apache-2.0`.
-- Wheel and sdist are validated with `twine check`.
-- CI installs the built wheel into a clean virtual environment and smoke-tests it.
-- Windows ZIP, wheel and source distribution receive GitHub build provenance attestations.
-- A project Code of Conduct is included.
+## Safety
 
-## Historical provenance
+The new dashboard is read-only. It does not expose system-changing actions.
 
-The Apache-2.0 license applies to the current AntiOS v2 source tree and contributions unless a file states otherwise.
+Advanced identity changes remain in the CLI and keep the existing dry-run, backup and allowlist safeguards.
 
-The repository history contains legacy third-party material from the historical upstream repository. Apache-2.0 adoption for v2 does not retroactively relicense historical material for which the v2 contributors do not hold the necessary rights.
+AntiOS v2 still does not provide anti-cheat, ban, licensing, hardware/storage serial, MAC/network identity, telemetry/update-ID or similar bypass functionality.
 
-## What is included
+## Distribution
 
-- read-only Windows system inventory;
-- TPM and Secure Boot diagnostics;
-- human-readable and JSON output;
-- dry-run identity planning;
-- backup/apply/restore workflows;
-- safe computer renaming through the Windows API;
-- TOML configuration;
-- optional privacy-conscious logging;
-- single-file Windows portable executable;
+The release contains:
+
+- `AntiOS-GUI.exe` — recommended for most users;
+- `AntiOS.exe` — advanced CLI;
 - installer/uninstaller PowerShell helpers;
 - Python wheel and source distribution;
-- SHA-256 checksum and GitHub provenance attestations.
-
-## What is intentionally not included
-
-AntiOS v2 does not provide anti-cheat, ban, licensing, hardware/storage serial, MAC-address, telemetry/update-ID or similar evasion/bypass capabilities.
+- Apache-2.0 LICENSE and NOTICE;
+- SHA-256 checksum;
+- GitHub provenance attestations.
 
 ## Windows warning
 
-The alpha executable is not Authenticode-signed. Windows SmartScreen may therefore show an unknown-publisher warning even when the downloaded file matches the published SHA-256 and GitHub provenance attestation.
-
-## Verify
-
-Compare the Windows ZIP against `AntiOS-windows-x64.zip.sha256`.
-
-With a current GitHub CLI, release artifacts can be verified against this repository with `gh attestation verify`.
+The executables are not Authenticode-signed yet, so Windows SmartScreen may show an unknown-publisher warning. Verify the published checksum and GitHub provenance if desired.

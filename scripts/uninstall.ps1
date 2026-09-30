@@ -3,7 +3,22 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\AntiOS"
+$Programs = [Environment]::GetFolderPath("Programs")
+$StartMenuDir = Join-Path $Programs "AntiOS"
+$Desktop = [Environment]::GetFolderPath("Desktop")
+$DesktopLink = Join-Path $Desktop "AntiOS.lnk"
+
+if (Test-Path $StartMenuDir) {
+    Remove-Item -Recurse -Force $StartMenuDir
+    Write-Host "Removed AntiOS Start Menu shortcuts."
+}
+
+if (Test-Path $DesktopLink) {
+    Remove-Item -Force $DesktopLink
+    Write-Host "Removed AntiOS desktop shortcut."
+}
 
 if (Test-Path $InstallDir) {
     Remove-Item -Recurse -Force $InstallDir

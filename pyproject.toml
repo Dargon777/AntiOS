@@ -5,16 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "antios"
 dynamic = ["version"]
-description = "Auditable Windows privacy and system-identity laboratory with safe scan, plan, backup and restore workflows"
+description = "Windows Health, Privacy and Diagnostics with a friendly dashboard and auditable CLI"
 requires-python = ">=3.11"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Dargon777 and AntiOS contributors" }]
-keywords = ["windows", "privacy", "system", "diagnostics", "cli"]
+keywords = ["windows", "privacy", "health", "security", "diagnostics", "cli", "desktop"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
+  "Environment :: Win32 (MS Windows)",
+  "Intended Audience :: End Users/Desktop",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Operating System :: Microsoft :: Windows",
@@ -29,6 +31,9 @@ Changelog = "https://github.com/Dargon777/AntiOS/blob/master/CHANGELOG.md"
 
 [project.scripts]
 antios = "antios.cli:main"
+
+[project.gui-scripts]
+antios-gui = "antios.dashboard:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "antios.__version__" }
