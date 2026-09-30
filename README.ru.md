@@ -1,6 +1,6 @@
 # AntiOS
 
-[English](README.md) · **Русский** · [Español](README.es.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · **Русский** · [Español](README.es.md) · [简体中文](README.zh-CN.md) · [Suomi](README.fi.md) · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
 **AntiOS — здоровье, приватность и диагностика Windows.**
 
@@ -19,7 +19,7 @@ https://github.com/Dargon777/AntiOS/releases
 - версию и сборку Windows;
 - архитектуру, процессор и аптайм.
 
-Интерфейс автоматически выбирает русский язык на русской Windows. Язык также можно переключить вручную: **English / Русский / Español / 简体中文**.
+Интерфейс автоматически выбирает русский язык на русской Windows. Язык также можно переключить вручную: **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**.
 
 Панель работает в режиме чтения и не отправляет автоматическую телеметрию.
 
