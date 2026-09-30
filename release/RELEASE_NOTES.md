@@ -1,37 +1,38 @@
-# AntiOS v2.0.0 alpha 8
+# AntiOS v2.0.0 alpha 9
 
-Alpha 8 focuses on product polish and trusted Windows distribution.
+Alpha 9 adds a read-only **Storage Cleanup** workflow.
 
-## Dashboard polish
+## Storage Cleanup
 
-- more spacious 1180×780 default layout;
-- visible version/channel in the sidebar;
-- quick actions for Windows Security, Startup Apps and Storage directly on Overview;
-- improved hover/focus behavior for buttons and navigation;
-- keyboard shortcuts:
-  - `F5` — refresh;
-  - `Ctrl+E` — export report;
-  - `Ctrl+1…4` — switch dashboard pages;
-- all seven interface languages remain supported.
+The new dashboard page can scan a user-selected folder for:
 
-## Windows trust
+- exact duplicate files;
+- old large files;
+- installer/archive candidates;
+- empty files.
 
-AntiOS now has two production distribution paths:
+Duplicate detection is content-based:
 
-1. **Microsoft Store / MSIX**
-   - dedicated GUI-only package;
-   - no advanced CLI write commands in the Store package;
-   - Store-ready manifest and packaging script;
-   - automated Store MSIX build workflow.
+1. files are grouped by size;
+2. likely matches receive a quick first/last-block fingerprint;
+3. only remaining candidates are confirmed with a full SHA-256 hash.
 
-2. **Direct GitHub download**
-   - optional Azure Artifact Signing integration;
-   - OIDC authentication from GitHub Actions;
-   - SHA-256 Authenticode signing and RFC 3161 timestamping;
-   - signature verification before ZIP packaging.
+The dashboard shows potential reclaimable duplicate space, supports background progress and cancellation, and can open the containing folder for any result.
 
-Direct builds remain unsigned until the repository is connected to an Artifact Signing account and `ENABLE_ARTIFACT_SIGNING=true` is configured.
+No file is deleted automatically.
 
-The Microsoft Store signs accepted MSIX submissions itself.
+## Honest “unused” handling
 
-The dashboard remains read-only and the advanced CLI safety model is unchanged.
+AntiOS does not claim that a file is unused based on Windows last-access timestamps. Those timestamps can be disabled, delayed or unreliable.
+
+“Old” candidates therefore mean **last modified at least 180 days ago and at least 500 MB by default**.
+
+## CLI
+
+`storage-scan` / `cleanup-scan` supports custom old-file, large-file and duplicate-size thresholds plus JSON output.
+
+## Localization
+
+The Storage Cleanup UI is translated across all seven supported languages.
+
+The existing Windows Health & Privacy dashboard, Store packaging and advanced CLI safety model are unchanged.
