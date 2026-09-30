@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .build_info import render_version, version_info
 from .config import default_config_path, load_config, write_default_config
+from .consumer import evaluate_health, render_quick_check
 from .core import (
     apply_plan,
     generate_plan,
@@ -18,6 +19,7 @@ from .core import (
     snapshot,
 )
 from .doctor import diagnose
+from .health import collect_health
 from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .report import render_doctor_human, render_operations_human, render_scan_human
@@ -40,7 +42,7 @@ def _is_admin() -> bool:
 
 def _require_windows() -> None:
     if not is_windows():
-        raise RuntimeError("AntiOS v2 registry commands currently require Windows.")
+        raise RuntimeError("AntiOS v2 Windows commands currently require Windows.")
 
 
 def _backend() -> WindowsRegistryBackend:
@@ -51,7 +53,7 @@ def _backend() -> WindowsRegistryBackend:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="antios",
-        description="AntiOS v2: auditable Windows privacy/system identity laboratory",
+        description="AntiOS: Windows Health, Privacy and Diagnostics",
     )
     parser.add_argument(
         "--version",
@@ -85,6 +87,18 @@ def build_parser() -> argparse.ArgumentParser:
     config_init = config_sub.add_parser("init", help="Create a default configuration file.")
     config_init.add_argument("--force", action="store_true", help="Overwrite an existing config.")
 
+    quick = sub.add_parser(
+        "quick-check",
+        aliases=["check"],
+        help="Run a friendly Windows health and privacy check.",
+    )
+    quick.add_argument("--json", action="store_true")
+
+    sub.add_parser(
+        "dashboard",
+        help="Open the AntiOS Windows Health & Privacy dashboard.",
+    )
+
     scan_cmd = sub.add_parser(
         "scan",
         help="Read Windows identity, version and platform-security metadata.",
@@ -93,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_cmd = sub.add_parser(
         "doctor",
-        help="Check the runtime and report Windows security/inventory warnings.",
+        help="Run technical runtime and Windows security/inventory diagnostics.",
     )
     doctor_cmd.add_argument("--json", action="store_true")
 
@@ -104,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     backup = sub.add_parser("backup", help="Back up v2-mutable metadata before a change.")
     backup.add_argument("path", nargs="?")
 
-    apply_cmd = sub.add_parser("apply", help="Preview or apply a v2 plan.")
+    apply_cmd = sub.add_parser("apply", help="Preview or apply a v2 metadata plan.")
     apply_cmd.add_argument("--computer-name")
     apply_cmd.add_argument("--registered-owner")
     apply_cmd.add_argument(
@@ -135,8 +149,8 @@ def _render_config(config_path: Path, config: object) -> str:
     general = cfg["general"]
     logging_cfg = cfg["logging"]
     return "\n".join([
-        "AntiOS v2 configuration",
-        "=======================",
+        "AntiOS configuration",
+        "====================",
         f"Path                 : {config_path}",
         f"Computer name prefix : {general['computer_name_prefix']}",
         f"Default backup path  : {general['backup_path']}",
@@ -182,8 +196,34 @@ def main(argv: list[str] | None = None) -> int:
                     print(_render_config(config_path, config))
                 return 0
 
+        if args.command == "dashboard":
+            _require_windows()
+            from .dashboard import main as dashboard_main
+            return dashboard_main([])
+
         backend = _backend()
         computer_backend = WindowsComputerNameBackend()
+
+        if args.command in {"quick-check", "check"}:
+            scan_data = scan(backend)
+            health_data = collect_health()
+            result = evaluate_health(scan_data, health_data)
+            payload = {
+                "scan": scan_data,
+                "health": health_data,
+                "evaluation": result,
+            }
+            if args.json:
+                _print_json(payload)
+            else:
+                print(render_quick_check(result))
+            logger.info(
+                "quick-check overall=%s warnings=%d review=%d",
+                result.get("overall"),
+                result.get("summary", {}).get("warn", 0),
+                result.get("summary", {}).get("advisory", 0),
+            )
+            return 1 if result.get("summary", {}).get("warn", 0) else 0
 
         if args.command == "scan":
             data = scan(backend)
