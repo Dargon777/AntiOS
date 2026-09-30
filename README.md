@@ -6,7 +6,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 7
+> **Pre-release:** 2.0.0 alpha 8
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -34,7 +34,7 @@ AntiOS checks common things that are scattered across different Windows screens:
 - Windows edition, version and build;
 - architecture, processor and uptime.
 
-Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. Alpha 5 adds a redesigned dark dashboard with sidebar navigation, status cards, colored badges and dedicated Security/System views.
+Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. Alpha 8 further polishes the dashboard with tighter spacing, quick actions on the Overview page, improved hover/focus states, keyboard shortcuts and visible build/version information.
 
 AntiOS deliberately avoids a fake all-knowing “PC health score”.
 
@@ -208,6 +208,14 @@ Safeguards:
 - restore accepts only explicit allowlisted Registry targets;
 - computer names are validated before use;
 - logs exclude scanned/generated identity values and backup contents.
+
+## Windows trust and SmartScreen
+
+For Microsoft Store distribution, AntiOS now includes a dedicated GUI-only MSIX packaging path. The Store signs accepted packages with Microsoft's trusted certificate.
+
+For direct GitHub downloads, the release workflow supports optional Azure Artifact Signing. Once the repository is connected to an Artifact Signing account, both EXE files are Authenticode-signed and verified before the ZIP is built.
+
+See [docs/SIGNING.md](docs/SIGNING.md) and [store/README.md](store/README.md).
 
 ## Verify downloads
 
