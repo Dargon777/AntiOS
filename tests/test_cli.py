@@ -70,8 +70,9 @@ def test_root_version_flag(capsys):
 def test_storage_scan_command_works_without_windows(capsys, tmp_path):
     first = tmp_path / "first.bin"
     second = tmp_path / "second.bin"
-    first.write_bytes(b"same-data" * 200)
-    second.write_bytes(b"same-data" * 200)
+    payload_bytes = b"x" * (1024 * 1024 + 64)
+    first.write_bytes(payload_bytes)
+    second.write_bytes(payload_bytes)
 
     code = main([
         "--config",
@@ -79,7 +80,7 @@ def test_storage_scan_command_works_without_windows(capsys, tmp_path):
         "storage-scan",
         str(tmp_path),
         "--duplicate-min-mb",
-        "0",
+        "1",
         "--json",
     ])
     payload = json.loads(capsys.readouterr().out)
