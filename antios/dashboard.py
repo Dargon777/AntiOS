@@ -9,6 +9,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Callable
 
+from . import __version__
 from .consumer import evaluate_health
 from .core import scan
 from .health import collect_health
@@ -207,10 +208,17 @@ class Dashboard:
     def _configure_root(self) -> None:
         root = self.root
         root.title(self.t("app.title"))
-        root.geometry("1120x760")
-        root.minsize(920, 640)
+        root.geometry("1180x780")
+        root.minsize(960, 650)
         root.configure(bg=THEME["bg"])
         root.option_add("*Font", ("Segoe UI", 10))
+        root.bind("<F5>", lambda _event: self.refresh())
+        root.bind("<Control-e>", lambda _event: self.export_report())
+        root.bind("<Control-E>", lambda _event: self.export_report())
+        root.bind("<Control-1>", lambda _event: self.show_page("overview"))
+        root.bind("<Control-2>", lambda _event: self.show_page("security"))
+        root.bind("<Control-3>", lambda _event: self.show_page("startup"))
+        root.bind("<Control-4>", lambda _event: self.show_page("system"))
         _enable_dark_titlebar(root)
 
     def _configure_ttk(self) -> None:
@@ -255,7 +263,7 @@ class Dashboard:
         self.sidebar = tk.Frame(
             self.root,
             bg=THEME["sidebar"],
-            width=220,
+            width=236,
             highlightthickness=1,
             highlightbackground=THEME["border"],
         )
@@ -294,6 +302,13 @@ class Dashboard:
             fg=THEME["muted"],
             font=("Segoe UI", 9),
         ).pack(anchor="w")
+        tk.Label(
+            brand_text,
+            text=f"v{__version__}  •  alpha",
+            bg=THEME["sidebar"],
+            fg=THEME["muted_2"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(2, 0))
 
         tk.Label(
             self.sidebar,
@@ -366,6 +381,13 @@ class Dashboard:
             bg=THEME["surface"],
             fg=THEME["muted"],
             font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=12, pady=(0, 7))
+        tk.Label(
+            trust,
+            text="F5  •  Ctrl+E  •  Ctrl+1…4",
+            bg=THEME["surface"],
+            fg=THEME["muted_2"],
+            font=("Segoe UI", 8),
         ).pack(anchor="w", padx=12, pady=(0, 11))
 
         sidebar_links = tk.Frame(self.sidebar, bg=THEME["sidebar"])
@@ -414,7 +436,7 @@ class Dashboard:
 
         self.export_button = self._button(
             header_actions,
-            self.t("button.export"),
+            f"↓  {self.t('button.export')}",
             self.export_report,
             kind="secondary",
         )
@@ -422,7 +444,7 @@ class Dashboard:
 
         self.refresh_button = self._button(
             header_actions,
-            self.t("button.refresh"),
+            f"↻  {self.t('button.refresh')}",
             self.refresh,
             kind="primary",
         )
@@ -456,7 +478,7 @@ class Dashboard:
             highlightthickness=1,
             highlightbackground=THEME["border"],
         )
-        self.hero.pack(fill="x")
+        self.hero.pack(fill="x", pady=(0, 14))
 
         hero_left = tk.Frame(self.hero, bg=THEME["surface"])
         hero_left.pack(side="left", fill="both", expand=True, padx=24, pady=22)
@@ -516,8 +538,30 @@ class Dashboard:
             ).pack(padx=14, pady=(0, 8))
             self.summary_chips[key] = value
 
+        quick_actions = tk.Frame(parent, bg=THEME["bg"])
+        quick_actions.pack(fill="x", pady=(0, 18))
+
+        self._button(
+            quick_actions,
+            self.t("button.windows_security"),
+            lambda: _open_settings("windowsdefender:"),
+            kind="secondary",
+        ).pack(side="left")
+        self._button(
+            quick_actions,
+            self.t("button.startup_apps"),
+            lambda: _open_settings("ms-settings:startupapps"),
+            kind="secondary",
+        ).pack(side="left", padx=(8, 0))
+        self._button(
+            quick_actions,
+            self.t("button.storage_settings"),
+            lambda: _open_settings("ms-settings:storagesense"),
+            kind="secondary",
+        ).pack(side="left", padx=(8, 0))
+
         section = tk.Frame(parent, bg=THEME["bg"])
-        section.pack(fill="x", pady=(22, 10))
+        section.pack(fill="x", pady=(0, 10))
 
         tk.Label(
             section,
@@ -709,6 +753,22 @@ class Dashboard:
             cursor="hand2",
             font=("Segoe UI Semibold", 10),
         )
+        button.bind(
+            "<Enter>",
+            lambda _event, widget=button, nav_key=key: (
+                widget.configure(bg=THEME["surface_hover"])
+                if self.active_page != nav_key
+                else None
+            ),
+        )
+        button.bind(
+            "<Leave>",
+            lambda _event, widget=button, nav_key=key: widget.configure(
+                bg=THEME["surface_alt"]
+                if self.active_page == nav_key
+                else THEME["sidebar"]
+            ),
+        )
         button.pack(fill="x", padx=8, pady=1)
         self.nav_buttons[key] = button
 
@@ -729,7 +789,7 @@ class Dashboard:
             fg = THEME["text"]
             active_bg = THEME["surface_hover"]
 
-        return self.tk.Button(
+        button = self.tk.Button(
             parent,
             text=text,
             command=command,
@@ -739,11 +799,30 @@ class Dashboard:
             fg=fg,
             activebackground=active_bg,
             activeforeground=fg,
+            disabledforeground=THEME["muted_2"],
             bd=0,
             relief="flat",
             cursor="hand2",
+            takefocus=True,
             font=("Segoe UI Semibold", 9),
         )
+        button.bind(
+            "<Enter>",
+            lambda _event, widget=button, color=active_bg: (
+                widget.configure(bg=color)
+                if str(widget.cget("state")) != "disabled"
+                else None
+            ),
+        )
+        button.bind(
+            "<Leave>",
+            lambda _event, widget=button, color=bg: (
+                widget.configure(bg=color)
+                if str(widget.cget("state")) != "disabled"
+                else None
+            ),
+        )
+        return button
 
     def _text_link(
         self,
@@ -1008,7 +1087,7 @@ class Dashboard:
     def _show_error(self, message: str) -> None:
         self.refresh_button.configure(
             state="normal",
-            text=self.t("button.refresh"),
+            text=f"↻  {self.t('button.refresh')}",
         )
         self.hero_kicker.configure(
             text=self.t("overview.check_failed"),
@@ -1293,7 +1372,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--lang",
         choices=list(LANGUAGE_NAMES),
-        help="UI language: en, ru, es, zh-CN. Defaults to Windows locale.",
+        help="UI language: en, ru, es, zh-CN, fi, pl, mn. Defaults to Windows locale.",
     )
     args = parser.parse_args(argv)
     if args.self_test:
