@@ -40,3 +40,12 @@ def test_config_rejects_long_prefix(tmp_path):
     )
     with pytest.raises(ValueError):
         load_config(path)
+
+def test_config_rejects_empty_backup_path(tmp_path):
+    path = tmp_path / "antios.toml"
+    path.write_text(
+        '[general]\nbackup_path = ""\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        load_config(path)
