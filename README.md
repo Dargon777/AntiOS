@@ -1,12 +1,12 @@
 # AntiOS
 
-**Languages:** English · [Русский](README.ru.md) · [Español](README.es.md) · [简体中文](README.zh-CN.md)
+**Languages:** English · [Русский](README.ru.md) · [Español](README.es.md) · [简体中文](README.zh-CN.md) · [Suomi](README.fi.md) · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
 **Windows Health, Privacy & Diagnostics — a friendly read-only dashboard with an auditable advanced CLI.**
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 6
+> **Pre-release:** 2.0.0 alpha 7
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
