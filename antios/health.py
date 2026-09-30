@@ -172,12 +172,34 @@ def pending_reboot_status(runner: Runner = subprocess.run) -> dict[str, Any]:
 
 
 def startup_status(runner: Runner = subprocess.run) -> dict[str, Any]:
-    ok, data = _powershell_json(
+    script = (
         "$ErrorActionPreference='Stop'; "
-        "@(Get-CimInstance Win32_StartupCommand | "
-        "Select-Object Name,Command,Location,User) | ConvertTo-Json -Compress",
-        runner=runner,
+        "$items=@(); "
+        "$keys=@("
+        "@{Path='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';Label='Current user Run';User=$env:USERNAME},"
+        "@{Path='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce';Label='Current user RunOnce';User=$env:USERNAME},"
+        "@{Path='HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';Label='All users Run';User='All users'},"
+        "@{Path='HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce';Label='All users RunOnce';User='All users'}"
+        "); "
+        "foreach($k in $keys){ "
+        "if(Test-Path $k.Path){ "
+        "$props=Get-ItemProperty $k.Path; "
+        "foreach($p in $props.PSObject.Properties){ "
+        "if($p.Name -notlike 'PS*'){ "
+        "$items += [pscustomobject]@{Name=$p.Name;Command=[string]$p.Value;Location=$k.Label;User=$k.User} "
+        "} } } }; "
+        "$folders=@("
+        "@{Path=[Environment]::GetFolderPath('Startup');Label='Current user Startup';User=$env:USERNAME},"
+        "@{Path=[Environment]::GetFolderPath('CommonStartup');Label='All users Startup';User='All users'}"
+        "); "
+        "foreach($folder in $folders){ "
+        "if($folder.Path -and (Test-Path $folder.Path)){ "
+        "Get-ChildItem $folder.Path -File -ErrorAction SilentlyContinue | ForEach-Object { "
+        "$items += [pscustomobject]@{Name=$_.BaseName;Command=$_.FullName;Location=$folder.Label;User=$folder.User} "
+        "} } }; "
+        "@($items) | ConvertTo-Json -Compress"
     )
+    ok, data = _powershell_json(script, runner=runner)
     if not ok:
         return {"available": False, "detail": data, "count": None, "entries": []}
 
@@ -206,7 +228,6 @@ def startup_status(runner: Runner = subprocess.run) -> dict[str, Any]:
         "count": len(normalized),
         "entries": normalized,
     }
-
 
 def collect_health(runner: Runner = subprocess.run) -> dict[str, Any]:
     return {
