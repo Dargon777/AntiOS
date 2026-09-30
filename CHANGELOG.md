@@ -4,6 +4,20 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a6] - 2026-09-30
+
+### Added
+
+- Four-language localization: English, Russian, Spanish and Simplified Chinese.
+- Automatic UI language detection from the user/system locale.
+- Live dashboard language switcher without restarting or rescanning.
+- Localized health-check details, actions, status badges and dynamic values.
+- Localized `quick-check` CLI output with `--lang`.
+- `--lang` support for launching the dashboard from the CLI.
+- English fallback for unsupported locales and missing translation keys.
+- Russian, Spanish and Simplified Chinese quick-start README files.
+- Tests that enforce full translation-key coverage across all four languages.
+
 ## [2.0.0a5] - 2026-09-30
 
 ### Changed
@@ -120,6 +134,7 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
+[2.0.0a6]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.6
 [2.0.0a5]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.5
 [2.0.0a4]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.4
 [2.0.0a3]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.3\n[2.0.0a2]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.2
