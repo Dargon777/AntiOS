@@ -1,8 +1,8 @@
 """AntiOS v2.
 
-The v2 codebase is intentionally limited to auditable, reversible privacy-lab
-operations. Legacy fingerprint-spoofing code remains at repository root for
-historical reference and is not imported by this package.
+AntiOS v2 provides auditable, reversible Windows privacy/system-lab workflows.
+The current v2 source tree is licensed under Apache-2.0. Historical legacy
+material remains in Git history and is not retroactively relicensed by v2.
 """
 
-__version__ = "2.0.0a1"
+__version__ = "2.0.0a2"
