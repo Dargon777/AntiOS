@@ -13,11 +13,14 @@ The original 2019 code is still present at the repository root for historical re
 - reads a documented set of Windows identity metadata with `scan`;
 - detects Windows 10/11 from the actual build number and reports edition/version/build;
 - reports architecture, processor, TPM state and Secure Boot state in read-only mode;
-- prints a human-readable report by default, with `--json` for scripting;
+- includes `doctor` with OK/info/advisory/warning checks;
+- prints human-readable reports by default, with `--json` for scripting;
 - generates a small reversible metadata plan with `plan`;
+- shows a Before/After change table before `apply` and `restore`;
 - defaults all writes to **dry-run**;
 - creates a backup immediately before a real `apply`;
-- restores only an explicit allowlist of v2-managed values;
+- changes the computer name through the supported Windows `SetComputerNameExW` API rather than direct registry edits;
+- restores only an explicit allowlist of v2-managed registry values plus the backed-up computer name;
 - refuses to modify read-only identifiers such as `MachineGuid` and `ProductId`;
 - tests the core logic without requiring a real registry;
 - runs CI on Python 3.11, 3.12 and 3.13 on Windows and Linux.
@@ -46,14 +49,27 @@ Machine-readable scan:
 antios scan --json
 ```
 
-The scan currently includes:
+Run diagnostics:
+
+```powershell
+antios doctor
+```
+
+Machine-readable diagnostics:
+
+```powershell
+antios doctor --json
+```
+
+The scan/doctor flow currently covers:
 
 - host/user/architecture/processor;
 - Windows generation, product, edition, display version and full build;
 - installation type and registered owner;
 - Secure Boot state;
 - TPM present/ready/enabled/activated state, vendor and version;
-- a documented set of registry identity values in read-only mode.
+- a documented set of registry identity values in read-only mode;
+- Python/runtime compatibility and registry-read warnings.
 
 Generate a proposed metadata identity:
 
@@ -67,10 +83,18 @@ Preview changes (no writes):
 antios apply
 ```
 
+The default output is a compact Before/After table. Computer-name changes are marked as requiring a Windows restart.
+
 Preview explicit values:
 
 ```powershell
 antios apply --computer-name LAB-PC --registered-owner "Lab User"
+```
+
+Use JSON output when scripting:
+
+```powershell
+antios apply --json
 ```
 
 Apply for real (Administrator terminal required). A backup is written first:
@@ -91,17 +115,20 @@ Restore for real:
 antios restore antios-backup.json --yes
 ```
 
-You can also run `START_V2.bat` for a read-only scan.
+Use `--json` on restore for machine-readable output.
+
+You can also run `START_V2.bat`; it performs a read-only scan and doctor check and makes no changes.
 
 ## Safety model
 
 v2 uses a hardcoded mutable allowlist. Backup files are treated as untrusted input: `restore` ignores registry paths that are not part of that allowlist. This prevents a crafted backup file from turning the restore command into arbitrary registry writes.
 
-The currently writable metadata is intentionally narrow:
+The currently writable state is intentionally narrow:
 
-- `RegisteredOwner`
-- configured computer name
-- active computer name
+- `RegisteredOwner` through the Windows Registry;
+- computer name through the Windows `SetComputerNameExW` API.
+
+Computer names are validated conservatively (letters, digits and hyphens, maximum 15 characters in v2). A rename is staged by Windows and requires a restart before all components observe the new name.
 
 Other identifiers can be displayed by `scan` but are read-only from v2.
 
