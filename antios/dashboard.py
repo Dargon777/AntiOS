@@ -253,6 +253,7 @@ class Dashboard:
         root: Any,
         *,
         language: str | None = None,
+        auto_refresh: bool = True,
     ) -> None:
         import tkinter as tk
         from tkinter import ttk
@@ -304,7 +305,8 @@ class Dashboard:
         self._build_shell()
         self._build_pages()
         self.show_page("overview")
-        self.refresh()
+        if auto_refresh:
+            self.refresh()
 
     def t(self, key: str, **values: Any) -> str:
         return self.tr.t(key, **values)
@@ -2314,6 +2316,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Validate dashboard imports without opening a window.",
     )
     parser.add_argument(
+        "--ui-self-test",
+        action="store_true",
+        help="Build the hidden Windows GUI and Settings page, then exit.",
+    )
+    parser.add_argument(
         "--lang",
         choices=list(LANGUAGE_NAMES),
         help="UI language: en, ru, es, zh-CN, fi, pl, mn. Defaults to Windows locale.",
@@ -2321,5 +2328,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.self_test:
         assert "bg" in THEME and "ok" in STATUS_STYLE
+        return 0
+    if args.ui_self_test:
+        if not is_windows():
+            return 0
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        dashboard = Dashboard(
+            root,
+            language=args.lang,
+            auto_refresh=False,
+        )
+        dashboard.show_page("settings")
+        root.update_idletasks()
+        root.destroy()
         return 0
     return launch(args.lang)
