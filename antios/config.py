@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+from .i18n import SUPPORTED_LANGUAGES
+from .storage_cleanup import (
+    DEFAULT_DUPLICATE_MIN_BYTES,
+    DEFAULT_LARGE_BYTES,
+    DEFAULT_OLD_DAYS,
+)
 
 
 @dataclass(frozen=True)
@@ -21,14 +29,33 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class UIConfig:
+    language: str = "auto"
+    theme: str = "system"
+
+
+@dataclass(frozen=True)
+class CleanupConfig:
+    old_days: int = DEFAULT_OLD_DAYS
+    large_mb: int = DEFAULT_LARGE_BYTES // (1024 * 1024)
+    duplicate_min_mb: int = DEFAULT_DUPLICATE_MIN_BYTES // (1024 * 1024)
+    remember_folder: bool = True
+    last_path: str = ""
+
+
+@dataclass(frozen=True)
 class AppConfig:
     general: GeneralConfig = GeneralConfig()
     logging: LoggingConfig = LoggingConfig()
+    ui: UIConfig = UIConfig()
+    cleanup: CleanupConfig = CleanupConfig()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "general": asdict(self.general),
             "logging": asdict(self.logging),
+            "ui": asdict(self.ui),
+            "cleanup": asdict(self.cleanup),
         }
 
 
@@ -55,6 +82,34 @@ def _level(value: Any) -> str:
     return level
 
 
+def _language(value: Any) -> str:
+    language = str(value or "auto")
+    if language == "auto":
+        return language
+    if language not in SUPPORTED_LANGUAGES:
+        raise ValueError(
+            "ui.language must be auto or one of: " + ", ".join(SUPPORTED_LANGUAGES)
+        )
+    return language
+
+
+def _theme(value: Any) -> str:
+    theme = str(value or "system").lower()
+    if theme not in {"system", "dark", "light"}:
+        raise ValueError("ui.theme must be one of: system, dark, light")
+    return theme
+
+
+def _positive_int(value: Any, *, name: str, default: int, minimum: int = 1) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be an integer") from None
+    if parsed < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return parsed
+
+
 def load_config(path: str | Path | None = None) -> AppConfig:
     target = Path(path) if path else default_config_path()
     if not target.exists():
@@ -63,6 +118,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     data = tomllib.loads(target.read_text(encoding="utf-8"))
     general = data.get("general") or {}
     logging_data = data.get("logging") or {}
+    ui = data.get("ui") or {}
+    cleanup = data.get("cleanup") or {}
 
     prefix = str(general.get("computer_name_prefix", "LAB")).strip() or "LAB"
     if len(prefix) > 6:
@@ -82,20 +139,77 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             level=_level(logging_data.get("level", "INFO")),
             file=str(logging_data.get("file", "")),
         ),
+        ui=UIConfig(
+            language=_language(ui.get("language", "auto")),
+            theme=_theme(ui.get("theme", "system")),
+        ),
+        cleanup=CleanupConfig(
+            old_days=_positive_int(
+                cleanup.get("old_days", DEFAULT_OLD_DAYS),
+                name="cleanup.old_days",
+                default=DEFAULT_OLD_DAYS,
+            ),
+            large_mb=_positive_int(
+                cleanup.get("large_mb", DEFAULT_LARGE_BYTES // (1024 * 1024)),
+                name="cleanup.large_mb",
+                default=DEFAULT_LARGE_BYTES // (1024 * 1024),
+            ),
+            duplicate_min_mb=_positive_int(
+                cleanup.get(
+                    "duplicate_min_mb",
+                    DEFAULT_DUPLICATE_MIN_BYTES // (1024 * 1024),
+                ),
+                name="cleanup.duplicate_min_mb",
+                default=DEFAULT_DUPLICATE_MIN_BYTES // (1024 * 1024),
+            ),
+            remember_folder=bool(cleanup.get("remember_folder", True)),
+            last_path=str(cleanup.get("last_path", "")),
+        ),
     )
 
 
-def render_default_config() -> str:
-    return """# AntiOS v2 configuration
+def _toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def render_config(config: AppConfig) -> str:
+    return f"""# AntiOS v2 configuration
 [general]
-computer_name_prefix = "LAB"
-backup_path = "antios-backup.json"
-color = "auto" # auto | always | never
+computer_name_prefix = {_toml_string(config.general.computer_name_prefix)}
+backup_path = {_toml_string(config.general.backup_path)}
+color = {_toml_string(config.general.color)} # auto | always | never
 
 [logging]
-level = "INFO"
-file = "" # empty disables file logging
+level = {_toml_string(config.logging.level)}
+file = {_toml_string(config.logging.file)} # empty disables file logging
+
+[ui]
+language = {_toml_string(config.ui.language)} # auto | en | ru | es | zh-CN | fi | pl | mn
+theme = {_toml_string(config.ui.theme)} # system | dark | light
+
+[cleanup]
+old_days = {config.cleanup.old_days}
+large_mb = {config.cleanup.large_mb}
+duplicate_min_mb = {config.cleanup.duplicate_min_mb}
+remember_folder = {str(config.cleanup.remember_folder).lower()}
+last_path = {_toml_string(config.cleanup.last_path)}
 """
+
+
+def render_default_config() -> str:
+    return render_config(AppConfig())
+
+
+def save_config(
+    config: AppConfig,
+    path: str | Path | None = None,
+) -> Path:
+    target = Path(path) if path else default_config_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_suffix(target.suffix + ".tmp")
+    temp.write_text(render_config(config), encoding="utf-8")
+    temp.replace(target)
+    return target
 
 
 def write_default_config(
@@ -106,6 +220,4 @@ def write_default_config(
     target = Path(path) if path else default_config_path()
     if target.exists() and not overwrite:
         raise FileExistsError(f"Configuration already exists: {target}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_default_config(), encoding="utf-8")
-    return target
+    return save_config(AppConfig(), target)
