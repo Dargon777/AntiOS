@@ -219,6 +219,8 @@ For direct GitHub downloads, the release workflow supports optional Azure Artifa
 
 See [docs/SIGNING.md](docs/SIGNING.md) and [store/README.md](store/README.md).
 
+Reserved Microsoft Store product: [AntiOS](https://apps.microsoft.com/detail/9P7V8BKW2KG9) (`9P7V8BKW2KG9`).
+
 ## Verify downloads
 
 SHA-256:
@@ -241,7 +243,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a6-py3-none-any.whl
+python -m pip install .\antios-2.0.0a9-py3-none-any.whl
 antios-gui
 ```
 

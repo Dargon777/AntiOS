@@ -13,15 +13,15 @@ on:
       identity_name:
         description: "Partner Center Package/Identity/Name"
         required: false
-        default: "Dargon777.AntiOS.Development"
+        default: "DargonsITP.AntiOS"
       publisher:
         description: "Partner Center Package/Identity/Publisher"
         required: false
-        default: "CN=AntiOS Development"
+        default: "CN=D0D34602-FED2-4FE0-B705-18B9041C45F3"
       publisher_display_name:
         description: "Publisher display name"
         required: false
-        default: "Dargon777"
+        default: "Dargon's ITP"
       package_version:
         description: "Store version (Major.Minor.Build.0)"
         required: false
@@ -50,9 +50,9 @@ jobs:
       - name: Build unsigned Store MSIX
         shell: pwsh
         run: |
-          $identity = "${{ github.event.inputs.identity_name || 'Dargon777.AntiOS.Development' }}"
-          $publisher = "${{ github.event.inputs.publisher || 'CN=AntiOS Development' }}"
-          $publisherDisplay = "${{ github.event.inputs.publisher_display_name || 'Dargon777' }}"
+          $identity = "${{ github.event.inputs.identity_name || 'DargonsITP.AntiOS' }}"
+          $publisher = "${{ github.event.inputs.publisher || 'CN=D0D34602-FED2-4FE0-B705-18B9041C45F3' }}"
+          $publisherDisplay = "${{ github.event.inputs.publisher_display_name || 'Dargon''s ITP' }}"
           $version = "${{ github.event.inputs.package_version || '2.0.9.0' }}"
           .\scripts\build-store-msix.ps1 `
             -IdentityName $identity `
