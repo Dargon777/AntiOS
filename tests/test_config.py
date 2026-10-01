@@ -2,7 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from antios.config import AppConfig, load_config, render_default_config, write_default_config
+from antios.config import (
+    AppConfig,
+    CleanupConfig,
+    UIConfig,
+    load_config,
+    render_default_config,
+    save_config,
+    write_default_config,
+)
 
 
 def test_missing_config_uses_defaults(tmp_path):
@@ -20,6 +28,8 @@ def test_write_and_load_default_config(tmp_path):
     assert config.general.computer_name_prefix == "LAB"
     assert config.general.color == "auto"
     assert config.logging.level == "INFO"
+    assert config.ui == UIConfig()
+    assert config.cleanup == CleanupConfig()
 
 
 def test_config_rejects_invalid_color(tmp_path):
@@ -48,4 +58,54 @@ def test_config_rejects_empty_backup_path(tmp_path):
         encoding="utf-8",
     )
     with pytest.raises(ValueError):
+        load_config(path)
+
+
+
+def test_save_and_load_ui_preferences(tmp_path):
+    path = tmp_path / "antios.toml"
+    config = AppConfig(
+        ui=UIConfig(language="pl", theme="light"),
+        cleanup=CleanupConfig(
+            old_days=90,
+            large_mb=250,
+            duplicate_min_mb=2,
+            remember_folder=True,
+            last_path=r"C:\Users\Example\Downloads",
+        ),
+    )
+
+    save_config(config, path)
+    loaded = load_config(path)
+
+    assert loaded.ui.language == "pl"
+    assert loaded.ui.theme == "light"
+    assert loaded.cleanup.old_days == 90
+    assert loaded.cleanup.large_mb == 250
+    assert loaded.cleanup.duplicate_min_mb == 2
+    assert loaded.cleanup.remember_folder is True
+    assert loaded.cleanup.last_path == r"C:\Users\Example\Downloads"
+
+
+def test_config_rejects_invalid_theme(tmp_path):
+    path = tmp_path / "antios.toml"
+    path.write_text('[ui]\ntheme = "neon"\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="ui.theme"):
+        load_config(path)
+
+
+def test_config_rejects_invalid_ui_language(tmp_path):
+    path = tmp_path / "antios.toml"
+    path.write_text('[ui]\nlanguage = "xx"\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="ui.language"):
+        load_config(path)
+
+
+def test_config_rejects_nonpositive_cleanup_threshold(tmp_path):
+    path = tmp_path / "antios.toml"
+    path.write_text('[cleanup]\nold_days = 0\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cleanup.old_days"):
         load_config(path)
