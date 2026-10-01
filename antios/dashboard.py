@@ -260,14 +260,42 @@ class Dashboard:
         self.root = root
         self.tk = tk
         self.ttk = ttk
-        self.language = normalize_language(language or detect_language())
+        self.config_path = default_config_path()
+        try:
+            self.config = load_config(self.config_path)
+        except (OSError, ValueError):
+            self.config = AppConfig()
+
+        self.language_setting = (
+            normalize_language(language)
+            if language
+            else self.config.ui.language
+        )
+        detected_language = detect_language()
+        self.language = normalize_language(
+            detected_language
+            if self.language_setting == "auto"
+            else self.language_setting
+        )
         self.tr = Translator(self.language)
+
+        self.theme_mode = self.config.ui.theme
+        self.resolved_theme = _apply_theme_palette(self.theme_mode)
+
         self.data: dict[str, Any] | None = None
         self.pages: dict[str, Any] = {}
         self.nav_buttons: dict[str, Any] = {}
         self.active_page = "overview"
         self._check_rows: list[Any] = []
-        self.storage_path = default_scan_path()
+
+        configured_path = Path(self.config.cleanup.last_path).expanduser()
+        self.storage_path = (
+            configured_path
+            if self.config.cleanup.remember_folder
+            and self.config.cleanup.last_path
+            and configured_path.is_dir()
+            else default_scan_path()
+        )
         self.storage_result: dict[str, Any] | None = None
         self._storage_cancel = threading.Event()
 
@@ -296,7 +324,8 @@ class Dashboard:
         root.bind("<Control-3>", lambda _event: self.show_page("startup"))
         root.bind("<Control-4>", lambda _event: self.show_page("system"))
         root.bind("<Control-5>", lambda _event: self.show_page("cleanup"))
-        _enable_dark_titlebar(root)
+        root.bind("<Control-comma>", lambda _event: self.show_page("settings"))
+        _enable_dark_titlebar(root, self.resolved_theme == "dark")
 
     def _configure_ttk(self) -> None:
         style = self.ttk.Style(self.root)
@@ -332,6 +361,25 @@ class Dashboard:
         style.map(
             "AntiOS.Treeview.Heading",
             background=[("active", THEME["surface_hover"])],
+        )
+
+        style.configure(
+            "AntiOS.TCombobox",
+            fieldbackground=THEME["surface_alt"],
+            background=THEME["surface_alt"],
+            foreground=THEME["text"],
+            arrowcolor=THEME["muted"],
+            bordercolor=THEME["border"],
+            lightcolor=THEME["border"],
+            darkcolor=THEME["border"],
+            padding=(8, 6),
+        )
+        style.map(
+            "AntiOS.TCombobox",
+            fieldbackground=[("readonly", THEME["surface_alt"])],
+            foreground=[("readonly", THEME["text"])],
+            selectbackground=[("readonly", THEME["surface_alt"])],
+            selectforeground=[("readonly", THEME["text"])],
         )
 
     def _build_shell(self) -> None:
@@ -404,38 +452,43 @@ class Dashboard:
         ]:
             self._create_nav_button(key, label)
 
-        language_box = tk.Frame(self.sidebar, bg=THEME["sidebar"])
-        language_box.pack(fill="x", padx=14, pady=(18, 8))
-
-        tk.Label(
-            language_box,
-            text=self.t("language.label"),
-            bg=THEME["sidebar"],
-            fg=THEME["muted_2"],
-            font=("Segoe UI Semibold", 8),
-        ).pack(anchor="w", padx=8, pady=(0, 6))
-
-        self.language_display_to_code = {
-            label: code for code, label in LANGUAGE_NAMES.items()
-        }
-        self.language_var = tk.StringVar(
-            value=LANGUAGE_NAMES[self.language]
-        )
-        self.language_combo = self.ttk.Combobox(
-            language_box,
-            textvariable=self.language_var,
-            values=list(self.language_display_to_code),
-            state="readonly",
-            width=18,
-        )
-        self.language_combo.pack(fill="x", padx=8)
-        self.language_combo.bind(
-            "<<ComboboxSelected>>",
-            self._on_language_selected,
-        )
-
         spacer = tk.Frame(self.sidebar, bg=THEME["sidebar"])
         spacer.pack(fill="both", expand=True)
+
+        self.settings_button = self.tk.Button(
+            self.sidebar,
+            text=f"⚙  {self.t('nav.settings')}",
+            command=lambda: self.show_page("settings"),
+            anchor="w",
+            padx=22,
+            pady=11,
+            bg=THEME["sidebar"],
+            fg=THEME["muted"],
+            activebackground=THEME["surface_hover"],
+            activeforeground=THEME["text"],
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            takefocus=True,
+            font=("Segoe UI Semibold", 10),
+        )
+        self.settings_button.bind(
+            "<Enter>",
+            lambda _event: (
+                self.settings_button.configure(bg=THEME["surface_hover"])
+                if self.active_page != "settings"
+                else None
+            ),
+        )
+        self.settings_button.bind(
+            "<Leave>",
+            lambda _event: self.settings_button.configure(
+                bg=THEME["surface_alt"]
+                if self.active_page == "settings"
+                else THEME["sidebar"]
+            ),
+        )
+        self.settings_button.pack(fill="x", padx=8, pady=(0, 10))
 
         trust = tk.Frame(
             self.sidebar,
@@ -462,7 +515,7 @@ class Dashboard:
         ).pack(anchor="w", padx=12, pady=(0, 7))
         tk.Label(
             trust,
-            text="F5  •  Ctrl+E  •  Ctrl+1…5",
+            text="F5  •  Ctrl+E  •  Ctrl+1…5  •  Ctrl+,",
             bg=THEME["surface"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 8),
@@ -537,7 +590,7 @@ class Dashboard:
         )
 
     def _build_pages(self) -> None:
-        for name in ("overview", "security", "startup", "system", "cleanup"):
+        for name in ("overview", "security", "startup", "system", "cleanup", "settings"):
             frame = self.tk.Frame(self.page_host, bg=THEME["bg"])
             frame.place(relx=0, rely=0, relwidth=1, relheight=1)
             self.pages[name] = frame
@@ -547,6 +600,7 @@ class Dashboard:
         self._build_startup(self.pages["startup"])
         self._build_system(self.pages["system"])
         self._build_cleanup(self.pages["cleanup"])
+        self._build_settings(self.pages["settings"])
 
     def _build_overview(self, parent: Any) -> None:
         tk = self.tk
