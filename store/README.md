@@ -14,15 +14,17 @@ Microsoft Store distribution gives AntiOS:
 - package identity;
 - no first-download SmartScreen warning for the Store-delivered package.
 
-## Partner Center values required
+## Reserved Partner Center identity
 
-After reserving the AntiOS app name in Partner Center, copy these exact values from **Product identity**:
+AntiOS now has a reserved Microsoft Store identity:
 
-- Package/Identity/Name
-- Package/Identity/Publisher
-- Publisher display name
+- Package/Identity/Name: `DargonsITP.AntiOS`
+- Package/Identity/Publisher: `CN=D0D34602-FED2-4FE0-B705-18B9041C45F3`
+- Publisher display name: `Dargon's ITP`
+- Store ID: `9P7V8BKW2KG9`
+- Store URL: https://apps.microsoft.com/detail/9P7V8BKW2KG9
 
-Do not guess these values. The Store validates them exactly.
+These values must match the Partner Center product identity exactly.
 
 ## Build
 
@@ -36,9 +38,9 @@ Then:
 
 ```powershell
 .\scripts\build-store-msix.ps1 `
-  -IdentityName "VALUE_FROM_PARTNER_CENTER" `
-  -Publisher "VALUE_FROM_PARTNER_CENTER" `
-  -PublisherDisplayName "Dargon777" `
+  -IdentityName "DargonsITP.AntiOS" `
+  -Publisher "CN=D0D34602-FED2-4FE0-B705-18B9041C45F3" `
+  -PublisherDisplayName "Dargon's ITP" `
   -PackageVersion "2.0.9.0"
 ```
 
@@ -56,6 +58,6 @@ The package is intentionally not production-signed by this script. Microsoft Sto
 
 `.github/workflows/store-msix.yml` validates that the Store package can be generated.
 
-On pull requests it uses development identity placeholders. For a real Store package, run the workflow manually and enter the exact Partner Center identity values.
+Pull requests and manual runs now default to the reserved AntiOS Partner Center identity. The workflow still exposes identity inputs so the package can be rebuilt against a different reserved identity if needed.
 
 The generated artifact is an input for Partner Center, not a substitute for Store certification.
