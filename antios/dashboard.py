@@ -1644,7 +1644,11 @@ class Dashboard:
         ):
             return
 
-        self.config = AppConfig()
+        self.config = replace(
+            self.config,
+            ui=UIConfig(),
+            cleanup=CleanupConfig(),
+        )
         self.language_setting = self.config.ui.language
         self.language = normalize_language(detect_language())
         self.tr = Translator(self.language)
