@@ -1,8 +1,8 @@
 # AntiOS Microsoft Store package
 
-The Store edition is intentionally the **read-only AntiOS GUI**.
+The Store edition packages the **AntiOS GUI**, including on-demand antivirus scans and explicitly confirmed quarantine/restore actions.
 
-It does not package the advanced CLI, so Microsoft Store users receive the consumer health/privacy dashboard without the CLI's administrator-only metadata write commands.
+It does not package the advanced CLI, so Microsoft Store users receive the antivirus and health/privacy dashboard without the CLI's administrator-only metadata write commands. Defender actions may require administrator rights; the GUI does not silently elevate or change protection policy. The Store identity remains reserved; package generation is not Store certification.
 
 ## Why MSIX
 
@@ -41,7 +41,7 @@ Then:
   -IdentityName "DargonsITP.AntiOS" `
   -Publisher "CN=D0D34602-FED2-4FE0-B705-18B9041C45F3" `
   -PublisherDisplayName "Dargon's ITP" `
-  -PackageVersion "2.0.10.0"
+  -PackageVersion "2.0.11.0"
 ```
 
 Output:

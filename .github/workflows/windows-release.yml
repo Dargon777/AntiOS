@@ -78,8 +78,7 @@ jobs:
           .\wheel-smoke\Scripts\python.exe -m pip install $wheel
           .\wheel-smoke\Scripts\antios.exe --version
           .\wheel-smoke\Scripts\antios.exe version --json | ConvertFrom-Json | Out-Null
-          .\wheel-smoke\Scripts\antios.exe virus-scan .\release\VERSION --json | ConvertFrom-Json | Out-Null
-          if ($LASTEXITCODE -notin @(0, 3)) { throw "Wheel antivirus smoke scan failed" }
+          .\wheel-smoke\Scripts\python.exe -c "import json,subprocess; p=subprocess.run([r'.\wheel-smoke\Scripts\antios.exe','virus-scan',r'.\release\VERSION','--json'],capture_output=True,text=True); print(p.stdout); assert p.returncode in (0,3),(p.returncode,p.stderr); d=json.loads(p.stdout); assert d['summary']['files_scanned']==1 and d['summary']['threats']==0,d"
           .\wheel-smoke\Scripts\antios-gui.exe --self-test
 
       - name: Build CLI executable
@@ -133,8 +132,7 @@ jobs:
           .\dist\AntiOS.exe --version
           .\dist\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
           .\dist\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
-          .\dist\AntiOS.exe virus-scan .\release\VERSION --json | ConvertFrom-Json | Out-Null
-          if ($LASTEXITCODE -notin @(0, 3)) { throw "Portable antivirus smoke scan failed" }
+          python -c "import json,subprocess; p=subprocess.run([r'.\dist\AntiOS.exe','virus-scan',r'.\release\VERSION','--json'],capture_output=True,text=True); print(p.stdout); assert p.returncode in (0,3),(p.returncode,p.stderr); d=json.loads(p.stdout); assert d['summary']['files_scanned']==1 and d['summary']['threats']==0,d"
           .\dist\AntiOS-GUI.exe --self-test
           .\dist\AntiOS-GUI.exe --ui-self-test
 

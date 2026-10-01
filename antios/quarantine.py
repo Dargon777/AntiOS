@@ -211,7 +211,7 @@ class Quarantine:
             raise FileExistsError("Restore never overwrites an existing file")
         if os.name == "nt" and ":" in target.name:
             raise ValueError("Alternate data streams are not supported")
-        if os.name == "nt" and target.is_reserved():
+        if os.name == "nt" and getattr(os.path, "isreserved", lambda p: Path(p).is_reserved())(str(target)):
             raise ValueError("Windows device paths are not supported")
         preview = {"id": item_id, "destination": str(target), "dry_run": dry_run}
         if dry_run:
