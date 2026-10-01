@@ -21,7 +21,9 @@ https://github.com/Dargon777/AntiOS/releases
 
 Polski Windows zostanie wykryty automatycznie. Język można też zmienić ręcznie: **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**.
 
-Panel działa tylko do odczytu i nie zawiera automatycznej telemetrii.
+Alpha 11 dodaje skanowanie plików na żądanie, szyfrowaną kwarantannę i funkcje Microsoft Defender. Ochronę w czasie rzeczywistym zapewnia zainstalowany antywirus. Skan nie zmienia plików; kwarantanna i przywracanie wymagają potwierdzenia. Brak automatycznej telemetrii. Dostawca antywirusa może korzystać z chmury zgodnie ze swoimi ustawieniami.
+
+Antywirus i ograniczenia: [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
 
 Pełna dokumentacja: [README.md](README.md)  
 Prywatność: [PRIVACY.md](PRIVACY.md)  

@@ -2,11 +2,11 @@
 
 **Languages:** English · [Русский](README.ru.md) · [Español](README.es.md) · [简体中文](README.zh-CN.md) · [Suomi](README.fi.md) · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
-**Windows Health, Privacy & Diagnostics — a friendly read-only dashboard with an auditable advanced CLI.**
+**On-demand antivirus scanning, encrypted quarantine and Windows Health, Privacy & Diagnostics.**
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 10
+> **Pre-release:** 2.0.0 alpha 11
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -19,7 +19,23 @@ AntiOS answers one simple question first: **does anything on this Windows PC nee
 
 https://github.com/Dargon777/AntiOS/releases
 
-The dashboard is read-only and does not require Administrator elevation just to open.
+Opening the dashboard and scanning user-accessible files do not require Administrator elevation. Quarantine and restore require explicit confirmation; Microsoft Defender operations can require administrator rights.
+
+## Antivirus
+
+Open **Antivirus** from the sidebar or press `Ctrl+6`:
+
+- Scan a selected file or folder without changing its contents.
+- Check content through the installed Windows AMSI provider and optional local SHA-256 signatures.
+- Inspect detections, skipped files, access errors and incomplete coverage.
+- Encrypt and isolate a selected detection in current-user Windows DPAPI quarantine.
+- Restore selected quarantined items without overwriting existing files.
+- Run Defender quick/full scans or update its signatures after confirmation.
+- Export a JSON scan report.
+
+This alpha is an **on-demand scanner**, not an independent real-time antivirus. AMSI submits buffers to the installed provider; it does not reproduce a full filesystem antivirus engine. Persistent protection remains with the installed antivirus. The built-in local database contains only the EICAR test hash; there is no independent malware feed. Archives are not unpacked. Default limits are 32 MiB per file and 100,000 files, with skipped files and failed provider calls explicitly reported.
+
+Details, CLI examples, exit codes and quarantine recovery: [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
 
 ### Why people may find it useful
 
@@ -36,7 +52,7 @@ AntiOS checks common things that are scattered across different Windows screens:
 - duplicate files and potential duplicate-space savings;
 - old large files, installers/archives and empty-file cleanup candidates.
 
-Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. Alpha 10 adds a dedicated Settings hub with persistent language, theme and Storage Cleanup preferences.
+Windows health results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. The Settings hub preserves language, theme and Storage Cleanup preferences. These checks describe Windows health settings; a completed health check is not a malware scan.
 
 AntiOS deliberately avoids a fake all-knowing “PC health score”.
 
@@ -184,7 +200,7 @@ antios restore antios-backup.json --yes
 
 ## Safety model
 
-The consumer dashboard is read-only.
+Health and Storage Cleanup checks are read-only. Antivirus file scans are read-only; quarantine, restore and Defender actions require explicit confirmation. The antivirus does not change exclusions or disable any protection setting.
 
 The advanced CLI keeps its write surface intentionally narrow.
 
@@ -243,7 +259,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a10-py3-none-any.whl
+python -m pip install .\antios-2.0.0a11-py3-none-any.whl
 antios-gui
 ```
 

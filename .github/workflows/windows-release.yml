@@ -78,6 +78,8 @@ jobs:
           .\wheel-smoke\Scripts\python.exe -m pip install $wheel
           .\wheel-smoke\Scripts\antios.exe --version
           .\wheel-smoke\Scripts\antios.exe version --json | ConvertFrom-Json | Out-Null
+          .\wheel-smoke\Scripts\antios.exe virus-scan .\release\VERSION --json | ConvertFrom-Json | Out-Null
+          if ($LASTEXITCODE -notin @(0, 3)) { throw "Wheel antivirus smoke scan failed" }
           .\wheel-smoke\Scripts\antios-gui.exe --self-test
 
       - name: Build CLI executable
@@ -131,6 +133,8 @@ jobs:
           .\dist\AntiOS.exe --version
           .\dist\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
           .\dist\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
+          .\dist\AntiOS.exe virus-scan .\release\VERSION --json | ConvertFrom-Json | Out-Null
+          if ($LASTEXITCODE -notin @(0, 3)) { throw "Portable antivirus smoke scan failed" }
           .\dist\AntiOS-GUI.exe --self-test
           .\dist\AntiOS-GUI.exe --ui-self-test
 
@@ -157,6 +161,7 @@ jobs:
           Copy-Item .\LICENSE .\package\LICENSE
           Copy-Item .\NOTICE .\package\NOTICE
           Copy-Item .\docs\SIGNING.md .\package\SIGNING.md
+          Copy-Item .\docs\ANTIVIRUS.md .\package\ANTIVIRUS.md
           $version = (Get-Content .\release\VERSION -Raw).Trim()
           $commit = "$env:GITHUB_SHA"
           $python = (python --version 2>&1).Trim()

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="AntiOS — Windows Health, Privacy & Diagnostics with a friendly read-only dashboard and an auditable advanced CLI.">
+  <meta name="description" content="AntiOS — on-demand antivirus scanning, encrypted quarantine and Windows health diagnostics.">
   <title>AntiOS — Windows Health, Privacy & Diagnostics</title>
   <style>
     :root {
@@ -75,12 +75,12 @@
       <div class="hero">
         <div>
           <h1>Know what needs attention on your Windows PC.</h1>
-          <p class="lead">AntiOS is a free, open-source Windows Health, Privacy & Diagnostics dashboard. It checks common security and system signals locally and explains the result without pretending your PC has a magical “health score”.</p>
+          <p class="lead">AntiOS is a free, open-source Windows diagnostics dashboard with on-demand antivirus scanning and encrypted quarantine. Check selected files through your installed Windows antivirus provider, inspect detections and review common security and system signals.</p>
           <div class="buttons">
             <a class="button primary" href="https://github.com/Dargon777/AntiOS/releases">Download for Windows</a>
             <a class="button" href="https://github.com/Dargon777/AntiOS">View source</a>
           </div>
-          <p class="lead" style="font-size:15px;margin-top:18px">Apache-2.0 · No automatic telemetry · Read-only dashboard · Advanced CLI for technical users</p>
+          <p class="lead" style="font-size:15px;margin-top:18px">Apache-2.0 · No automatic telemetry · On-demand scanning · Reversible quarantine</p>
         </div>
 
         <div class="dash" aria-label="Example AntiOS dashboard">
@@ -97,7 +97,7 @@
       <section>
         <h2>Useful in the first 30 seconds</h2>
         <div class="grid">
-          <div class="card"><h3>Security</h3><p>Defender, BitLocker/device encryption, Secure Boot and TPM state.</p></div>
+          <div class="card"><h3>Antivirus & security</h3><p>On-demand file scans, manual encrypted quarantine, Defender scan controls, BitLocker, Secure Boot and TPM state. Persistent protection remains with your installed antivirus.</p></div>
           <div class="card"><h3>Performance clues</h3><p>Free disk space, uptime, pending restarts and common startup applications.</p></div>
           <div class="card"><h3>System context</h3><p>Windows edition/build, architecture, processor and technical diagnostics when you need them.</p></div>
         </div>
@@ -107,7 +107,7 @@
         <h2>Privacy by design</h2>
         <div class="privacy">
           <strong>No automatic telemetry.</strong>
-          <p>AntiOS performs its checks locally. It does not automatically upload health results, startup entries, Windows identifiers or exported reports. The GUI is read-only; advanced write operations stay in the CLI and remain dry-run by default.</p>
+          <p>AntiOS does not automatically upload diagnostic reports to the project. File scans are read-only; quarantine and restore require confirmation. The installed antivirus provider may use cloud services under its own settings. Defender scans follow Defender's remediation policy.</p>
           <a href="https://github.com/Dargon777/AntiOS/blob/master/PRIVACY.md">Read the privacy policy →</a>
         </div>
       </section>

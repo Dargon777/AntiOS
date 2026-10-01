@@ -21,7 +21,9 @@ https://github.com/Dargon777/AntiOS/releases
 
 Suomenkielinen Windows valitaan automaattisesti, ja kielen voi vaihtaa myös käsin: **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**.
 
-Hallintapaneeli toimii vain luku -tilassa eikä sisällä automaattista telemetriaa.
+Alpha 11 lisää tiedostojen tarkistuksen, salatun karanteenin ja Microsoft Defenderin toiminnot. Asennettu virustorjunta tarjoaa reaaliaikaisen suojauksen. Tarkistus ei muuta tiedostoja; karanteeni ja palautus vaativat vahvistuksen. Automaattista telemetriaa ei ole. Virustorjuntapalvelu voi käyttää pilveä omien asetustensa mukaisesti.
+
+Virustorjunta ja rajoitukset: [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
 
 Täysi dokumentaatio: [README.md](README.md)  
 Tietosuoja: [PRIVACY.md](PRIVACY.md)  

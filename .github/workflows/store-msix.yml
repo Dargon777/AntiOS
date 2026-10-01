@@ -25,7 +25,7 @@ on:
       package_version:
         description: "Store version (Major.Minor.Build.0)"
         required: false
-        default: "2.0.10.0"
+        default: "2.0.11.0"
 
 permissions:
   contents: read
@@ -53,7 +53,7 @@ jobs:
           $identity = "${{ github.event.inputs.identity_name || 'DargonsITP.AntiOS' }}"
           $publisher = "${{ github.event.inputs.publisher || 'CN=D0D34602-FED2-4FE0-B705-18B9041C45F3' }}"
           $publisherDisplay = "${{ github.event.inputs.publisher_display_name || 'Dargon''s ITP' }}"
-          $version = "${{ github.event.inputs.package_version || '2.0.10.0' }}"
+          $version = "${{ github.event.inputs.package_version || '2.0.11.0' }}"
           .\scripts\build-store-msix.ps1 `
             -IdentityName $identity `
             -Publisher $publisher `

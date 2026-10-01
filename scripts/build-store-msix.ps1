@@ -2,7 +2,7 @@ param(
     [string]$IdentityName = "DargonsITP.AntiOS",
     [string]$Publisher = "CN=D0D34602-FED2-4FE0-B705-18B9041C45F3",
     [string]$PublisherDisplayName = "Dargon's ITP",
-    [string]$PackageVersion = "2.0.10.0",
+    [string]$PackageVersion = "2.0.11.0",
     [string]$GuiPath = ".\dist\AntiOS-GUI.exe",
     [string]$OutputPath = ".\store-output\AntiOS.msix"
 )
