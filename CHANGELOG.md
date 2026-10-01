@@ -4,6 +4,33 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a10] - 2026-10-01
+
+### Added
+
+- Dedicated **Settings** page opened from a gear button in the sidebar.
+- `Ctrl+,` shortcut for Settings.
+- Persistent per-user GUI preferences in `antios.toml`.
+- Theme selector with **System / Dark / Light** modes.
+- Windows system-theme detection through `AppsUseLightTheme`.
+- Full light palette alongside the existing dark palette.
+- Language selector moved from the sidebar into Settings.
+- Automatic Windows-locale language option.
+- Configurable Storage Cleanup defaults:
+  - old-file age threshold;
+  - large-file size threshold;
+  - duplicate minimum size;
+  - remember last scanned folder.
+- About section with version, release channel, Microsoft Store ID and project links.
+- Reset-to-defaults for GUI/cleanup preferences without resetting advanced CLI settings.
+
+### Changed
+
+- Language and theme changes apply immediately without re-running the health scan.
+- Storage Cleanup now uses persisted user thresholds instead of fixed GUI defaults.
+- CLI `config show` includes UI and cleanup preferences.
+- Store development package version bumped to `2.0.10.0`.
+
 ## [2.0.0a9] - 2026-10-01
 
 ### Added
@@ -199,6 +226,7 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
+[2.0.0a10]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.10
 [2.0.0a9]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.9
 [2.0.0a8]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.8
 [2.0.0a7]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.7\n[2.0.0a6]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.6
