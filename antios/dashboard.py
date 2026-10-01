@@ -986,7 +986,10 @@ class Dashboard:
 
         tk.Label(
             parent,
-            text=self.t("cleanup.note", days=DEFAULT_OLD_DAYS),
+            text=self.t(
+                "cleanup.note",
+                days=self.config.cleanup.old_days,
+            ),
             bg=THEME["bg"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 9),
@@ -1059,6 +1062,16 @@ class Dashboard:
         self.cleanup_path_label.configure(text=str(self.storage_path))
         self.cleanup_status.configure(text=self.t("cleanup.status.ready"))
 
+        if self.config.cleanup.remember_folder:
+            self.config = replace(
+                self.config,
+                cleanup=replace(
+                    self.config.cleanup,
+                    last_path=str(self.storage_path),
+                ),
+            )
+            self._persist_config()
+
     def _start_cleanup_scan(self) -> None:
         self._storage_cancel = threading.Event()
         self.cleanup_scan_button.configure(
@@ -1094,6 +1107,11 @@ class Dashboard:
             try:
                 result = scan_storage(
                     self.storage_path,
+                    old_days=self.config.cleanup.old_days,
+                    large_bytes=self.config.cleanup.large_mb * 1024 * 1024,
+                    duplicate_min_bytes=(
+                        self.config.cleanup.duplicate_min_mb * 1024 * 1024
+                    ),
                     progress=progress,
                     cancelled=self._storage_cancel.is_set,
                 )
@@ -1902,43 +1920,42 @@ class Dashboard:
 
     def _on_language_selected(self, _event: Any = None) -> None:
         selected = self.language_var.get()
-        code = self.language_display_to_code.get(selected)
-        if not code or code == self.language:
+        setting = self.language_display_to_code.get(selected)
+        if not setting or setting == self.language_setting:
             return
 
-        existing = self.data
-        active_page = self.active_page
-        self._storage_cancel.set()
+        self.language_setting = setting
+        self.language = normalize_language(
+            detect_language() if setting == "auto" else setting
+        )
+        self.tr = Translator(self.language)
+        self.config = replace(
+            self.config,
+            ui=UIConfig(
+                language=self.language_setting,
+                theme=self.theme_mode,
+            ),
+        )
+        self._persist_config()
+        self._rebuild_ui("settings")
 
-        self.language = code
-        self.tr = Translator(code)
+    def _on_theme_selected(self, _event: Any = None) -> None:
+        selected = self.theme_var.get()
+        mode = self.theme_display_to_code.get(selected)
+        if not mode or mode == self.theme_mode:
+            return
 
-        for child in self.root.winfo_children():
-            child.destroy()
-
-        self.pages = {}
-        self.nav_buttons = {}
-        self._check_rows = []
-
-        self._configure_root()
-        self._configure_ttk()
-        self._build_shell()
-        self._build_pages()
-        self.show_page(active_page)
-
-        if existing:
-            localized = {
-                "scan": existing["scan"],
-                "health": existing["health"],
-                "evaluation": evaluate_health(
-                    existing["scan"],
-                    existing["health"],
-                    language=self.language,
-                ),
-            }
-            self._render(localized)
-        else:
-            self.refresh()
+        self.theme_mode = mode
+        self.resolved_theme = _apply_theme_palette(mode)
+        self.config = replace(
+            self.config,
+            ui=UIConfig(
+                language=self.language_setting,
+                theme=self.theme_mode,
+            ),
+        )
+        self._persist_config()
+        self._rebuild_ui("settings")
 
     def show_page(self, name: str) -> None:
         if name not in self.pages:
@@ -1950,6 +1967,7 @@ class Dashboard:
             "startup": (self.t("nav.startup"), self.t("page.startup.subtitle")),
             "system": (self.t("nav.system"), self.t("page.system.subtitle")),
             "cleanup": (self.t("nav.cleanup"), self.t("page.cleanup.subtitle")),
+            "settings": (self.t("nav.settings"), self.t("page.settings.subtitle")),
         }
 
         self.active_page = name
@@ -1964,6 +1982,17 @@ class Dashboard:
             button.configure(
                 bg=THEME["surface_alt"] if selected else THEME["sidebar"],
                 fg=THEME["text"] if selected else THEME["muted"],
+            )
+
+        if hasattr(self, "settings_button"):
+            settings_selected = name == "settings"
+            self.settings_button.configure(
+                bg=THEME["surface_alt"]
+                if settings_selected
+                else THEME["sidebar"],
+                fg=THEME["text"]
+                if settings_selected
+                else THEME["muted"],
             )
 
     def refresh(self) -> None:
