@@ -1579,6 +1579,18 @@ for _language, _overrides in _SETTINGS_TRANSLATIONS.items():
     TRANSLATIONS[_language] = {**TRANSLATIONS[_language], **_overrides}
 
 
+for _language, _message in {
+    "en": "Could not save settings.",
+    "ru": "Не удалось сохранить настройки.",
+    "es": "No se pudo guardar la configuración.",
+    "zh-CN": "无法保存设置。",
+    "fi": "Asetuksia ei voitu tallentaa.",
+    "pl": "Nie udało się zapisać ustawień.",
+    "mn": "Тохиргоог хадгалж чадсангүй."
+}.items():
+    TRANSLATIONS[_language]["settings.status.save_failed"] = _message
+
+
 @dataclass(frozen=True)
 class Translator:
     language: str = "en"
