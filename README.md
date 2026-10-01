@@ -6,7 +6,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 9
+> **Pre-release:** 2.0.0 alpha 10
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -36,7 +36,7 @@ AntiOS checks common things that are scattered across different Windows screens:
 - duplicate files and potential duplicate-space savings;
 - old large files, installers/archives and empty-file cleanup candidates.
 
-Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. Alpha 8 further polishes the dashboard with tighter spacing, quick actions on the Overview page, improved hover/focus states, keyboard shortcuts and visible build/version information.
+Results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. Alpha 10 adds a dedicated Settings hub with persistent language, theme and Storage Cleanup preferences.
 
 AntiOS deliberately avoids a fake all-knowing “PC health score”.
 
@@ -243,7 +243,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a9-py3-none-any.whl
+python -m pip install .\antios-2.0.0a10-py3-none-any.whl
 antios-gui
 ```
 

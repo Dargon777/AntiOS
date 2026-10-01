@@ -197,15 +197,24 @@ def _render_config(config_path: Path, config: object) -> str:
     cfg = config.to_dict()
     general = cfg["general"]
     logging_cfg = cfg["logging"]
+    ui = cfg["ui"]
+    cleanup = cfg["cleanup"]
     return "\n".join([
         "AntiOS configuration",
         "====================",
-        f"Path                 : {config_path}",
-        f"Computer name prefix : {general['computer_name_prefix']}",
-        f"Default backup path  : {general['backup_path']}",
-        f"Color                : {general['color']}",
-        f"Log level            : {logging_cfg['level']}",
-        f"Log file             : {logging_cfg['file'] or '(disabled)'}",
+        f"Path                  : {config_path}",
+        f"Computer name prefix  : {general['computer_name_prefix']}",
+        f"Default backup path   : {general['backup_path']}",
+        f"Terminal color        : {general['color']}",
+        f"Log level             : {logging_cfg['level']}",
+        f"Log file              : {logging_cfg['file'] or '(disabled)'}",
+        f"UI language           : {ui['language']}",
+        f"UI theme              : {ui['theme']}",
+        f"Cleanup old days      : {cleanup['old_days']}",
+        f"Cleanup large MB      : {cleanup['large_mb']}",
+        f"Duplicate minimum MB  : {cleanup['duplicate_min_mb']}",
+        f"Remember cleanup path : {cleanup['remember_folder']}",
+        f"Last cleanup path     : {cleanup['last_path'] or '(none)'}",
     ])
 
 

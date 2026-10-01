@@ -6,11 +6,20 @@ import json
 import os
 import threading
 import webbrowser
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from . import __version__
+from .config import (
+    AppConfig,
+    CleanupConfig,
+    UIConfig,
+    default_config_path,
+    load_config,
+    save_config,
+)
 from .consumer import evaluate_health
 from .core import scan
 from .health import collect_health
@@ -30,7 +39,7 @@ FEATURE_URL = PROJECT_URL + "/issues/new?template=feature_request.yml"
 PRIVACY_URL = PROJECT_URL + "/blob/master/PRIVACY.md"
 SUPPORT_URL = PROJECT_URL + "/blob/master/SUPPORT.md"
 
-THEME = {
+DARK_THEME = {
     "bg": "#090D14",
     "sidebar": "#0E1420",
     "surface": "#111925",
@@ -42,6 +51,7 @@ THEME = {
     "muted_2": "#66758A",
     "accent": "#6EA8FE",
     "accent_hover": "#8AB9FF",
+    "accent_text": "#08111F",
     "ok": "#59D499",
     "ok_bg": "#102A25",
     "review": "#F3C969",
@@ -52,13 +62,69 @@ THEME = {
     "info_bg": "#132239",
 }
 
-STATUS_STYLE = {
-    "ok": ("OK", THEME["ok"], THEME["ok_bg"]),
-    "advisory": ("REVIEW", THEME["review"], THEME["review_bg"]),
-    "warn": ("WARNING", THEME["warn"], THEME["warn_bg"]),
-    "info": ("INFO", THEME["info"], THEME["info_bg"]),
+LIGHT_THEME = {
+    "bg": "#F4F7FB",
+    "sidebar": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surface_alt": "#EEF2F7",
+    "surface_hover": "#E3E9F2",
+    "border": "#D7DEE8",
+    "text": "#172033",
+    "muted": "#5F6F84",
+    "muted_2": "#7A8798",
+    "accent": "#3B82F6",
+    "accent_hover": "#2563EB",
+    "accent_text": "#FFFFFF",
+    "ok": "#15803D",
+    "ok_bg": "#ECFDF3",
+    "review": "#A16207",
+    "review_bg": "#FFF7D6",
+    "warn": "#C2414A",
+    "warn_bg": "#FFF0F1",
+    "info": "#2563EB",
+    "info_bg": "#EEF4FF",
 }
 
+THEME = dict(DARK_THEME)
+STATUS_STYLE: dict[str, tuple[str, str, str]] = {}
+
+
+def _refresh_status_style() -> None:
+    STATUS_STYLE.clear()
+    STATUS_STYLE.update({
+        "ok": ("OK", THEME["ok"], THEME["ok_bg"]),
+        "advisory": ("REVIEW", THEME["review"], THEME["review_bg"]),
+        "warn": ("WARNING", THEME["warn"], THEME["warn_bg"]),
+        "info": ("INFO", THEME["info"], THEME["info_bg"]),
+    })
+
+
+def _system_theme() -> str:
+    if os.name != "nt":
+        return "dark"
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        ) as key:
+            value, _kind = winreg.QueryValueEx(key, "AppsUseLightTheme")
+        return "light" if int(value) else "dark"
+    except Exception:
+        return "dark"
+
+
+def _apply_theme_palette(mode: str) -> str:
+    resolved = _system_theme() if mode == "system" else mode
+    palette = LIGHT_THEME if resolved == "light" else DARK_THEME
+    THEME.clear()
+    THEME.update(palette)
+    _refresh_status_style()
+    return resolved
+
+
+_refresh_status_style()
 
 def _open_url(url: str) -> None:
     webbrowser.open(url, new=2)
@@ -105,14 +171,14 @@ def _open_settings(uri: str) -> None:
     os.startfile(uri)  # type: ignore[attr-defined]
 
 
-def _enable_dark_titlebar(root: Any) -> None:
-    """Ask modern Windows to render a dark native title bar."""
+def _enable_dark_titlebar(root: Any, dark: bool = True) -> None:
+    """Ask modern Windows to render the native title bar to match the app."""
     if os.name != "nt":
         return
     try:
         root.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
-        value = ctypes.c_int(1)
+        value = ctypes.c_int(1 if dark else 0)
         # DWMWA_USE_IMMERSIVE_DARK_MODE is 20 on modern Windows.
         ctypes.windll.dwmapi.DwmSetWindowAttribute(
             hwnd,
@@ -187,6 +253,7 @@ class Dashboard:
         root: Any,
         *,
         language: str | None = None,
+        auto_refresh: bool = True,
     ) -> None:
         import tkinter as tk
         from tkinter import ttk
@@ -194,14 +261,42 @@ class Dashboard:
         self.root = root
         self.tk = tk
         self.ttk = ttk
-        self.language = normalize_language(language or detect_language())
+        self.config_path = default_config_path()
+        try:
+            self.config = load_config(self.config_path)
+        except (OSError, ValueError):
+            self.config = AppConfig()
+
+        self.language_setting = (
+            normalize_language(language)
+            if language
+            else self.config.ui.language
+        )
+        detected_language = detect_language()
+        self.language = normalize_language(
+            detected_language
+            if self.language_setting == "auto"
+            else self.language_setting
+        )
         self.tr = Translator(self.language)
+
+        self.theme_mode = self.config.ui.theme
+        self.resolved_theme = _apply_theme_palette(self.theme_mode)
+
         self.data: dict[str, Any] | None = None
         self.pages: dict[str, Any] = {}
         self.nav_buttons: dict[str, Any] = {}
         self.active_page = "overview"
         self._check_rows: list[Any] = []
-        self.storage_path = default_scan_path()
+
+        configured_path = Path(self.config.cleanup.last_path).expanduser()
+        self.storage_path = (
+            configured_path
+            if self.config.cleanup.remember_folder
+            and self.config.cleanup.last_path
+            and configured_path.is_dir()
+            else default_scan_path()
+        )
         self.storage_result: dict[str, Any] | None = None
         self._storage_cancel = threading.Event()
 
@@ -210,7 +305,8 @@ class Dashboard:
         self._build_shell()
         self._build_pages()
         self.show_page("overview")
-        self.refresh()
+        if auto_refresh:
+            self.refresh()
 
     def t(self, key: str, **values: Any) -> str:
         return self.tr.t(key, **values)
@@ -230,7 +326,8 @@ class Dashboard:
         root.bind("<Control-3>", lambda _event: self.show_page("startup"))
         root.bind("<Control-4>", lambda _event: self.show_page("system"))
         root.bind("<Control-5>", lambda _event: self.show_page("cleanup"))
-        _enable_dark_titlebar(root)
+        root.bind("<Control-comma>", lambda _event: self.show_page("settings"))
+        _enable_dark_titlebar(root, self.resolved_theme == "dark")
 
     def _configure_ttk(self) -> None:
         style = self.ttk.Style(self.root)
@@ -268,6 +365,25 @@ class Dashboard:
             background=[("active", THEME["surface_hover"])],
         )
 
+        style.configure(
+            "AntiOS.TCombobox",
+            fieldbackground=THEME["surface_alt"],
+            background=THEME["surface_alt"],
+            foreground=THEME["text"],
+            arrowcolor=THEME["muted"],
+            bordercolor=THEME["border"],
+            lightcolor=THEME["border"],
+            darkcolor=THEME["border"],
+            padding=(8, 6),
+        )
+        style.map(
+            "AntiOS.TCombobox",
+            fieldbackground=[("readonly", THEME["surface_alt"])],
+            foreground=[("readonly", THEME["text"])],
+            selectbackground=[("readonly", THEME["surface_alt"])],
+            selectforeground=[("readonly", THEME["text"])],
+        )
+
     def _build_shell(self) -> None:
         tk = self.tk
 
@@ -290,7 +406,7 @@ class Dashboard:
             width=3,
             height=1,
             bg=THEME["accent"],
-            fg="#08111F",
+            fg=THEME["accent_text"],
             font=("Segoe UI", 14, "bold"),
             bd=0,
         )
@@ -338,38 +454,43 @@ class Dashboard:
         ]:
             self._create_nav_button(key, label)
 
-        language_box = tk.Frame(self.sidebar, bg=THEME["sidebar"])
-        language_box.pack(fill="x", padx=14, pady=(18, 8))
-
-        tk.Label(
-            language_box,
-            text=self.t("language.label"),
-            bg=THEME["sidebar"],
-            fg=THEME["muted_2"],
-            font=("Segoe UI Semibold", 8),
-        ).pack(anchor="w", padx=8, pady=(0, 6))
-
-        self.language_display_to_code = {
-            label: code for code, label in LANGUAGE_NAMES.items()
-        }
-        self.language_var = tk.StringVar(
-            value=LANGUAGE_NAMES[self.language]
-        )
-        self.language_combo = self.ttk.Combobox(
-            language_box,
-            textvariable=self.language_var,
-            values=list(self.language_display_to_code),
-            state="readonly",
-            width=18,
-        )
-        self.language_combo.pack(fill="x", padx=8)
-        self.language_combo.bind(
-            "<<ComboboxSelected>>",
-            self._on_language_selected,
-        )
-
         spacer = tk.Frame(self.sidebar, bg=THEME["sidebar"])
         spacer.pack(fill="both", expand=True)
+
+        self.settings_button = self.tk.Button(
+            self.sidebar,
+            text=f"⚙  {self.t('nav.settings')}",
+            command=lambda: self.show_page("settings"),
+            anchor="w",
+            padx=22,
+            pady=11,
+            bg=THEME["sidebar"],
+            fg=THEME["muted"],
+            activebackground=THEME["surface_hover"],
+            activeforeground=THEME["text"],
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            takefocus=True,
+            font=("Segoe UI Semibold", 10),
+        )
+        self.settings_button.bind(
+            "<Enter>",
+            lambda _event: (
+                self.settings_button.configure(bg=THEME["surface_hover"])
+                if self.active_page != "settings"
+                else None
+            ),
+        )
+        self.settings_button.bind(
+            "<Leave>",
+            lambda _event: self.settings_button.configure(
+                bg=THEME["surface_alt"]
+                if self.active_page == "settings"
+                else THEME["sidebar"]
+            ),
+        )
+        self.settings_button.pack(fill="x", padx=8, pady=(0, 10))
 
         trust = tk.Frame(
             self.sidebar,
@@ -396,7 +517,7 @@ class Dashboard:
         ).pack(anchor="w", padx=12, pady=(0, 7))
         tk.Label(
             trust,
-            text="F5  •  Ctrl+E  •  Ctrl+1…5",
+            text="F5  •  Ctrl+E  •  Ctrl+1…5  •  Ctrl+,",
             bg=THEME["surface"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 8),
@@ -471,7 +592,7 @@ class Dashboard:
         )
 
     def _build_pages(self) -> None:
-        for name in ("overview", "security", "startup", "system", "cleanup"):
+        for name in ("overview", "security", "startup", "system", "cleanup", "settings"):
             frame = self.tk.Frame(self.page_host, bg=THEME["bg"])
             frame.place(relx=0, rely=0, relwidth=1, relheight=1)
             self.pages[name] = frame
@@ -481,6 +602,7 @@ class Dashboard:
         self._build_startup(self.pages["startup"])
         self._build_system(self.pages["system"])
         self._build_cleanup(self.pages["cleanup"])
+        self._build_settings(self.pages["settings"])
 
     def _build_overview(self, parent: Any) -> None:
         tk = self.tk
@@ -866,7 +988,10 @@ class Dashboard:
 
         tk.Label(
             parent,
-            text=self.t("cleanup.note", days=DEFAULT_OLD_DAYS),
+            text=self.t(
+                "cleanup.note",
+                days=self.config.cleanup.old_days,
+            ),
             bg=THEME["bg"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 9),
@@ -939,6 +1064,16 @@ class Dashboard:
         self.cleanup_path_label.configure(text=str(self.storage_path))
         self.cleanup_status.configure(text=self.t("cleanup.status.ready"))
 
+        if self.config.cleanup.remember_folder:
+            self.config = replace(
+                self.config,
+                cleanup=replace(
+                    self.config.cleanup,
+                    last_path=str(self.storage_path),
+                ),
+            )
+            self._persist_config()
+
     def _start_cleanup_scan(self) -> None:
         self._storage_cancel = threading.Event()
         self.cleanup_scan_button.configure(
@@ -974,6 +1109,11 @@ class Dashboard:
             try:
                 result = scan_storage(
                     self.storage_path,
+                    old_days=self.config.cleanup.old_days,
+                    large_bytes=self.config.cleanup.large_mb * 1024 * 1024,
+                    duplicate_min_bytes=(
+                        self.config.cleanup.duplicate_min_mb * 1024 * 1024
+                    ),
                     progress=progress,
                     cancelled=self._storage_cancel.is_set,
                 )
@@ -1123,6 +1263,408 @@ class Dashboard:
         if os.name == "nt":
             os.startfile(str(target))  # type: ignore[attr-defined]
 
+    def _build_settings(self, parent: Any) -> None:
+        tk = self.tk
+
+        scroll = ScrollFrame(parent, tk)
+        scroll.frame.pack(fill="both", expand=True)
+        body = scroll.inner
+
+        appearance = tk.Frame(
+            body,
+            bg=THEME["surface"],
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
+        appearance.pack(fill="x", pady=(0, 14))
+
+        tk.Label(
+            appearance,
+            text=self.t("settings.appearance.title"),
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", padx=20, pady=(18, 2))
+        tk.Label(
+            appearance,
+            text=self.t("settings.appearance.subtitle"),
+            bg=THEME["surface"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=20, pady=(0, 16))
+
+        appearance_grid = tk.Frame(appearance, bg=THEME["surface"])
+        appearance_grid.pack(fill="x", padx=20, pady=(0, 20))
+        appearance_grid.grid_columnconfigure(0, weight=1)
+        appearance_grid.grid_columnconfigure(1, weight=1)
+
+        language_group = tk.Frame(appearance_grid, bg=THEME["surface"])
+        language_group.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        tk.Label(
+            language_group,
+            text=self.t("settings.language"),
+            bg=THEME["surface"],
+            fg=THEME["muted_2"],
+            font=("Segoe UI Semibold", 8),
+        ).pack(anchor="w", pady=(0, 6))
+
+        auto_language = self.t("settings.language.auto")
+        self.language_display_to_code = {auto_language: "auto"}
+        self.language_display_to_code.update(
+            {label: code for code, label in LANGUAGE_NAMES.items()}
+        )
+        language_value = (
+            auto_language
+            if self.language_setting == "auto"
+            else LANGUAGE_NAMES.get(self.language_setting, auto_language)
+        )
+        self.language_var = tk.StringVar(value=language_value)
+        self.language_combo = self.ttk.Combobox(
+            language_group,
+            textvariable=self.language_var,
+            values=list(self.language_display_to_code),
+            state="readonly",
+            style="AntiOS.TCombobox",
+        )
+        self.language_combo.pack(fill="x")
+        self.language_combo.bind(
+            "<<ComboboxSelected>>",
+            self._on_language_selected,
+        )
+
+        theme_group = tk.Frame(appearance_grid, bg=THEME["surface"])
+        theme_group.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+        tk.Label(
+            theme_group,
+            text=self.t("settings.theme"),
+            bg=THEME["surface"],
+            fg=THEME["muted_2"],
+            font=("Segoe UI Semibold", 8),
+        ).pack(anchor="w", pady=(0, 6))
+
+        self.theme_display_to_code = {
+            self.t("settings.theme.system"): "system",
+            self.t("settings.theme.dark"): "dark",
+            self.t("settings.theme.light"): "light",
+        }
+        theme_code_to_display = {
+            code: label for label, code in self.theme_display_to_code.items()
+        }
+        self.theme_var = tk.StringVar(
+            value=theme_code_to_display.get(
+                self.theme_mode,
+                self.t("settings.theme.system"),
+            )
+        )
+        self.theme_combo = self.ttk.Combobox(
+            theme_group,
+            textvariable=self.theme_var,
+            values=list(self.theme_display_to_code),
+            state="readonly",
+            style="AntiOS.TCombobox",
+        )
+        self.theme_combo.pack(fill="x")
+        self.theme_combo.bind(
+            "<<ComboboxSelected>>",
+            self._on_theme_selected,
+        )
+
+        cleanup = tk.Frame(
+            body,
+            bg=THEME["surface"],
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
+        cleanup.pack(fill="x", pady=(0, 14))
+
+        tk.Label(
+            cleanup,
+            text=self.t("settings.cleanup.title"),
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", padx=20, pady=(18, 2))
+        tk.Label(
+            cleanup,
+            text=self.t("settings.cleanup.subtitle"),
+            bg=THEME["surface"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=20, pady=(0, 16))
+
+        cleanup_grid = tk.Frame(cleanup, bg=THEME["surface"])
+        cleanup_grid.pack(fill="x", padx=20)
+        for column in range(3):
+            cleanup_grid.grid_columnconfigure(column, weight=1, uniform="settings_cleanup")
+
+        self.cleanup_old_days_var = tk.StringVar(
+            value=str(self.config.cleanup.old_days)
+        )
+        self.cleanup_large_mb_var = tk.StringVar(
+            value=str(self.config.cleanup.large_mb)
+        )
+        self.cleanup_duplicate_min_var = tk.StringVar(
+            value=str(self.config.cleanup.duplicate_min_mb)
+        )
+
+        fields = [
+            (
+                self.t("settings.cleanup.old_days"),
+                self.cleanup_old_days_var,
+                0,
+            ),
+            (
+                self.t("settings.cleanup.large_mb"),
+                self.cleanup_large_mb_var,
+                1,
+            ),
+            (
+                self.t("settings.cleanup.duplicate_min_mb"),
+                self.cleanup_duplicate_min_var,
+                2,
+            ),
+        ]
+        for label, variable, column in fields:
+            group = tk.Frame(cleanup_grid, bg=THEME["surface"])
+            group.grid(
+                row=0,
+                column=column,
+                sticky="ew",
+                padx=(0 if column == 0 else 8, 0 if column == 2 else 8),
+            )
+            tk.Label(
+                group,
+                text=label,
+                bg=THEME["surface"],
+                fg=THEME["muted_2"],
+                font=("Segoe UI Semibold", 8),
+            ).pack(anchor="w", pady=(0, 6))
+            spin = tk.Spinbox(
+                group,
+                from_=1,
+                to=1000000,
+                textvariable=variable,
+                bg=THEME["surface_alt"],
+                fg=THEME["text"],
+                buttonbackground=THEME["surface_alt"],
+                insertbackground=THEME["text"],
+                relief="flat",
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=THEME["border"],
+                highlightcolor=THEME["accent"],
+                font=("Segoe UI", 10),
+            )
+            spin.pack(fill="x", ipady=6)
+
+        self.cleanup_remember_var = tk.BooleanVar(
+            value=self.config.cleanup.remember_folder
+        )
+        remember = tk.Checkbutton(
+            cleanup,
+            text=self.t("settings.cleanup.remember_folder"),
+            variable=self.cleanup_remember_var,
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            activebackground=THEME["surface"],
+            activeforeground=THEME["text"],
+            selectcolor=THEME["surface_alt"],
+            highlightthickness=0,
+            bd=0,
+            font=("Segoe UI", 9),
+        )
+        remember.pack(anchor="w", padx=20, pady=(16, 12))
+
+        cleanup_actions = tk.Frame(cleanup, bg=THEME["surface"])
+        cleanup_actions.pack(fill="x", padx=20, pady=(0, 20))
+        self._button(
+            cleanup_actions,
+            self.t("settings.save"),
+            self._save_cleanup_settings,
+            kind="primary",
+        ).pack(side="left")
+        self._button(
+            cleanup_actions,
+            self.t("settings.reset"),
+            self._reset_settings,
+            kind="secondary",
+        ).pack(side="left", padx=(8, 0))
+
+        self.settings_status = tk.Label(
+            cleanup_actions,
+            text="",
+            bg=THEME["surface"],
+            fg=THEME["ok"],
+            font=("Segoe UI", 9),
+        )
+        self.settings_status.pack(side="left", padx=(12, 0))
+
+        about = tk.Frame(
+            body,
+            bg=THEME["surface"],
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
+        about.pack(fill="x", pady=(0, 14))
+
+        tk.Label(
+            about,
+            text=self.t("settings.about.title"),
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", padx=20, pady=(18, 2))
+        tk.Label(
+            about,
+            text=self.t("settings.about.subtitle"),
+            bg=THEME["surface"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=20, pady=(0, 12))
+
+        info = tk.Frame(about, bg=THEME["surface"])
+        info.pack(fill="x", padx=20, pady=(0, 14))
+        info_text = (
+            f"{self.t('settings.about.version')}: {__version__}    •    "
+            f"{self.t('settings.about.channel')}: "
+            f"{self.t('settings.about.channel.alpha')}    •    "
+            f"{self.t('settings.about.store')}: 9P7V8BKW2KG9"
+        )
+        tk.Label(
+            info,
+            text=info_text,
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            font=("Segoe UI", 10),
+        ).pack(anchor="w")
+        tk.Label(
+            info,
+            text=self.t(
+                "settings.config_location",
+                path=str(self.config_path),
+            ),
+            bg=THEME["surface"],
+            fg=THEME["muted_2"],
+            font=("Segoe UI", 8),
+            wraplength=780,
+            justify="left",
+        ).pack(anchor="w", pady=(5, 0))
+
+        links = tk.Frame(about, bg=THEME["surface"])
+        links.pack(fill="x", padx=20, pady=(0, 20))
+        for index, (label, url) in enumerate([
+            (self.t("settings.github"), PROJECT_URL),
+            (self.t("settings.releases"), RELEASES_URL),
+            (self.t("settings.privacy"), PRIVACY_URL),
+            (self.t("settings.support"), SUPPORT_URL),
+        ]):
+            self._button(
+                links,
+                label,
+                lambda target=url: _open_url(target),
+                kind="secondary",
+            ).pack(side="left", padx=(0 if index == 0 else 8, 0))
+
+    def _persist_config(self) -> bool:
+        try:
+            save_config(self.config, self.config_path)
+            return True
+        except OSError:
+            return False
+
+    def _rebuild_ui(self, active_page: str | None = None) -> None:
+        existing = self.data
+        target_page = active_page or self.active_page
+        self._storage_cancel.set()
+
+        for child in self.root.winfo_children():
+            child.destroy()
+
+        self.pages = {}
+        self.nav_buttons = {}
+        self._check_rows = []
+
+        self._configure_root()
+        self._configure_ttk()
+        self._build_shell()
+        self._build_pages()
+        self.show_page(target_page)
+
+        if existing:
+            localized = {
+                "scan": existing["scan"],
+                "health": existing["health"],
+                "evaluation": evaluate_health(
+                    existing["scan"],
+                    existing["health"],
+                    language=self.language,
+                ),
+            }
+            self._render(localized)
+
+    def _save_cleanup_settings(self) -> None:
+        try:
+            old_days = int(self.cleanup_old_days_var.get())
+            large_mb = int(self.cleanup_large_mb_var.get())
+            duplicate_min_mb = int(self.cleanup_duplicate_min_var.get())
+            if min(old_days, large_mb, duplicate_min_mb) < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            self.settings_status.configure(
+                text=self.t("settings.invalid_number"),
+                fg=THEME["warn"],
+            )
+            return
+
+        remember = bool(self.cleanup_remember_var.get())
+        last_path = str(self.storage_path) if remember else ""
+        cleanup = CleanupConfig(
+            old_days=old_days,
+            large_mb=large_mb,
+            duplicate_min_mb=duplicate_min_mb,
+            remember_folder=remember,
+            last_path=last_path,
+        )
+        self.config = replace(self.config, cleanup=cleanup)
+        if self._persist_config():
+            self.settings_status.configure(
+                text=self.t("settings.saved"),
+                fg=THEME["ok"],
+            )
+        else:
+            self.settings_status.configure(
+                text=self.t("settings.status.save_failed"),
+                fg=THEME["warn"],
+            )
+
+    def _reset_settings(self) -> None:
+        from tkinter import messagebox
+
+        if not messagebox.askyesno(
+            "AntiOS",
+            self.t("settings.reset.confirm"),
+        ):
+            return
+
+        self.config = replace(
+            self.config,
+            ui=UIConfig(),
+            cleanup=CleanupConfig(),
+        )
+        self.language_setting = self.config.ui.language
+        self.language = normalize_language(detect_language())
+        self.tr = Translator(self.language)
+        self.theme_mode = self.config.ui.theme
+        self.resolved_theme = _apply_theme_palette(self.theme_mode)
+        self.storage_path = default_scan_path()
+        self._persist_config()
+        self._rebuild_ui("settings")
+        if hasattr(self, "settings_status"):
+            self.settings_status.configure(
+                text=self.t("settings.reset.done"),
+                fg=THEME["ok"],
+            )
+
     def _create_nav_button(self, key: str, text: str) -> None:
         button = self.tk.Button(
             self.sidebar,
@@ -1169,7 +1711,7 @@ class Dashboard:
     ) -> Any:
         if kind == "primary":
             bg = THEME["accent"]
-            fg = "#08111F"
+            fg = THEME["accent_text"]
             active_bg = THEME["accent_hover"]
         else:
             bg = THEME["surface_alt"]
@@ -1384,43 +1926,42 @@ class Dashboard:
 
     def _on_language_selected(self, _event: Any = None) -> None:
         selected = self.language_var.get()
-        code = self.language_display_to_code.get(selected)
-        if not code or code == self.language:
+        setting = self.language_display_to_code.get(selected)
+        if not setting or setting == self.language_setting:
             return
 
-        existing = self.data
-        active_page = self.active_page
-        self._storage_cancel.set()
+        self.language_setting = setting
+        self.language = normalize_language(
+            detect_language() if setting == "auto" else setting
+        )
+        self.tr = Translator(self.language)
+        self.config = replace(
+            self.config,
+            ui=UIConfig(
+                language=self.language_setting,
+                theme=self.theme_mode,
+            ),
+        )
+        self._persist_config()
+        self._rebuild_ui("settings")
 
-        self.language = code
-        self.tr = Translator(code)
+    def _on_theme_selected(self, _event: Any = None) -> None:
+        selected = self.theme_var.get()
+        mode = self.theme_display_to_code.get(selected)
+        if not mode or mode == self.theme_mode:
+            return
 
-        for child in self.root.winfo_children():
-            child.destroy()
-
-        self.pages = {}
-        self.nav_buttons = {}
-        self._check_rows = []
-
-        self._configure_root()
-        self._configure_ttk()
-        self._build_shell()
-        self._build_pages()
-        self.show_page(active_page)
-
-        if existing:
-            localized = {
-                "scan": existing["scan"],
-                "health": existing["health"],
-                "evaluation": evaluate_health(
-                    existing["scan"],
-                    existing["health"],
-                    language=self.language,
-                ),
-            }
-            self._render(localized)
-        else:
-            self.refresh()
+        self.theme_mode = mode
+        self.resolved_theme = _apply_theme_palette(mode)
+        self.config = replace(
+            self.config,
+            ui=UIConfig(
+                language=self.language_setting,
+                theme=self.theme_mode,
+            ),
+        )
+        self._persist_config()
+        self._rebuild_ui("settings")
 
     def show_page(self, name: str) -> None:
         if name not in self.pages:
@@ -1432,6 +1973,7 @@ class Dashboard:
             "startup": (self.t("nav.startup"), self.t("page.startup.subtitle")),
             "system": (self.t("nav.system"), self.t("page.system.subtitle")),
             "cleanup": (self.t("nav.cleanup"), self.t("page.cleanup.subtitle")),
+            "settings": (self.t("nav.settings"), self.t("page.settings.subtitle")),
         }
 
         self.active_page = name
@@ -1446,6 +1988,17 @@ class Dashboard:
             button.configure(
                 bg=THEME["surface_alt"] if selected else THEME["sidebar"],
                 fg=THEME["text"] if selected else THEME["muted"],
+            )
+
+        if hasattr(self, "settings_button"):
+            settings_selected = name == "settings"
+            self.settings_button.configure(
+                bg=THEME["surface_alt"]
+                if settings_selected
+                else THEME["sidebar"],
+                fg=THEME["text"]
+                if settings_selected
+                else THEME["muted"],
             )
 
     def refresh(self) -> None:
@@ -1763,6 +2316,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Validate dashboard imports without opening a window.",
     )
     parser.add_argument(
+        "--ui-self-test",
+        action="store_true",
+        help="Build the hidden Windows GUI and Settings page, then exit.",
+    )
+    parser.add_argument(
         "--lang",
         choices=list(LANGUAGE_NAMES),
         help="UI language: en, ru, es, zh-CN, fi, pl, mn. Defaults to Windows locale.",
@@ -1770,5 +2328,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.self_test:
         assert "bg" in THEME and "ok" in STATUS_STYLE
+        return 0
+    if args.ui_self_test:
+        if not is_windows():
+            return 0
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        dashboard = Dashboard(
+            root,
+            language=args.lang,
+            auto_refresh=False,
+        )
+        dashboard.show_page("settings")
+        root.update_idletasks()
+        root.destroy()
         return 0
     return launch(args.lang)

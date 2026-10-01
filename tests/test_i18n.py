@@ -73,3 +73,15 @@ def test_new_locales_translate_core_ui_strings():
 
 def test_unknown_key_falls_back_to_key_name():
     assert Translator("ru").t("missing.key") == "missing.key"
+
+
+
+def test_settings_catalog_is_complete_in_every_language():
+    keys = {
+        key
+        for key in TRANSLATIONS["en"]
+        if key.startswith("settings.") or key == "nav.settings"
+    }
+    assert keys
+    for language in SUPPORTED_LANGUAGES:
+        assert keys <= set(TRANSLATIONS[language])
