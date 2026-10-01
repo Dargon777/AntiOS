@@ -1,38 +1,48 @@
-# AntiOS v2.0.0 alpha 9
+# AntiOS v2.0.0 alpha 10
 
-Alpha 9 adds a read-only **Storage Cleanup** workflow.
+Alpha 10 adds a dedicated persistent **Settings** experience.
 
-## Storage Cleanup
+## Settings hub
 
-The new dashboard page can scan a user-selected folder for:
+Open Settings from the gear button at the bottom of the sidebar or with `Ctrl+,`.
 
-- exact duplicate files;
-- old large files;
-- installer/archive candidates;
-- empty files.
+### Appearance
 
-Duplicate detection is content-based:
+- Language:
+  - Automatic (Windows)
+  - English
+  - Русский
+  - Español
+  - 简体中文
+  - Suomi
+  - Polski
+  - Монгол
+- Theme:
+  - System
+  - Dark
+  - Light
 
-1. files are grouped by size;
-2. likely matches receive a quick first/last-block fingerprint;
-3. only remaining candidates are confirmed with a full SHA-256 hash.
+System theme reads the current Windows app-theme preference. Language and theme changes rebuild the GUI immediately without repeating the health scan.
 
-The dashboard shows potential reclaimable duplicate space, supports background progress and cancellation, and can open the containing folder for any result.
+### Storage Cleanup defaults
 
-No file is deleted automatically.
+Settings can change:
 
-## Honest “unused” handling
+- old-file age in days;
+- large-file threshold in MB;
+- minimum duplicate-file size in MB;
+- whether AntiOS remembers the last scanned folder.
 
-AntiOS does not claim that a file is unused based on Windows last-access timestamps. Those timestamps can be disabled, delayed or unreliable.
+Storage Cleanup uses these values on subsequent scans.
 
-“Old” candidates therefore mean **last modified at least 180 days ago and at least 500 MB by default**.
+### Persistence
 
-## CLI
+GUI preferences are stored locally in the normal per-user `antios.toml` file.
 
-`storage-scan` / `cleanup-scan` supports custom old-file, large-file and duplicate-size thresholds plus JSON output.
+Resetting Settings restores only UI and cleanup preferences. It does not overwrite advanced CLI backup/logging/metadata configuration.
 
-## Localization
+### About
 
-The Storage Cleanup UI is translated across all seven supported languages.
+The page shows the AntiOS version, alpha channel, Microsoft Store ID and links to GitHub, releases, privacy and support.
 
-The existing Windows Health & Privacy dashboard, Store packaging and advanced CLI safety model are unchanged.
+All Settings UI is localized across the seven supported languages.
