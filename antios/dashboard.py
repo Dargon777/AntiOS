@@ -6,11 +6,20 @@ import json
 import os
 import threading
 import webbrowser
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from . import __version__
+from .config import (
+    AppConfig,
+    CleanupConfig,
+    UIConfig,
+    default_config_path,
+    load_config,
+    save_config,
+)
 from .consumer import evaluate_health
 from .core import scan
 from .health import collect_health
@@ -30,7 +39,7 @@ FEATURE_URL = PROJECT_URL + "/issues/new?template=feature_request.yml"
 PRIVACY_URL = PROJECT_URL + "/blob/master/PRIVACY.md"
 SUPPORT_URL = PROJECT_URL + "/blob/master/SUPPORT.md"
 
-THEME = {
+DARK_THEME = {
     "bg": "#090D14",
     "sidebar": "#0E1420",
     "surface": "#111925",
@@ -42,6 +51,7 @@ THEME = {
     "muted_2": "#66758A",
     "accent": "#6EA8FE",
     "accent_hover": "#8AB9FF",
+    "accent_text": "#08111F",
     "ok": "#59D499",
     "ok_bg": "#102A25",
     "review": "#F3C969",
@@ -52,13 +62,69 @@ THEME = {
     "info_bg": "#132239",
 }
 
-STATUS_STYLE = {
-    "ok": ("OK", THEME["ok"], THEME["ok_bg"]),
-    "advisory": ("REVIEW", THEME["review"], THEME["review_bg"]),
-    "warn": ("WARNING", THEME["warn"], THEME["warn_bg"]),
-    "info": ("INFO", THEME["info"], THEME["info_bg"]),
+LIGHT_THEME = {
+    "bg": "#F4F7FB",
+    "sidebar": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surface_alt": "#EEF2F7",
+    "surface_hover": "#E3E9F2",
+    "border": "#D7DEE8",
+    "text": "#172033",
+    "muted": "#5F6F84",
+    "muted_2": "#7A8798",
+    "accent": "#3B82F6",
+    "accent_hover": "#2563EB",
+    "accent_text": "#FFFFFF",
+    "ok": "#15803D",
+    "ok_bg": "#ECFDF3",
+    "review": "#A16207",
+    "review_bg": "#FFF7D6",
+    "warn": "#C2414A",
+    "warn_bg": "#FFF0F1",
+    "info": "#2563EB",
+    "info_bg": "#EEF4FF",
 }
 
+THEME = dict(DARK_THEME)
+STATUS_STYLE: dict[str, tuple[str, str, str]] = {}
+
+
+def _refresh_status_style() -> None:
+    STATUS_STYLE.clear()
+    STATUS_STYLE.update({
+        "ok": ("OK", THEME["ok"], THEME["ok_bg"]),
+        "advisory": ("REVIEW", THEME["review"], THEME["review_bg"]),
+        "warn": ("WARNING", THEME["warn"], THEME["warn_bg"]),
+        "info": ("INFO", THEME["info"], THEME["info_bg"]),
+    })
+
+
+def _system_theme() -> str:
+    if os.name != "nt":
+        return "dark"
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        ) as key:
+            value, _kind = winreg.QueryValueEx(key, "AppsUseLightTheme")
+        return "light" if int(value) else "dark"
+    except Exception:
+        return "dark"
+
+
+def _apply_theme_palette(mode: str) -> str:
+    resolved = _system_theme() if mode == "system" else mode
+    palette = LIGHT_THEME if resolved == "light" else DARK_THEME
+    THEME.clear()
+    THEME.update(palette)
+    _refresh_status_style()
+    return resolved
+
+
+_refresh_status_style()
 
 def _open_url(url: str) -> None:
     webbrowser.open(url, new=2)
@@ -105,14 +171,14 @@ def _open_settings(uri: str) -> None:
     os.startfile(uri)  # type: ignore[attr-defined]
 
 
-def _enable_dark_titlebar(root: Any) -> None:
-    """Ask modern Windows to render a dark native title bar."""
+def _enable_dark_titlebar(root: Any, dark: bool = True) -> None:
+    """Ask modern Windows to render the native title bar to match the app."""
     if os.name != "nt":
         return
     try:
         root.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
-        value = ctypes.c_int(1)
+        value = ctypes.c_int(1 if dark else 0)
         # DWMWA_USE_IMMERSIVE_DARK_MODE is 20 on modern Windows.
         ctypes.windll.dwmapi.DwmSetWindowAttribute(
             hwnd,
@@ -290,7 +356,7 @@ class Dashboard:
             width=3,
             height=1,
             bg=THEME["accent"],
-            fg="#08111F",
+            fg=THEME["accent_text"],
             font=("Segoe UI", 14, "bold"),
             bd=0,
         )
@@ -1169,7 +1235,7 @@ class Dashboard:
     ) -> Any:
         if kind == "primary":
             bg = THEME["accent"]
-            fg = "#08111F"
+            fg = THEME["accent_text"]
             active_bg = THEME["accent_hover"]
         else:
             bg = THEME["surface_alt"]
