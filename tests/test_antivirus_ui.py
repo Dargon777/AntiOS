@@ -1,3 +1,5 @@
+import hashlib
+import json
 import importlib.util
 import os
 import time
@@ -23,9 +25,7 @@ def test_antivirus_catalog_is_complete_and_formats_in_every_locale():
                    reason="Native Tk display unavailable")
 def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeypatch):
     import tkinter as tk
-    from antios import antivirus, antivirus_ui
     from antios.dashboard import Dashboard
-    from test_antivirus import Provider
 
     root = tk.Tk()
     root.withdraw()
@@ -34,10 +34,12 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
     try:
         target = tmp_path / "benign.txt"
         target.write_bytes(b"benign UI fixture")
-        monkeypatch.setattr(antivirus_ui, "scan_files", lambda path, **options:
-            antivirus.scan_files(path, **options, provider_factory=lambda: Provider(32768)))
+        signatures = tmp_path / "signatures.json"
+        signatures.write_text(json.dumps({"schema": 1, "sha256": {
+            hashlib.sha256(target.read_bytes()).hexdigest(): "Benign UI test fixture"}}))
         app = Dashboard(root, language="ru", auto_refresh=False)
         app.antivirus_path = target
+        app.antivirus_signatures = signatures
         app.show_page("antivirus")
         app.antivirus_panel._scan()
         # Rebuild while a job is running: no destroyed-widget callback may fire.

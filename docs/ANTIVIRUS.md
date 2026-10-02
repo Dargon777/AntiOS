@@ -71,3 +71,11 @@ Replace the illustrative key with an actual 64-character SHA-256 digest. The loa
 - A failed restore keeps its encrypted backup. It can leave a partially written destination; review or choose another destination before retrying. AntiOS never overwrites that destination.
 
 Native API references: [AMSI scan buffer](https://learn.microsoft.com/en-us/windows/win32/api/amsi/nf-amsi-amsiscanbuffer), [AMSI results](https://learn.microsoft.com/en-us/windows/win32/api/amsi/ne-amsi-amsi_result), [DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata), [Start-MpScan](https://learn.microsoft.com/en-us/powershell/module/defender/start-mpscan), [Update-MpSignature](https://learn.microsoft.com/en-us/powershell/module/defender/update-mpsignature).
+
+## Stopping scans and startup permissions
+
+Windows EXEs request UAC Administrator consent before startup. The Python dashboard also requests elevation; cancelling consent cancels launch. Supplying a different administrator account uses that account's settings and DPAPI quarantine, not the original user's vault.
+
+The GUI file scanner runs in a separate read-only process. **Stop** terminates that process, even during a blocked file read or AMSI call. Completed checkpoints are retained; the interrupted file and work since the last checkpoint are not counted as checked. Cancelled reports always have limited coverage. The app waits for the worker to exit before enabling another operation. Closing the window also cancels the file scan. This does not stop independent Microsoft Defender scans, quarantine or restoration.
+
+Executables use directory bundles so elevated launches do not extract executable dependencies into a temporary directory. Keep `_gui` and `_cli` with their EXEs.

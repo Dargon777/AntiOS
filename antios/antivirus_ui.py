@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
-from .antivirus import scan_files
+from .scan_process import run_scan_process
 from .quarantine import Quarantine, default_quarantine_path
 from .windows_antivirus import defender_action
 
@@ -157,18 +157,21 @@ class AntivirusPanel:
             finally:
                 self.app.antivirus_queue.put(("idle", None))
 
-        threading.Thread(target=worker, daemon=kind not in {"quarantined", "restored"}).start()
+        threading.Thread(target=worker, daemon=kind not in {"scan", "quarantined", "restored"}).start()
 
     def _scan(self) -> None:
         path, signatures = self.app.antivirus_path, self.app.antivirus_signatures
-        self._run("scan", lambda: scan_files(
-            path, signature_path=signatures, excluded_paths=(default_quarantine_path(),),
+        self._run("scan", lambda: run_scan_process(
+            path, signature_path=signatures,
             cancelled=self.app.antivirus_cancel.is_set,
             progress=lambda data: self.app.antivirus_queue.put(("progress", data)),
         ), cancelable=True)
 
     def _cancel(self) -> None:
-        self.app.antivirus_cancel.set()
+        if self.app.antivirus_busy and self.app.antivirus_cancelable:
+            self.app.antivirus_cancel.set()
+            self.status.configure(text=self.t("stopping"))
+            self.cancel_button.configure(state="disabled")
 
     def _defender(self, action: str) -> None:
         from tkinter import messagebox
@@ -224,7 +227,7 @@ class AntivirusPanel:
     def _render_result(self) -> None:
         result = self.app.antivirus_result
         if result:
-            self.status.configure(text=self.t("result", verdict=self.t(result["verdict"]),
+            self.status.configure(text=self.t("result", verdict=self.t("stopped") if result["summary"].get("cancelled") else self.t(result["verdict"]),
                 scanned=result["summary"]["files_scanned"], threats=result["summary"]["threats"],
                 skipped=result["summary"]["skipped"], errors=result["summary"]["errors"]) +
                 ("\n" + self.t("limited") if result["coverage"] == "limited" else ""))
@@ -273,7 +276,7 @@ class AntivirusPanel:
         busy = self.app.antivirus_busy
         for button in self.buttons:
             button.configure(state="disabled" if busy else "normal")
-        self.cancel_button.configure(state="normal" if busy and self.app.antivirus_cancelable else "disabled")
+        self.cancel_button.configure(state="normal" if busy and self.app.antivirus_cancelable and not self.app.antivirus_cancel.is_set() else "disabled")
         self._selection_changed()
 
     def _poll(self) -> None:
@@ -287,7 +290,7 @@ class AntivirusPanel:
                 self._set_busy()
             elif kind == "error":
                 self._error(value)
-            elif kind == "progress":
+            elif kind == "progress" and not self.app.antivirus_cancel.is_set():
                 self.status.configure(text=self.t("progress", count=value["files_scanned"]))
             elif kind == "scan":
                 self.app.antivirus_result = value

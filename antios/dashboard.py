@@ -450,7 +450,7 @@ class Dashboard:
         ).pack(anchor="w")
         tk.Label(
             brand_text,
-            text=f"v{__version__}  •  alpha",
+            text=f"v{__version__}  •  DargonITP",
             bg=THEME["sidebar"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 8),
@@ -2380,4 +2380,8 @@ def main(argv: list[str] | None = None) -> int:
         root.update_idletasks()
         root.destroy()
         return 0
+    from .elevation import ensure_administrator
+    elevation_status = ensure_administrator(args.lang)
+    if elevation_status is not None:
+        return elevation_status
     return launch(args.lang)

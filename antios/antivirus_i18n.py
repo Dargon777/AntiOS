@@ -170,3 +170,15 @@ MESSAGES = {
         "sidebar": "Автомат телеметргүй\nФайлын үйлдэл баталгаажуулна",
     },
 }
+
+# Explicit status for forced termination, independent of the detection verdict.
+for _locale, _texts in {
+    "en": ("Stopping scan…", "Scan forcibly stopped; partial results"),
+    "ru": ("Принудительно останавливаю проверку…", "Проверка остановлена; результаты неполные"),
+    "es": ("Deteniendo análisis…", "Análisis detenido; resultados parciales"),
+    "zh-CN": ("正在强制停止扫描…", "扫描已停止；结果不完整"),
+    "fi": ("Pysäytetään tarkistus…", "Tarkistus pysäytetty; osittaiset tulokset"),
+    "pl": ("Zatrzymywanie skanowania…", "Skanowanie zatrzymane; wyniki częściowe"),
+    "mn": ("Шалгалтыг зогсоож байна…", "Шалгалт зогссон; дутуу үр дүн"),
+}.items():
+    MESSAGES[_locale].update(stopping=_texts[0], stopped=_texts[1])

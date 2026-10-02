@@ -15,7 +15,7 @@
   <Properties>
     <DisplayName>AntiOS</DisplayName>
     <PublisherDisplayName>__PUBLISHER_DISPLAY_NAME__</PublisherDisplayName>
-    <Description>Windows Health, Privacy and Diagnostics</Description>
+    <Description>AntiOS Antivirus by DargonITP</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
@@ -41,7 +41,7 @@
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements
         DisplayName="AntiOS"
-        Description="Windows Health, Privacy and Diagnostics"
+        Description="AntiOS Antivirus by DargonITP"
         BackgroundColor="#0E1420"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
@@ -55,5 +55,6 @@
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="allowElevation" />
   </Capabilities>
 </Package>

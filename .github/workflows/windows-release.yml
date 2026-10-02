@@ -84,12 +84,17 @@ jobs:
       - name: Build CLI executable
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onefile --console --name AntiOS antios_entry.py
+          pyinstaller --clean --noconfirm --onedir --contents-directory _cli --uac-admin --version-file release/windows-cli-version.txt --console --name AntiOS antios_entry.py
 
       - name: Build GUI executable
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onefile --windowed --name AntiOS-GUI antios_gui_entry.py
+          pyinstaller --clean --noconfirm --onedir --contents-directory _gui --uac-admin --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
+
+      - name: Verify Windows resources and scan worker
+        shell: pwsh
+        run: |
+          python scripts/verify-windows-build.py
 
       - name: Azure login for Artifact Signing
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
@@ -108,17 +113,18 @@ jobs:
           certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
           files-folder: ${{ github.workspace }}\dist
           files-folder-filter: exe
+          files-folder-recurse: true
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
-          description: AntiOS Windows Health Privacy and Diagnostics
+          description: DargonITP AntiOS Antivirus
           description-url: https://github.com/Dargon777/AntiOS
 
       - name: Verify Authenticode signatures
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
-          foreach ($file in @(".\dist\AntiOS.exe", ".\dist\AntiOS-GUI.exe")) {
+          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe")) {
             $signature = Get-AuthenticodeSignature $file
             Write-Host "$file => $($signature.Status) / $($signature.SignerCertificate.Subject)"
             if ($signature.Status -ne "Valid") {
@@ -129,19 +135,19 @@ jobs:
       - name: Smoke-test executables
         shell: pwsh
         run: |
-          .\dist\AntiOS.exe --version
-          .\dist\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
-          .\dist\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
-          python -c "import json,subprocess; p=subprocess.run([r'.\dist\AntiOS.exe','virus-scan',r'.\release\VERSION','--json'],capture_output=True,text=True); print(p.stdout); assert p.returncode in (0,3),(p.returncode,p.stderr); d=json.loads(p.stdout); assert d['summary']['files_scanned']==1 and d['summary']['threats']==0,d"
-          .\dist\AntiOS-GUI.exe --self-test
-          .\dist\AntiOS-GUI.exe --ui-self-test
+          .\dist\AntiOS\AntiOS.exe --version
+          .\dist\AntiOS\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
+          .\dist\AntiOS\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
+          python -c "import json,subprocess; p=subprocess.run([r'.\dist\AntiOS\AntiOS.exe','virus-scan',r'.\release\VERSION','--json'],capture_output=True,text=True); print(p.stdout); assert p.returncode in (0,3),(p.returncode,p.stderr); d=json.loads(p.stdout); assert d['summary']['files_scanned']==1 and d['summary']['threats']==0,d"
+          .\dist\AntiOS-GUI\AntiOS-GUI.exe --self-test
+          .\dist\AntiOS-GUI\AntiOS-GUI.exe --ui-self-test
 
       - name: Package portable release
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force package | Out-Null
-          Copy-Item .\dist\AntiOS.exe .\package\AntiOS.exe
-          Copy-Item .\dist\AntiOS-GUI.exe .\package\AntiOS-GUI.exe
+          Copy-Item .\dist\AntiOS\* .\package\ -Recurse -Force
+          Copy-Item .\dist\AntiOS-GUI\* .\package\ -Recurse -Force
           Copy-Item .\scripts\install.ps1 .\package\install.ps1
           Copy-Item .\scripts\uninstall.ps1 .\package\uninstall.ps1
           Copy-Item .\README.md .\package\README.md
@@ -163,8 +169,9 @@ jobs:
           $version = (Get-Content .\release\VERSION -Raw).Trim()
           $commit = "$env:GITHUB_SHA"
           $python = (python --version 2>&1).Trim()
-          $signing = if ("${{ vars.ENABLE_ARTIFACT_SIGNING }}" -eq "true") {
-            "Azure Artifact Signing"
+          $signature = Get-AuthenticodeSignature .\package\AntiOS-GUI.exe
+          $signing = if ($signature.Status -eq "Valid") {
+            "Valid Authenticode: $($signature.SignerCertificate.Subject)"
           } else {
             "Unsigned direct-download build"
           }
@@ -174,6 +181,7 @@ jobs:
             "Build runner: windows-latest",
             "Python: $python",
             "License: Apache-2.0",
+            "Product publisher: DargonITP",
             "Code signing: $signing"
           ) | Set-Content .\package\BUILD_INFO.txt
           Compress-Archive -Path .\package\* -DestinationPath .\AntiOS-windows-x64.zip -Force

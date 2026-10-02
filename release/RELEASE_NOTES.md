@@ -18,3 +18,10 @@ This is the first on-demand antivirus alpha. Persistent protection remains with 
 Scans do not change files. Quarantine, restoration and Defender actions require confirmation. Defender system scans follow its own remediation/cloud policy; results are viewed in Windows Security.
 
 See `ANTIVIRUS.md` in the portable package or [the documentation](https://github.com/Dargon777/AntiOS/blob/master/docs/ANTIVIRUS.md) for CLI exit codes, limits and recovery instructions.
+
+## Startup, scan cancellation and publisher
+
+- The antivirus is included in the main dashboard. Stop forcibly ends its file-scan worker and retains incomplete results, including on a blocked provider call.
+- Windows asks for Administrator consent at startup. Extract the whole ZIP; `_gui` and `_cli` must remain beside the executables.
+- DargonITP is embedded in executable version resources and shown in the app. This alpha may still be unsigned: see BUILD_INFO.txt. A trusted signing identity is required to replace Unknown Publisher; a metadata label alone cannot do that.
+- MSIX startup elevation requires separate Microsoft approval of `allowElevation`; packaging is not Store acceptance.

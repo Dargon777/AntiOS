@@ -2,7 +2,7 @@
 
 The Store edition packages the **AntiOS GUI**, including on-demand antivirus scans and explicitly confirmed quarantine/restore actions.
 
-It does not package the advanced CLI, so Microsoft Store users receive the antivirus and health/privacy dashboard without the CLI's administrator-only metadata write commands. Defender actions may require administrator rights; the GUI does not silently elevate or change protection policy. The Store identity remains reserved; package generation is not Store certification.
+It does not package the advanced CLI, so Microsoft Store users receive the antivirus and health/privacy dashboard without the CLI's administrator-only metadata write commands. The GUI requests UAC elevation at startup; the manifest declares the restricted `allowElevation` capability. Microsoft must approve that capability before Store publication. Protection policy is unchanged. The Store identity remains reserved; package generation is not Store certification.
 
 ## Why MSIX
 
@@ -20,7 +20,7 @@ AntiOS now has a reserved Microsoft Store identity:
 
 - Package/Identity/Name: `DargonsITP.AntiOS`
 - Package/Identity/Publisher: `CN=D0D34602-FED2-4FE0-B705-18B9041C45F3`
-- Publisher display name: `Dargon's ITP`
+- Publisher display name: `DargonITP`
 - Store ID: `9P7V8BKW2KG9`
 - Store URL: https://apps.microsoft.com/detail/9P7V8BKW2KG9
 
@@ -31,7 +31,7 @@ These values must match the Partner Center product identity exactly.
 First build the GUI executable:
 
 ```powershell
-pyinstaller --clean --noconfirm --onefile --windowed --name AntiOS-GUI antios_gui_entry.py
+pyinstaller --clean --noconfirm --onedir --contents-directory _gui --uac-admin --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
 ```
 
 Then:
@@ -40,7 +40,7 @@ Then:
 .\scripts\build-store-msix.ps1 `
   -IdentityName "DargonsITP.AntiOS" `
   -Publisher "CN=D0D34602-FED2-4FE0-B705-18B9041C45F3" `
-  -PublisherDisplayName "Dargon's ITP" `
+  -PublisherDisplayName "DargonITP" `
   -PackageVersion "2.0.11.0"
 ```
 

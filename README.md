@@ -19,7 +19,7 @@ AntiOS answers one simple question first: **does anything on this Windows PC nee
 
 https://github.com/Dargon777/AntiOS/releases
 
-Opening the dashboard and scanning user-accessible files do not require Administrator elevation. Quarantine and restore require explicit confirmation; Microsoft Defender operations can require administrator rights.
+Windows executables request Administrator consent at startup. Cancelling UAC cancels launch. Extract the entire archive: keep `_gui` and `_cli` beside the EXE files. Quarantine and restore still require explicit confirmation.
 
 ## Antivirus
 
@@ -289,8 +289,8 @@ Build both Windows executables:
 
 ```powershell
 python -m pip install pyinstaller
-pyinstaller --clean --noconfirm --onefile --console --name AntiOS antios_entry.py
-pyinstaller --clean --noconfirm --onefile --windowed --name AntiOS-GUI antios_gui_entry.py
+pyinstaller --clean --noconfirm --onedir --contents-directory _cli --uac-admin --version-file release/windows-cli-version.txt --console --name AntiOS antios_entry.py
+pyinstaller --clean --noconfirm --onedir --contents-directory _gui --uac-admin --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
 ```
 
 CI validates Windows/Linux Python matrices, CodeQL, wheel/sdist metadata, clean wheel installation, GUI entry points, both PyInstaller executables, smoke tests, release metadata and provenance attestations.

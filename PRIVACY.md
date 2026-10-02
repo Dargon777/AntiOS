@@ -53,3 +53,5 @@ Advanced CLI write operations remain dry-run by default, require explicit confir
 For privacy questions or bug reports:
 
 https://github.com/Dargon777/AntiOS/issues
+
+The GUI scan worker temporarily records scan requests, file paths and findings in a private temporary job directory and removes it after completion or cancellation. Forced termination retains completed results in app memory. Startup UAC elevation uses the selected Windows account; choosing a different administrator changes the account used for settings and encrypted quarantine.

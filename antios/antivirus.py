@@ -97,6 +97,7 @@ def scan_files(
     cancelled: Callable[[], bool] | None = None,
     provider_factory: Callable = AmsiScanner,
     excluded_paths: tuple[Path, ...] = (),
+    checkpoint: Callable[[dict], None] | None = None,
 ) -> dict[str, Any]:
     if not 1 <= max_bytes <= 256 * 1024 * 1024 or not 1 <= max_files <= 1_000_000:
         raise ValueError("Scan limits must be 1..256 MiB and 1..1000000 files")
@@ -117,6 +118,8 @@ def scan_files(
         "findings": [], "issues": [],
         "coverage": "limited", "verdict": "incomplete",
     }
+    if checkpoint:
+        checkpoint(result)
     summary = result["summary"]
     provider = None
     try:
@@ -226,6 +229,8 @@ def scan_files(
             except (OSError, ValueError) as exc:
                 issue(item, str(exc), error=True)
             finally:
+                if checkpoint:
+                    checkpoint(result)
                 if progress and (summary["files_seen"] == 1 or summary["files_seen"] % 25 == 0):
                     progress(dict(summary))
         summary["cancelled"] = stopped()
@@ -246,6 +251,8 @@ def scan_files(
         result["verdict"] = "no-threats-found"
     if progress:
         progress(dict(summary))
+    if checkpoint:
+        checkpoint(result)
     return result
 
 

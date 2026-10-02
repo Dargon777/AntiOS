@@ -45,7 +45,7 @@ When enabled, CI:
 
 See [../store/README.md](../store/README.md).
 
-The Store package contains the read-only GUI only. Advanced CLI write operations remain outside the Store package.
+The Store package contains the antivirus GUI, including confirmed quarantine and restore. Advanced CLI commands remain outside the package. Startup elevation declares `allowElevation`, a restricted capability requiring separate Microsoft approval before Store distribution.
 
 ## Local verification
 
@@ -62,3 +62,13 @@ A production-signed direct build should report `Status : Valid`.
 ## Development certificates
 
 Do not distribute self-signed certificates as a way to suppress warnings. They are appropriate only for local/test machines where the certificate is deliberately installed into a trust store.
+
+## DargonITP identity and the current alpha
+
+`CompanyName`, product metadata, the dashboard and the default MSIX publisher display name are **DargonITP**. The reserved package identity and certificate subject GUID are unchanged. Confirm the display name against Partner Center before submitting.
+
+These resource strings are not a digital signature. Windows derives the verified publisher in UAC from the trusted Authenticode signing certificate, not CompanyName. Configure the signing service using an identity verified for the intended publisher; the repository cannot manufacture a trusted DargonITP certificate. Until then builds remain unsigned and may show Unknown Publisher / SmartScreen warnings. Even a valid signature does not guarantee immediate SmartScreen reputation. BUILD_INFO records the actual signature status of the packaged GUI.
+
+The existing Azure signing path runs on master pushes when configured. Pull request artifacts remain unsigned. Store packaging success is not certification or publication, and `allowElevation` requires Microsoft's approval. Never disable SmartScreen or install a self-signed root certificate to make a public build appear trusted.
+
+References: [SmartScreen reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation), [restricted elevation capability](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations#restricted-capability-list).

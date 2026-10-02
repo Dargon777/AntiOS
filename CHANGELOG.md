@@ -6,6 +6,11 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [2.0.0a11] - 2026-10-01
 
+- Force-stop GUI file scans in an isolated worker process; preserve incomplete checkpoints.
+- Request Administrator consent at Windows startup and add DargonITP executable metadata.
+- Bundle elevated EXEs with dependency directories; report actual signing status.
+
+
 ### Added
 
 - Antivirus page (`Ctrl+6`) with read-only file/folder scans, progress, cancellation and JSON export.
