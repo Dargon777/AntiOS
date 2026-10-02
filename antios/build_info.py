@@ -9,6 +9,7 @@ from . import __version__
 def version_info() -> dict[str, Any]:
     return {
         "name": "AntiOS",
+        "publisher": "DargonITP",
         "version": __version__,
         "python": platform.python_version(),
         "platform": platform.platform(),

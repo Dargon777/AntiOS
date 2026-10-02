@@ -21,7 +21,9 @@ https://github.com/Dargon777/AntiOS/releases
 
 简体中文 Windows 会自动使用中文界面，也可以手动切换 **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**。
 
-控制面板仅以只读方式工作，不包含自动遥测。
+Alpha 11 新增按需文件扫描、加密隔离区和 Microsoft Defender 控制。实时保护由已安装的防病毒软件提供。扫描不修改文件；隔离和恢复需要确认。不包含自动遥测。防病毒提供程序可能根据自身设置使用云服务。
+
+防病毒功能及限制：[docs/ANTIVIRUS.md](docs/ANTIVIRUS.md)。
 
 完整文档：[README.md](README.md)  
 隐私说明：[PRIVACY.md](PRIVACY.md)  

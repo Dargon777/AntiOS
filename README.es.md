@@ -21,7 +21,9 @@ https://github.com/Dargon777/AntiOS/releases
 
 La interfaz detecta automáticamente Windows en español y también permite cambiar manualmente entre **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**.
 
-El panel es de solo lectura y no incluye telemetría automática.
+Alpha 11 añade análisis de archivos a petición, cuarentena cifrada y controles de Microsoft Defender. La protección en tiempo real depende del antivirus instalado. El análisis no modifica archivos; la cuarentena y restauración requieren confirmación. No incluye telemetría automática. El proveedor antivirus puede usar servicios en la nube según su configuración.
+
+Antivirus y límites: [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
 
 Documentación completa: [README.md](README.md)  
 Privacidad: [PRIVACY.md](PRIVACY.md)  

@@ -9,9 +9,10 @@ def test_release_version_matches_package_version():
     assert release_version == __version__
 
 
-def test_release_tag_is_alpha_10():
+def test_release_tag_matches_package_version():
     tag = Path("release/TAG").read_text(encoding="utf-8").strip()
-    assert tag == "v2.0.0-alpha.10"
+    base, alpha = __version__.split("a")
+    assert tag == f"v{base}-alpha.{alpha}"
 
 
 def test_package_declares_apache_2_license():

@@ -12,7 +12,7 @@ $GuiSource = Join-Path $SourceDirectory "AntiOS-GUI.exe"
 $CliTarget = Join-Path $InstallDir "AntiOS.exe"
 $GuiTarget = Join-Path $InstallDir "AntiOS-GUI.exe"
 
-foreach ($required in @($CliSource, $GuiSource)) {
+foreach ($required in @($CliSource, $GuiSource, (Join-Path $SourceDirectory "_cli"), (Join-Path $SourceDirectory "_gui"))) {
     if (-not (Test-Path $required)) {
         throw "Required AntiOS file not found: $required"
     }
@@ -21,6 +21,9 @@ foreach ($required in @($CliSource, $GuiSource)) {
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Copy-Item -Force $CliSource $CliTarget
 Copy-Item -Force $GuiSource $GuiTarget
+foreach ($runtime in @("_cli", "_gui")) {
+    Copy-Item -Recurse -Force (Join-Path $SourceDirectory $runtime) $InstallDir
+}
 
 $Programs = [Environment]::GetFolderPath("Programs")
 $StartMenuDir = Join-Path $Programs "AntiOS"

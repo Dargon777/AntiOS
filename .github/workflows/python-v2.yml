@@ -32,4 +32,4 @@ jobs:
           python -m pip install -e .
 
       - name: Test
-        run: python -m pytest
+        run: python -m pytest -rs

@@ -4,6 +4,32 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [2.0.0a11] - 2026-10-01
+
+- Force-stop GUI file scans in an isolated worker process; preserve incomplete checkpoints.
+- Request Administrator consent at Windows startup and add DargonITP executable metadata.
+- Bundle elevated EXEs with dependency directories; report actual signing status.
+
+
+### Added
+
+- Antivirus page (`Ctrl+6`) with read-only file/folder scans, progress, cancellation and JSON export.
+- Windows AMSI provider integration plus validated optional local SHA-256 signature databases.
+- Explicit limited/incomplete results for missing providers, errors, skipped files and limits.
+- Current-user DPAPI quarantine, authenticated contents and metadata, verified recovery copies and manual restore without overwrites.
+- Allowlisted Defender quick/full scan and signature-update actions with confirmation.
+- `virus-scan`, `quarantine list/add/restore` and `defender quick/full/update` CLI commands.
+- Seven-language antivirus UI and scan-result preservation across appearance changes.
+- Scanner, quarantine, recovery, native API and real Tk GUI regression tests.
+
+### Changed
+
+- Antivirus actions are explicit write-capable exceptions to the read-only diagnostic pages.
+- Privacy/security documentation explains provider cloud policy, quarantine and the on-demand scope.
+- Windows portable/wheel smoke tests cover the new page and scanner command.
+- Release version advanced to alpha 11; there is no independent real-time engine or public signature feed yet.
+- Store development package version advanced to `2.0.11.0`.
+
 ## [2.0.0a10] - 2026-10-01
 
 ### Added

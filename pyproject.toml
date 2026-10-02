@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "antios"
 dynamic = ["version"]
-description = "Windows Health, Privacy and Diagnostics with a friendly dashboard and auditable CLI"
+description = "On-demand antivirus scanning, encrypted quarantine and Windows health diagnostics"
 requires-python = ">=3.11"
 readme = "README.md"
 license = "Apache-2.0"

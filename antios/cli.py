@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .build_info import render_version, version_info
+from .antivirus import DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES, render_antivirus_scan, scan_files
 from .config import default_config_path, load_config, write_default_config
 from .consumer import evaluate_health, render_quick_check
 from .core import (
@@ -23,6 +24,8 @@ from .health import collect_health
 from .i18n import LANGUAGE_NAMES, detect_language
 from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
+from .quarantine import Quarantine, default_quarantine_path
+from .windows_antivirus import defender_action
 from .report import render_doctor_human, render_operations_human, render_scan_human
 from .storage_cleanup import (
     DEFAULT_DUPLICATE_MIN_BYTES,
@@ -62,7 +65,7 @@ def _backend() -> WindowsRegistryBackend:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="antios",
-        description="AntiOS: Windows Health, Privacy and Diagnostics",
+        description="AntiOS: Antivirus and Windows Diagnostics",
     )
     parser.add_argument(
         "--version",
@@ -147,6 +150,34 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Minimum duplicate file size in MB (default: {DEFAULT_DUPLICATE_MIN_BYTES // (1024 * 1024)}).",
     )
     storage_cmd.add_argument("--json", action="store_true")
+
+    av = sub.add_parser("virus-scan", help="Read-only, on-demand antivirus scan of a file or folder.")
+    av.add_argument("path")
+    av.add_argument("--signatures", help="Optional local schema-1 SHA-256 signature database.")
+    av.add_argument("--max-mb", type=int, default=DEFAULT_MAX_BYTES // (1024 * 1024))
+    av.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
+    av.add_argument("--json", action="store_true")
+
+    quarantine_cmd = sub.add_parser("quarantine", help="Inspect, isolate or restore encrypted threats.")
+    quarantine_sub = quarantine_cmd.add_subparsers(dest="quarantine_command", required=True)
+    quarantine_list = quarantine_sub.add_parser("list")
+    quarantine_list.add_argument("--json", action="store_true")
+    quarantine_add = quarantine_sub.add_parser("add", help="Rescan a file, then preview or isolate a confirmed detection.")
+    quarantine_add.add_argument("path")
+    quarantine_add.add_argument("--signatures")
+    quarantine_add.add_argument("--yes", action="store_true")
+    quarantine_add.add_argument("--json", action="store_true")
+    quarantine_restore = quarantine_sub.add_parser("restore", help="Preview or restore a quarantined item without overwriting.")
+    quarantine_restore.add_argument("id")
+    quarantine_restore.add_argument("--to", help="Optional new destination; its parent must exist.")
+    quarantine_restore.add_argument("--yes", action="store_true")
+    quarantine_restore.add_argument("--json", action="store_true")
+
+    defender_cmd = sub.add_parser("defender", help="Preview or run an allowlisted Microsoft Defender action.")
+    defender_cmd.add_argument("action", choices=["quick", "full", "update"])
+    defender_cmd.add_argument("--yes", action="store_true",
+                              help="Run the operation using Defender's configured remediation/cloud policy.")
+    defender_cmd.add_argument("--json", action="store_true")
 
     scan_cmd = sub.add_parser(
         "scan",
@@ -280,6 +311,49 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(result)
             else:
                 print(render_storage_scan(result))
+            return 0
+
+        if args.command == "virus-scan":
+            result = scan_files(args.path, signature_path=args.signatures,
+                                max_bytes=args.max_mb * 1024 * 1024, max_files=args.max_files,
+                                excluded_paths=(default_quarantine_path(),))
+            if args.json:
+                _print_json(result)
+            else:
+                print(render_antivirus_scan(result))
+            logger.info("virus-scan verdict=%s scanned=%d threats=%d", result["verdict"],
+                        result["summary"]["files_scanned"], result["summary"]["threats"])
+            # 0: fully scanned/no findings, 1: threats/review, 3: incomplete/limited.
+            return 1 if result["findings"] else (0 if result["verdict"] == "no-threats-found" else 3)
+
+        if args.command == "quarantine":
+            store = Quarantine()
+            if args.quarantine_command == "list":
+                payload = {"items": store.list_items()}
+            elif args.quarantine_command == "restore":
+                payload = store.restore(args.id, destination=args.to, dry_run=not args.yes)
+            else:
+                result = scan_files(args.path, signature_path=args.signatures,
+                                    excluded_paths=(default_quarantine_path(),))
+                if not Path(args.path).is_file():
+                    raise ValueError("Quarantine add requires one file")
+                findings = [f for f in result["findings"] if f["kind"] == "threat"]
+                if len(findings) != 1:
+                    raise ValueError("No confirmed detection; file was not quarantined")
+                payload = store.add(findings[0], dry_run=not args.yes)
+            if args.json:
+                _print_json(payload)
+            else:
+                print(json.dumps(payload, indent=2, ensure_ascii=False))
+            return 0
+
+        if args.command == "defender":
+            _require_windows()
+            payload = defender_action(args.action) if args.yes else {
+                "action": args.action, "dry_run": True,
+                "note": "Use --yes to run. Scans follow Defender's remediation policy; results are in Windows Security.",
+            }
+            _print_json(payload)
             return 0
 
         backend = _backend()

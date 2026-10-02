@@ -1,48 +1,27 @@
-# AntiOS v2.0.0 alpha 10
+# AntiOS v2.0.0 alpha 11
 
-Alpha 10 adds a dedicated persistent **Settings** experience.
+AntiOS now includes an **Antivirus** page with on-demand file and folder scanning, encrypted quarantine and Microsoft Defender controls.
 
-## Settings hub
+## Antivirus
 
-Open Settings from the gear button at the bottom of the sidebar or with `Ctrl+,`.
+- Windows AMSI content scanning and optional local SHA-256 signatures.
+- Explicit progress, cancellation, findings, skipped files and errors.
+- Manual current-user DPAPI quarantine and restore without overwriting existing files.
+- Defender quick/full scans and signature updates after confirmation.
+- JSON export and `virus-scan`, `quarantine` and `defender` CLI commands.
+- Seven-language UI; Settings and existing diagnostic/cleanup features are retained.
 
-### Appearance
+## Scope
 
-- Language:
-  - Automatic (Windows)
-  - English
-  - Русский
-  - Español
-  - 简体中文
-  - Suomi
-  - Polski
-  - Монгол
-- Theme:
-  - System
-  - Dark
-  - Light
+This is the first on-demand antivirus alpha. Persistent protection remains with an installed antivirus. AntiOS does not install a kernel driver, register as a primary antivirus or disable Defender. AMSI scans submitted buffers and does not reproduce Defender's full file/archive engine. The built-in local signature is only the EICAR test hash; no independent malware feed is included. Default scan limits are 32 MiB per file and 100,000 files. Incomplete coverage is never reported as clean.
 
-System theme reads the current Windows app-theme preference. Language and theme changes rebuild the GUI immediately without repeating the health scan.
+Scans do not change files. Quarantine, restoration and Defender actions require confirmation. Defender system scans follow its own remediation/cloud policy; results are viewed in Windows Security.
 
-### Storage Cleanup defaults
+See `ANTIVIRUS.md` in the portable package or [the documentation](https://github.com/Dargon777/AntiOS/blob/master/docs/ANTIVIRUS.md) for CLI exit codes, limits and recovery instructions.
 
-Settings can change:
+## Startup, scan cancellation and publisher
 
-- old-file age in days;
-- large-file threshold in MB;
-- minimum duplicate-file size in MB;
-- whether AntiOS remembers the last scanned folder.
-
-Storage Cleanup uses these values on subsequent scans.
-
-### Persistence
-
-GUI preferences are stored locally in the normal per-user `antios.toml` file.
-
-Resetting Settings restores only UI and cleanup preferences. It does not overwrite advanced CLI backup/logging/metadata configuration.
-
-### About
-
-The page shows the AntiOS version, alpha channel, Microsoft Store ID and links to GitHub, releases, privacy and support.
-
-All Settings UI is localized across the seven supported languages.
+- The antivirus is included in the main dashboard. Stop forcibly ends its file-scan worker and retains incomplete results, including on a blocked provider call.
+- Windows asks for Administrator consent at startup. Extract the whole ZIP; `_gui` and `_cli` must remain beside the executables.
+- DargonITP is embedded in executable version resources and shown in the app. This alpha may still be unsigned: see BUILD_INFO.txt. A trusted signing identity is required to replace Unknown Publisher; a metadata label alone cannot do that.
+- MSIX startup elevation requires separate Microsoft approval of `allowElevation`; packaging is not Store acceptance.

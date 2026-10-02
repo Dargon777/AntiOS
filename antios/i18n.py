@@ -1591,6 +1591,28 @@ for _language, _message in {
     TRANSLATIONS[_language]["settings.status.save_failed"] = _message
 
 
+from .antivirus_i18n import MESSAGES as _AV_MESSAGES
+
+for _language, _messages in _AV_MESSAGES.items():
+    TRANSLATIONS[_language].update({"av." + key: value for key, value in _messages.items()})
+    TRANSLATIONS[_language]["nav.antivirus"] = _messages["title"]
+    TRANSLATIONS[_language]["sidebar.no_telemetry"] = _messages["sidebar"]
+    TRANSLATIONS[_language]["app.title"] = "AntiOS — " + _messages["title"]
+
+for _language, _brand, _recovery, _health_ok in [
+    ("en", "Antivirus & Diagnostics", "Recovery copy", "WINDOWS CHECKS OK"),
+    ("ru", "Антивирус и диагностика", "Резервная копия", "ПРОВЕРКИ WINDOWS В НОРМЕ"),
+    ("es", "Antivirus y diagnóstico", "Copia de recuperación", "COMPROBACIONES WINDOWS OK"),
+    ("zh-CN", "防病毒与诊断", "恢复副本", "WINDOWS 检查正常"),
+    ("fi", "Virustorjunta ja diagnostiikka", "Palautuskopio", "WINDOWS-TARKISTUKSET OK"),
+    ("pl", "Antywirus i diagnostyka", "Kopia odzyskiwania", "KONTROLE WINDOWS OK"),
+    ("mn", "Вирусын эсрэг ба оношилгоо", "Сэргээх хуулбар", "WINDOWS ШАЛГАЛТ ХЭВИЙН"),
+]:
+    TRANSLATIONS[_language]["brand.subtitle"] = _brand
+    TRANSLATIONS[_language]["av.recovery-copy"] = _recovery
+    TRANSLATIONS[_language]["overview.all_clear"] = _health_ok
+
+
 @dataclass(frozen=True)
 class Translator:
     language: str = "en"

@@ -4,6 +4,7 @@ import argparse
 import ctypes
 import json
 import os
+import queue
 import threading
 import webbrowser
 from dataclasses import replace
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import __version__
+from .antivirus_ui import AntivirusPanel
 from .config import (
     AppConfig,
     CleanupConfig,
@@ -299,6 +301,14 @@ class Dashboard:
         )
         self.storage_result: dict[str, Any] | None = None
         self._storage_cancel = threading.Event()
+        self.antivirus_path = default_scan_path()
+        self.antivirus_signatures: Path | None = None
+        self.antivirus_result: dict[str, Any] | None = None
+        self.antivirus_items: list[dict] = []
+        self.antivirus_queue: queue.Queue = queue.Queue()
+        self.antivirus_cancel = threading.Event()
+        self.antivirus_busy = False
+        self.antivirus_cancelable = False
 
         self._configure_root()
         self._configure_ttk()
@@ -326,8 +336,15 @@ class Dashboard:
         root.bind("<Control-3>", lambda _event: self.show_page("startup"))
         root.bind("<Control-4>", lambda _event: self.show_page("system"))
         root.bind("<Control-5>", lambda _event: self.show_page("cleanup"))
+        root.bind("<Control-6>", lambda _event: self.show_page("antivirus"))
         root.bind("<Control-comma>", lambda _event: self.show_page("settings"))
+        root.protocol("WM_DELETE_WINDOW", self._close)
         _enable_dark_titlebar(root, self.resolved_theme == "dark")
+
+    def _close(self) -> None:
+        self._storage_cancel.set()
+        self.antivirus_cancel.set()
+        self.root.destroy()
 
     def _configure_ttk(self) -> None:
         style = self.ttk.Style(self.root)
@@ -428,10 +445,12 @@ class Dashboard:
             bg=THEME["sidebar"],
             fg=THEME["muted"],
             font=("Segoe UI", 9),
+            wraplength=142,
+            justify="left",
         ).pack(anchor="w")
         tk.Label(
             brand_text,
-            text=f"v{__version__}  •  alpha",
+            text=f"v{__version__}  •  DargonITP",
             bg=THEME["sidebar"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 8),
@@ -448,6 +467,7 @@ class Dashboard:
         for key, label in [
             ("overview", self.t("nav.overview")),
             ("security", self.t("nav.security")),
+            ("antivirus", self.t("nav.antivirus")),
             ("startup", self.t("nav.startup")),
             ("system", self.t("nav.system")),
             ("cleanup", self.t("nav.cleanup")),
@@ -511,13 +531,14 @@ class Dashboard:
             trust,
             text=self.t("sidebar.no_telemetry"),
             justify="left",
+            wraplength=180,
             bg=THEME["surface"],
             fg=THEME["muted"],
             font=("Segoe UI", 9),
         ).pack(anchor="w", padx=12, pady=(0, 7))
         tk.Label(
             trust,
-            text="F5  •  Ctrl+E  •  Ctrl+1…5  •  Ctrl+,",
+            text="F5  •  Ctrl+E  •  Ctrl+,",
             bg=THEME["surface"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 8),
@@ -544,7 +565,7 @@ class Dashboard:
         self.header.pack(fill="x", padx=30, pady=(24, 18))
 
         title_block = tk.Frame(self.header, bg=THEME["bg"])
-        title_block.pack(side="left")
+        title_block.pack(side="left", fill="both", expand=True)
 
         self.page_title = tk.Label(
             title_block,
@@ -561,11 +582,18 @@ class Dashboard:
             bg=THEME["bg"],
             fg=THEME["muted"],
             font=("Segoe UI", 10),
+            justify="left",
         )
         self.page_subtitle.pack(anchor="w", pady=(3, 0))
 
         header_actions = tk.Frame(self.header, bg=THEME["bg"])
-        header_actions.pack(side="right")
+        header_actions.pack(side="right", before=title_block)
+        self.header.bind(
+            "<Configure>",
+            lambda event: self.page_subtitle.configure(
+                wraplength=max(150, event.width - header_actions.winfo_reqwidth() - 20)
+            ),
+        )
 
         self.export_button = self._button(
             header_actions,
@@ -592,13 +620,14 @@ class Dashboard:
         )
 
     def _build_pages(self) -> None:
-        for name in ("overview", "security", "startup", "system", "cleanup", "settings"):
+        for name in ("overview", "security", "antivirus", "startup", "system", "cleanup", "settings"):
             frame = self.tk.Frame(self.page_host, bg=THEME["bg"])
             frame.place(relx=0, rely=0, relwidth=1, relheight=1)
             self.pages[name] = frame
 
         self._build_overview(self.pages["overview"])
         self._build_security(self.pages["security"])
+        self.antivirus_panel = AntivirusPanel(self, self.pages["antivirus"], THEME)
         self._build_startup(self.pages["startup"])
         self._build_system(self.pages["system"])
         self._build_cleanup(self.pages["cleanup"])
@@ -1970,6 +1999,7 @@ class Dashboard:
         titles = {
             "overview": (self.t("nav.overview"), self.t("page.overview.subtitle")),
             "security": (self.t("nav.security"), self.t("page.security.subtitle")),
+            "antivirus": (self.t("nav.antivirus"), self.t("av.subtitle")),
             "startup": (self.t("nav.startup"), self.t("page.startup.subtitle")),
             "system": (self.t("nav.system"), self.t("page.system.subtitle")),
             "cleanup": (self.t("nav.cleanup"), self.t("page.cleanup.subtitle")),
@@ -2084,6 +2114,7 @@ class Dashboard:
             self._check_rows.append(card)
 
         self._render_security(scan_data, health)
+        self.antivirus_panel.render_provider_status(health)
         self._render_startup(health)
         self._render_system(scan_data, health)
 
@@ -2276,6 +2307,8 @@ class Dashboard:
         payload = dict(self.data)
         if self.storage_result is not None:
             payload["storage_cleanup"] = self.storage_result
+        if self.antivirus_result is not None:
+            payload["antivirus"] = self.antivirus_result
 
         Path(target).write_text(
             json.dumps(payload, indent=2, ensure_ascii=False),
@@ -2308,7 +2341,7 @@ def launch(language: str | None = None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="AntiOS Windows Health & Privacy Dashboard"
+        description="AntiOS Antivirus & Windows Diagnostics Dashboard"
     )
     parser.add_argument(
         "--self-test",
@@ -2318,7 +2351,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--ui-self-test",
         action="store_true",
-        help="Build the hidden Windows GUI and Settings page, then exit.",
+        help="Build the hidden Windows GUI, Antivirus and Settings pages, then exit.",
     )
     parser.add_argument(
         "--lang",
@@ -2343,6 +2376,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         dashboard.show_page("settings")
         root.update_idletasks()
+        dashboard.show_page("antivirus")
+        root.update_idletasks()
         root.destroy()
         return 0
+    from .elevation import ensure_administrator
+    elevation_status = ensure_administrator(args.lang)
+    if elevation_status is not None:
+        return elevation_status
     return launch(args.lang)
