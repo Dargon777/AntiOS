@@ -52,7 +52,8 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         assert not app.antivirus_busy
         assert app.antivirus_result["summary"]["threats"] == 1
         panel = app.antivirus_panel
-        assert len(panel.tree.get_children()) == 1
+        assert len(panel.tree.get_children()) == 1 + len(app.antivirus_result["issues"])
+        assert panel.rows["0"]["name"] == "Benign UI test fixture"
         panel.tree.selection_set("0")
         panel._selection_changed()
         assert str(panel.quarantine_button["state"]) == "normal"
@@ -69,6 +70,16 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
             app._rebuild_ui("antivirus")
             root.update()
             assert app.antivirus_panel.status["text"]
+        app.antivirus_panel._scan()
+        app.antivirus_panel._cancel()
+        deadline = time.monotonic() + 10
+        while app.antivirus_busy and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        assert not app.antivirus_busy
+        assert app.antivirus_result["summary"]["cancelled"]
+        assert str(app.antivirus_panel.cancel_button["state"]) == "disabled"
+        assert app.antivirus_panel.t("stopped") in app.antivirus_panel.status["text"]
         assert not callback_errors
     finally:
         root.destroy()

@@ -106,7 +106,9 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
                                 result = value
                             else:
                                 for key in ("findings", "issues"):
-                                    value[key] = result[key] + value[key]
+                                    previous = result[key]
+                                    previous.extend(value[key])
+                                    value[key] = previous
                                 result = value
                             if progress:
                                 progress(result["summary"])
