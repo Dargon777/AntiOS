@@ -79,3 +79,29 @@ Windows EXEs request UAC Administrator consent before startup. The Python dashbo
 The GUI file scanner runs in a separate read-only process. **Stop** terminates that process, even during a blocked file read or AMSI call. Completed checkpoints are retained; the interrupted file and work since the last checkpoint are not counted as checked. Cancelled reports always have limited coverage. The app waits for the worker to exit before enabling another operation. Closing the window also cancels the file scan. This does not stop independent Microsoft Defender scans, quarantine or restoration.
 
 Executables use directory bundles so elevated launches do not extract executable dependencies into a temporary directory. Keep `_gui` and `_cli` with their EXEs.
+
+## Packaged antivirus validation
+
+CI runs `scripts/smoke-antivirus.py` against both the installed wheel CLI and
+frozen CLI. It checks a harmless file and then detects that same file using a
+temporary local SHA-256 rule. This checks packaging and detection plumbing; it
+is not a malware effectiveness test. The fixture must remain unchanged.
+
+Hosted runners may have no working AMSI provider. In that case the packaging
+check accepts only an explicit limited/incomplete result with exit code 3 and
+writes a warning and job summary. This is not evidence of working native
+antivirus scanning.
+
+Before a release, run the following from an elevated terminal on a Windows
+machine with a working, enabled AMSI provider:
+
+```powershell
+python scripts/smoke-antivirus.py .\AntiOS.exe --require-amsi
+if ($LASTEXITCODE -ne 0) { throw "Native antivirus validation failed" }
+```
+
+Strict mode requires successful provider coverage, no errors, and the expected
+benign verdict. Separately validate EICAR through the installed provider in a
+controlled test environment and record whether the resident antivirus blocks
+file creation before AntiOS can read it. The local hash fixture alone does not
+validate provider detection. Do not disable Defender to make this test pass.
