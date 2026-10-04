@@ -101,13 +101,14 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         assert panel.engine_var.get() == "clamav"
         assert not hasattr(panel, "engine_choice")
         assert not panel.advanced_visible
-        assert not panel.advanced_frame.winfo_ismapped()
+        assert not panel.advanced_frame.place_info()
 
         panel._toggle_advanced()
         root.update_idletasks()
         assert panel.advanced_visible
-        assert panel.advanced_frame.winfo_ismapped()
+        assert panel.advanced_frame.place_info()
         panel._toggle_advanced()
+        assert not panel.advanced_frame.place_info()
 
         panel._scan()
         # Rebuild while a job is running: no destroyed-widget callback may fire.
