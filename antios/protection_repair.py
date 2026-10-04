@@ -22,9 +22,12 @@ def run_protection_repair(*, apply: bool = False, update_signatures: bool = Fals
                           timeout: float = 180.0) -> dict:
     if os.name != "nt":
         raise OSError("Protection repair is available on Windows only")
-    powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    powershell = os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        "System32", "WindowsPowerShell", "v1.0", "powershell.exe",
+    )
     command = [
-        str(powershell),
+        powershell,
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy", "Bypass",
