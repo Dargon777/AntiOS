@@ -49,7 +49,7 @@ def worker_main(request_path: str, events_path: str) -> int:
 
         try:
             scan_files(request["path"], signature_path=request.get("signatures"),
-                       engine=request.get("engine", "amsi"),
+                       engine=request.get("engine", "clamav"),
                        engine_service=request.get("engine_service"),
                        require_verified_peer=bool(request.get("require_verified_peer", False)),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint,
@@ -81,7 +81,7 @@ def _terminate(process: subprocess.Popen) -> None:
 
 
 def run_scan_process(path: Path, *, signature_path: Path | None = None,
-                     engine: str = "amsi",
+                     engine: str = "clamav",
                      engine_service: str | None = None,
                      require_verified_peer: bool = False,
                      workers: int = 4,
