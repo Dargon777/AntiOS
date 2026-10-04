@@ -40,3 +40,27 @@ def test_license_and_notice_are_present():
     assert "Version 2.0" in license_text
     assert "Copyright 2026 Dargon777" in notice
     assert "does not retroactively relicense" in notice
+
+
+def test_windows_and_store_versions_track_package_alpha():
+    _base, alpha = __version__.split("a")
+    expected_numeric = f"2.0.{int(alpha)}.0"
+    expected_tuple = f"(2, 0, {int(alpha)}, 0)"
+
+    for path in (
+        "release/windows-cli-version.txt",
+        "release/windows-gui-version.txt",
+        "release/windows-guard-version.txt",
+    ):
+        text = Path(path).read_text(encoding="utf-8")
+        assert expected_tuple in text
+        assert __version__ in text
+
+    installer = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
+    assert f'!define APP_VERSION "{__version__}"' in installer
+    assert f'!define NUMERIC_VERSION "{expected_numeric}"' in installer
+
+    store_script = Path("scripts/build-store-msix.ps1").read_text(encoding="utf-8")
+    store_workflow = Path(".github/workflows/store-msix.yml").read_text(encoding="utf-8")
+    assert expected_numeric in store_script
+    assert expected_numeric in store_workflow
