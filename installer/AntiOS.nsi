@@ -3,18 +3,18 @@ Unicode true
 !include "LogicLib.nsh"
 !include "x64.nsh"
 
-#ifndef APP_VERSION
+!ifndef APP_VERSION
   !define APP_VERSION "2.0.0a14"
-#endif
-#ifndef NUMERIC_VERSION
+!endif
+!ifndef NUMERIC_VERSION
   !define NUMERIC_VERSION "2.0.14.0"
-#endif
-#ifndef SOURCE_DIR
+!endif
+!ifndef SOURCE_DIR
   !define SOURCE_DIR "..\installer-stage"
-#endif
-#ifndef OUTPUT_FILE
+!endif
+!ifndef OUTPUT_FILE
   !define OUTPUT_FILE "..\installer-output\AntiOS-Setup.exe"
-#endif
+!endif
 
 !define PRODUCT_NAME "AntiOS"
 !define PUBLISHER "DargonITP"
