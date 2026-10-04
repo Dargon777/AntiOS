@@ -749,6 +749,7 @@ class Dashboard:
 
         header_actions = tk.Frame(self.header, bg=THEME["bg"])
         header_actions.pack(side="right", before=title_block)
+        self.header_actions = header_actions
         self.header.bind(
             "<Configure>",
             lambda event: self.page_subtitle.configure(
@@ -2179,21 +2180,24 @@ class Dashboard:
             bg = THEME["accent"]
             fg = THEME["accent_text"]
             active_bg = THEME["accent_hover"]
+            border = THEME["accent"]
         elif kind == "danger":
             bg = THEME["warn"]
             fg = "#FFFFFF"
             active_bg = THEME["warn"]
+            border = THEME["warn"]
         else:
             bg = THEME["surface_alt"]
             fg = THEME["text"]
             active_bg = THEME["surface_hover"]
+            border = THEME["border"]
 
         button = self.tk.Button(
             parent,
             text=text,
             command=command,
-            padx=15,
-            pady=8,
+            padx=14,
+            pady=9,
             bg=bg,
             fg=fg,
             activebackground=active_bg,
@@ -2201,6 +2205,9 @@ class Dashboard:
             disabledforeground=THEME["muted_2"],
             bd=0,
             relief="flat",
+            highlightthickness=1,
+            highlightbackground=border,
+            highlightcolor=border,
             cursor="hand2",
             takefocus=True,
             font=("Segoe UI Semibold", 9),
@@ -2453,6 +2460,17 @@ class Dashboard:
         title, subtitle = titles[name]
         self.page_title.configure(text=title)
         self.page_subtitle.configure(text=subtitle)
+
+        # Pages with their own action model stay visually quiet; health/report
+        # actions return only where they are relevant.
+        if name in {"antivirus", "cleanup", "settings"}:
+            self.export_button.pack_forget()
+            self.refresh_button.pack_forget()
+        else:
+            if not self.export_button.winfo_manager():
+                self.export_button.pack(side="left", padx=(0, 10))
+            if not self.refresh_button.winfo_manager():
+                self.refresh_button.pack(side="left")
 
         for key, button in self.nav_buttons.items():
             selected = key == name
