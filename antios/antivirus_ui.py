@@ -379,25 +379,34 @@ class AntivirusPanel:
 
         # Hidden advanced area.
         self.advanced_frame = self._card(outer)
-        self.advanced_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
-        self.advanced_frame.grid_remove()
         advanced = tk.Frame(self.advanced_frame, bg=self.palette["surface"])
-        advanced.pack(fill="x", padx=18, pady=14)
+        advanced.pack(fill="both", expand=True, padx=18, pady=14)
 
+        advanced_header = tk.Frame(advanced, bg=self.palette["surface"])
+        advanced_header.pack(fill="x")
+        advanced_text = tk.Frame(advanced_header, bg=self.palette["surface"])
+        advanced_text.pack(side="left", fill="x", expand=True)
         tk.Label(
-            advanced,
+            advanced_text,
             text=self.t("advanced_title"),
             bg=self.palette["surface"],
             fg=self.palette["text"],
             font=("Segoe UI", 11, "bold"),
         ).pack(anchor="w")
         tk.Label(
-            advanced,
+            advanced_text,
             text=self.t("advanced_hint"),
             bg=self.palette["surface"],
             fg=self.palette["muted"],
             font=("Segoe UI", 8),
         ).pack(anchor="w", pady=(2, 10))
+        close_advanced = self.app._button(
+            advanced_header,
+            self.t("advanced_hide"),
+            self._toggle_advanced,
+            kind="secondary",
+        )
+        close_advanced.pack(side="right", padx=(12, 0))
 
         engine_row = tk.Frame(advanced, bg=self.palette["surface"])
         engine_row.pack(fill="x", pady=(0, 8))
@@ -481,10 +490,17 @@ class AntivirusPanel:
     def _toggle_advanced(self) -> None:
         self.advanced_visible = not self.advanced_visible
         if self.advanced_visible:
-            self.advanced_frame.grid()
+            self.advanced_frame.place(
+                relx=0,
+                rely=1,
+                anchor="sw",
+                relwidth=1,
+                height=190,
+            )
+            self.advanced_frame.lift()
             self.advanced_button.configure(text=self.t("advanced_hide"))
         else:
-            self.advanced_frame.grid_remove()
+            self.advanced_frame.place_forget()
             self.advanced_button.configure(text=self.t("advanced"))
 
     def render_provider_status(self, _health: dict) -> None:
