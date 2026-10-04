@@ -100,16 +100,24 @@ def _iter_files(
                             continue
                         if not entry.is_file(follow_symlinks=False):
                             continue
-                        stat = entry.stat(follow_symlinks=False)
+                        path = Path(entry.path)
+                        # Windows DirEntry.stat can expose a different file-ID
+                        # view than the Path/lstat call used immediately before
+                        # deletion. Capture and verify with the same API family.
+                        info = (
+                            path.lstat()
+                            if os.name == "nt"
+                            else entry.stat(follow_symlinks=False)
+                        )
                         records.append(
                             FileRecord(
-                                path=Path(entry.path),
-                                size=int(stat.st_size),
-                                modified=float(stat.st_mtime),
-                                modified_ns=int(stat.st_mtime_ns),
-                                created_ns=int(stat.st_ctime_ns),
-                                device=int(stat.st_dev),
-                                inode=int(stat.st_ino),
+                                path=path,
+                                size=int(info.st_size),
+                                modified=float(info.st_mtime),
+                                modified_ns=int(info.st_mtime_ns),
+                                created_ns=int(info.st_ctime_ns),
+                                device=int(info.st_dev),
+                                inode=int(info.st_ino),
                             )
                         )
                         if progress and len(records) % 250 == 0:
