@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .models import IdentityPlan, RegistryTarget
 from .registry import RegistryBackend
 from .system_info import collect_system_info
@@ -25,7 +26,7 @@ def _registry_entries(backend: RegistryBackend) -> list[dict[str, Any]]:
 
 def scan(backend: RegistryBackend) -> dict[str, Any]:
     return {
-        "antios_version": "2.0.0a1",
+        "antios_version": __version__,
         "platform": platform.platform(),
         "system": collect_system_info(backend),
         "registry": _registry_entries(backend),

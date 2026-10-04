@@ -4,7 +4,16 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
-from pathlib import Path
+
+from .windows_process import hidden_process_kwargs, system_executable
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _powershell_executable() -> str:
+    return system_executable("WindowsPowerShell/v1.0/powershell.exe")
 
 
 class AmsiScanner:
@@ -62,17 +71,16 @@ def defender_action(action: str, *, runner=subprocess.run) -> dict:
     }
     if action not in commands:
         raise ValueError("Defender action must be quick, full or update")
-    if os.name != "nt":
+    if not _is_windows():
         raise OSError("Microsoft Defender operations require Windows")
-    system = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-    executable = system / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    executable = _powershell_executable()
     result = runner(
         [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
          "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; "
          + commands[action]],
         capture_output=True, text=True, errors="replace", check=False,
         timeout=86400 if action == "full" else 3600,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        **hidden_process_kwargs(),
     )
     if result.returncode:
         detail = (result.stderr or result.stdout or "Operation failed").strip()[:2000]

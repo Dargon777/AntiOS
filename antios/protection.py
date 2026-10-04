@@ -8,6 +8,7 @@ import subprocess
 
 from .clamav import ClamAVScanner
 from .guard_state import read_guard_state
+from .windows_process import hidden_process_kwargs, system_executable
 
 
 def _managed_runtime_status() -> dict:
@@ -26,7 +27,7 @@ def _managed_runtime_status() -> dict:
     }
     files = {key: path.exists() for key, path in required.items()}
     task = {"available": False}
-    schtasks = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "schtasks.exe"
+    schtasks = system_executable("schtasks.exe")
     try:
         process = subprocess.run(
             [str(schtasks), "/Query", "/TN", "AntiOS ClamAV Signature Update", "/FO", "LIST"],
@@ -35,7 +36,7 @@ def _managed_runtime_status() -> dict:
             stderr=subprocess.PIPE,
             text=True,
             timeout=5,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            **hidden_process_kwargs(),
         )
         task = {
             "available": process.returncode == 0,
@@ -83,7 +84,7 @@ def _native_status() -> dict:
                 stderr=subprocess.PIPE,
                 text=True,
                 timeout=5,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                **hidden_process_kwargs(),
             )
             payload = json.loads(process.stdout) if process.stdout.strip() else {}
             payload["exit_code"] = process.returncode

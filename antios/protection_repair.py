@@ -7,6 +7,12 @@ from pathlib import Path
 import subprocess
 import sys
 
+from .windows_process import hidden_process_kwargs, system_executable
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
 
 def _script_path() -> Path:
     if getattr(sys, "frozen", False):
@@ -20,14 +26,11 @@ def _script_path() -> Path:
 
 def run_protection_repair(*, apply: bool = False, update_signatures: bool = False,
                           timeout: float = 180.0) -> dict:
-    if os.name != "nt":
+    if not _is_windows():
         raise OSError("Protection repair is available on Windows only")
-    powershell = os.path.join(
-        os.environ.get("SystemRoot", r"C:\Windows"),
-        "System32", "WindowsPowerShell", "v1.0", "powershell.exe",
-    )
+    powershell = system_executable("WindowsPowerShell/v1.0/powershell.exe")
     command = [
-        powershell,
+        str(powershell),
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy", "Bypass",
@@ -45,7 +48,7 @@ def run_protection_repair(*, apply: bool = False, update_signatures: bool = Fals
         stderr=subprocess.PIPE,
         text=True,
         timeout=timeout,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        **hidden_process_kwargs(),
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "Protection repair failed").strip()

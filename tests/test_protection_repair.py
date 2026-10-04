@@ -7,7 +7,12 @@ def test_repair_wrapper_builds_preview_command(monkeypatch, tmp_path):
     script = tmp_path / "protection-repair.ps1"
     script.write_text("# fixture")
     monkeypatch.setattr(protection_repair, "_script_path", lambda: script)
-    monkeypatch.setattr(protection_repair.os, "name", "nt")
+    monkeypatch.setattr(protection_repair, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        protection_repair,
+        "system_executable",
+        lambda _relative: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
     captured = {}
 
     def fake_run(command, **kwargs):
@@ -28,7 +33,12 @@ def test_repair_wrapper_apply_and_update_flags(monkeypatch, tmp_path):
     script = tmp_path / "protection-repair.ps1"
     script.write_text("# fixture")
     monkeypatch.setattr(protection_repair, "_script_path", lambda: script)
-    monkeypatch.setattr(protection_repair.os, "name", "nt")
+    monkeypatch.setattr(protection_repair, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        protection_repair,
+        "system_executable",
+        lambda _relative: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
     captured = {}
 
     def fake_run(command, **kwargs):

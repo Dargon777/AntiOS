@@ -97,6 +97,9 @@ def test_automatic_quarantine_is_explicit_and_never_acts_on_reviews(tmp_path):
             return {'id': 'test-backup'}
     root, state, instance, stop, thread, failures = launch(tmp_path, auto_quarantine=True, quarantine_factory=Vault)
     try:
+        # Avoid racing file creation against Guard's initial engine probe on
+        # slow/shared Windows CI runners.
+        until(lambda: instance.status['state'] == 'monitoring')
         target = root / 'fixture'
         target.write_bytes(b'inert-marker')
         until(lambda: instance.status['quarantined'] == 1)

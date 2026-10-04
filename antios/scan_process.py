@@ -13,6 +13,8 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+
+from .windows_process import hidden_process_kwargs
 import time
 from typing import Callable
 
@@ -105,9 +107,13 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
             "signatures": str(signature_path.absolute()) if signature_path else None,
         }), encoding="utf-8")
         events.touch()
-        process = subprocess.Popen(worker_command(request, events), stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        process = subprocess.Popen(
+            worker_command(request, events),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **hidden_process_kwargs(),
+        )
         forced = False
         timed_out = False
         deadline = time.monotonic() + timeout if timeout is not None else None

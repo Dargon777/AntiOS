@@ -20,6 +20,7 @@ from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifi
 from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
 from .scan_process import run_scan_process
+from .windows_process import hidden_process_kwargs
 
 
 @dataclass(frozen=True)
@@ -463,9 +464,13 @@ def launch_guard(root):
         command = [str(executable), 'run', str(path)]
     else:
         command = [sys.executable, '-m', 'antios.guard', 'run', str(path)]
-    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL,
-                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **hidden_process_kwargs(),
+    )
     return {'pid': process.pid, 'root': str(path)}
 
 

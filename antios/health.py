@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .registry import is_windows
+from .windows_process import hidden_process_kwargs, system_executable
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -17,9 +18,13 @@ def _powershell(script: str, runner: Runner = subprocess.run) -> tuple[bool, str
     if not is_windows():
         return False, "not-windows"
     try:
+        executable = (
+            str(system_executable("WindowsPowerShell/v1.0/powershell.exe"))
+            if os.name == "nt" else "powershell.exe"
+        )
         proc = runner(
             [
-                "powershell.exe",
+                executable,
                 "-NoLogo",
                 "-NoProfile",
                 "-NonInteractive",
@@ -32,6 +37,7 @@ def _powershell(script: str, runner: Runner = subprocess.run) -> tuple[bool, str
             text=True,
             timeout=12,
             check=False,
+            **hidden_process_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, str(exc)

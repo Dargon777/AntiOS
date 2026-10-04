@@ -9,6 +9,8 @@ import json
 import os
 import re
 import subprocess
+
+from .windows_process import hidden_process_kwargs, system_executable
 import uuid
 from pathlib import Path
 from typing import Protocol
@@ -76,7 +78,7 @@ class DPAPIProtector:
 def _current_windows_sid() -> str:
     if os.name != "nt":
         raise OSError("Windows SID lookup requires Windows")
-    whoami = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "whoami.exe"
+    whoami = system_executable("whoami.exe")
     result = subprocess.run(
         [str(whoami), "/user", "/fo", "csv", "/nh"],
         stdin=subprocess.DEVNULL,
@@ -84,7 +86,7 @@ def _current_windows_sid() -> str:
         stderr=subprocess.PIPE,
         text=True,
         timeout=5,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        **hidden_process_kwargs(),
     )
     if result.returncode != 0:
         raise OSError((result.stderr or "Unable to resolve current Windows SID").strip())
@@ -99,7 +101,7 @@ def _harden_windows_directory(path: Path) -> None:
     if os.name != "nt":
         return
     sid = _current_windows_sid()
-    icacls = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "icacls.exe"
+    icacls = system_executable("icacls.exe")
     grants = (
         f"*{sid}:(OI)(CI)F",
         "*S-1-5-18:(OI)(CI)F",
@@ -112,7 +114,7 @@ def _harden_windows_directory(path: Path) -> None:
         stderr=subprocess.PIPE,
         text=True,
         timeout=30,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        **hidden_process_kwargs(),
     )
     if result.returncode != 0:
         raise OSError((result.stderr or result.stdout or "Failed to harden quarantine ACL").strip())

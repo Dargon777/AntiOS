@@ -1,3 +1,4 @@
+from antios import __version__
 import pytest
 
 from antios.core import (
@@ -110,3 +111,12 @@ def test_restore_ignores_unapproved_registry_paths():
     )
 
     assert all("Danger" not in item["target"] for item in operations)
+
+
+def test_scan_reports_current_package_version(monkeypatch):
+    import antios.core as core
+
+    monkeypatch.setattr(core, "collect_system_info", lambda _backend: {})
+    monkeypatch.setattr(core, "_registry_entries", lambda _backend: [])
+    data = core.scan(object())
+    assert data["antios_version"] == __version__

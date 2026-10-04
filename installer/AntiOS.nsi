@@ -5,10 +5,10 @@ Unicode true
 !include "FileFunc.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "2.0.0a16"
+  !define APP_VERSION "2.0.0a17"
 !endif
 !ifndef NUMERIC_VERSION
-  !define NUMERIC_VERSION "2.0.16.0"
+  !define NUMERIC_VERSION "2.0.17.0"
 !endif
 !ifndef SOURCE_DIR
   !define SOURCE_DIR "..\installer-stage"
@@ -102,8 +102,9 @@ Section "AntiOS" SecMain
   SectionIn RO
   SetRegView 64
 
-  IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +3
-    ExecWait '"$INSTDIR\AntiOS-Guard.exe" stop' $0
+  IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +4
+    nsExec::Exec '"$INSTDIR\AntiOS-Guard.exe" stop'
+    Pop $0
     Sleep 500
 
   SetOutPath "$INSTDIR"
@@ -135,10 +136,18 @@ Section "AntiOS" SecMain
 
   ${If} $SkipEngine != "1"
     DetailPrint "Bootstrapping AntiOS protection engine..."
-    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\protection-bootstrap.ps1" -ManifestPath "$INSTDIR\clamav-windows.json" -Apply' $0
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-bootstrap.ps1" -ManifestPath "$INSTDIR\clamav-windows.json" -Apply'
+    Pop $0
+    ${If} $0 == "error"
+      StrCpy $0 9001
+    ${EndIf}
     WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapExitCode" $0
     ${If} $0 == 0
-      ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply' $2
+      nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply'
+      Pop $2
+      ${If} $2 == "error"
+        StrCpy $2 9001
+      ${EndIf}
       WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionFirstRunExitCode" $2
     ${Else}
       IfSilent bootstrap_done bootstrap_notice
@@ -154,12 +163,15 @@ SectionEnd
 
 Section "Uninstall"
   SetRegView 64
-  IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +2
-    ExecWait '"$INSTDIR\AntiOS-Guard.exe" stop' $0
-  IfFileExists "$INSTDIR\guard-startup.ps1" 0 +2
-    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply' $0
-  IfFileExists "$INSTDIR\protection-engine.ps1" 0 +2
-    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\protection-engine.ps1" -Uninstall -Apply' $0
+  IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +3
+    nsExec::Exec '"$INSTDIR\AntiOS-Guard.exe" stop'
+    Pop $0
+  IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
+    Pop $0
+  IfFileExists "$INSTDIR\protection-engine.ps1" 0 +3
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-engine.ps1" -Uninstall -Apply'
+    Pop $0
 
   Delete "$COMMONDESKTOP\AntiOS.lnk"
   RMDir /r "$COMMONPROGRAMS\AntiOS"

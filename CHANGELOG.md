@@ -6,6 +6,17 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a17] - 2026-10-04
+
+- Normal GUI diagnostics and protection helpers no longer flash PowerShell or
+  console windows in the background.
+- Setup/uninstall use hidden NSIS console execution for ClamAV and Guard
+  preparation while leaving the normal UAC consent dialog visible.
+- Windows helper executables are resolved from System32 instead of PATH lookup.
+- Scan reports now contain the actual AntiOS version.
+- Removed a Guard test startup race seen on loaded Windows runners.
+
+
 ## [2.0.0a16] - 2026-10-04
 
 Alpha 16 makes the installed antivirus stack much less manual.
