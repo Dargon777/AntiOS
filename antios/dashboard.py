@@ -1478,7 +1478,7 @@ class Dashboard:
                 return
             chosen = filedialog.askdirectory(
                 title=self.t("cleanup.backup_dialog_title"),
-                initialdir=str(default_cleanup_backup_path().parent),
+                initialdir=str(default_cleanup_backup_path().parent.parent),
                 mustexist=False,
             )
             if not chosen:
