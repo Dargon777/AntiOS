@@ -6,6 +6,14 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a19] - 2026-10-04
+
+- Rebuilt Antivirus around protection state, scanning, Resident Guard, results
+  and quarantine; engine/provider controls are now advanced-only.
+- Refined the application shell, branding, palettes, spacing and controls.
+- Synchronized Python, Windows, installer and Store release metadata.
+
+
 ## [2.0.0a18] - 2026-10-04
 
 - Closing the dashboard now hides AntiOS to the system tray instead of

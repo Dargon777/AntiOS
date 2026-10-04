@@ -5,10 +5,10 @@ Unicode true
 !include "FileFunc.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "2.0.0a18"
+  !define APP_VERSION "2.0.0a19"
 !endif
 !ifndef NUMERIC_VERSION
-  !define NUMERIC_VERSION "2.0.18.0"
+  !define NUMERIC_VERSION "2.0.19.0"
 !endif
 !ifndef SOURCE_DIR
   !define SOURCE_DIR "..\installer-stage"

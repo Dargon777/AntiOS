@@ -38,6 +38,7 @@ from .storage_cleanup import (
 from .tray import (
     DashboardTray,
     application_icon_asset,
+    icon_asset,
     clear_dashboard_presence,
     mark_dashboard_presence,
 )
@@ -50,49 +51,49 @@ PRIVACY_URL = PROJECT_URL + "/blob/master/PRIVACY.md"
 SUPPORT_URL = PROJECT_URL + "/blob/master/SUPPORT.md"
 
 DARK_THEME = {
-    "bg": "#090D14",
-    "sidebar": "#0E1420",
-    "surface": "#111925",
-    "surface_alt": "#151F2D",
-    "surface_hover": "#1B2737",
-    "border": "#263347",
-    "text": "#F2F5FA",
-    "muted": "#8996A8",
-    "muted_2": "#66758A",
-    "accent": "#6EA8FE",
-    "accent_hover": "#8AB9FF",
-    "accent_text": "#08111F",
-    "ok": "#59D499",
-    "ok_bg": "#102A25",
-    "review": "#F3C969",
-    "review_bg": "#2C2513",
-    "warn": "#FF7B82",
-    "warn_bg": "#2E171D",
-    "info": "#7CAEF8",
-    "info_bg": "#132239",
+    "bg": "#090C12",
+    "sidebar": "#0C111A",
+    "surface": "#111722",
+    "surface_alt": "#171F2C",
+    "surface_hover": "#202B3B",
+    "border": "#222E3E",
+    "text": "#F5F7FB",
+    "muted": "#98A4B5",
+    "muted_2": "#6F7D90",
+    "accent": "#6D9EFF",
+    "accent_hover": "#85AFFF",
+    "accent_text": "#07101E",
+    "ok": "#55D69B",
+    "ok_bg": "#102A24",
+    "review": "#F0C96B",
+    "review_bg": "#2A2515",
+    "warn": "#FF727B",
+    "warn_bg": "#30171C",
+    "info": "#7EAEFF",
+    "info_bg": "#15243A",
 }
 
 LIGHT_THEME = {
-    "bg": "#F4F7FB",
-    "sidebar": "#FFFFFF",
+    "bg": "#F5F7FA",
+    "sidebar": "#FBFCFE",
     "surface": "#FFFFFF",
-    "surface_alt": "#EEF2F7",
-    "surface_hover": "#E3E9F2",
-    "border": "#D7DEE8",
-    "text": "#172033",
-    "muted": "#5F6F84",
-    "muted_2": "#7A8798",
-    "accent": "#3B82F6",
-    "accent_hover": "#2563EB",
+    "surface_alt": "#F0F3F7",
+    "surface_hover": "#E7ECF3",
+    "border": "#DCE2EA",
+    "text": "#151B27",
+    "muted": "#5D6879",
+    "muted_2": "#7D8898",
+    "accent": "#3D78F2",
+    "accent_hover": "#2E68D9",
     "accent_text": "#FFFFFF",
-    "ok": "#15803D",
-    "ok_bg": "#ECFDF3",
-    "review": "#A16207",
-    "review_bg": "#FFF7D6",
-    "warn": "#C2414A",
-    "warn_bg": "#FFF0F1",
-    "info": "#2563EB",
-    "info_bg": "#EEF4FF",
+    "ok": "#16804A",
+    "ok_bg": "#EAF8F0",
+    "review": "#9A6508",
+    "review_bg": "#FFF6D8",
+    "warn": "#C83F4D",
+    "warn_bg": "#FFF0F2",
+    "info": "#326ED7",
+    "info_bg": "#EDF3FF",
 }
 
 THEME = dict(DARK_THEME)
@@ -381,8 +382,8 @@ class Dashboard:
     def _configure_root(self) -> None:
         root = self.root
         root.title(self.t("app.title"))
-        root.geometry("1180x780")
-        root.minsize(960, 650)
+        root.geometry("1240x820")
+        root.minsize(1024, 700)
         root.configure(bg=THEME["bg"])
         root.option_add("*Font", ("Segoe UI", 10))
         root.bind("<F5>", lambda _event: self.refresh())
@@ -499,7 +500,7 @@ class Dashboard:
             foreground=THEME["text"],
             borderwidth=0,
             relief="flat",
-            rowheight=36,
+            rowheight=38,
             font=("Segoe UI", 10),
         )
         style.map(
@@ -513,7 +514,7 @@ class Dashboard:
             foreground=THEME["muted"],
             borderwidth=0,
             relief="flat",
-            padding=(10, 9),
+            padding=(12, 10),
             font=("Segoe UI Semibold", 9),
         )
         style.map(
@@ -528,7 +529,7 @@ class Dashboard:
             bordercolor=THEME["border"],
             lightcolor=THEME["accent"],
             darkcolor=THEME["accent"],
-            thickness=7,
+            thickness=6,
         )
 
         style.configure(
@@ -556,7 +557,7 @@ class Dashboard:
         self.sidebar = tk.Frame(
             self.root,
             bg=THEME["sidebar"],
-            width=236,
+            width=218,
             highlightthickness=1,
             highlightbackground=THEME["border"],
         )
@@ -564,29 +565,39 @@ class Dashboard:
         self.sidebar.pack_propagate(False)
 
         brand = tk.Frame(self.sidebar, bg=THEME["sidebar"])
-        brand.pack(fill="x", padx=22, pady=(24, 26))
+        brand.pack(fill="x", padx=18, pady=(22, 24))
 
-        mark = tk.Label(
-            brand,
-            text="A",
-            width=3,
-            height=1,
-            bg=THEME["accent"],
-            fg=THEME["accent_text"],
-            font=("Segoe UI", 14, "bold"),
-            bd=0,
-        )
+        try:
+            source = tk.PhotoImage(file=str(icon_asset("app_main.png")))
+            self._sidebar_logo = source.subsample(6, 6)
+            mark = tk.Label(
+                brand,
+                image=self._sidebar_logo,
+                bg=THEME["sidebar"],
+                bd=0,
+            )
+        except Exception:
+            mark = tk.Label(
+                brand,
+                text="A",
+                width=3,
+                height=1,
+                bg=THEME["accent"],
+                fg=THEME["accent_text"],
+                font=("Segoe UI", 14, "bold"),
+                bd=0,
+            )
         mark.pack(side="left")
 
         brand_text = tk.Frame(brand, bg=THEME["sidebar"])
-        brand_text.pack(side="left", padx=(11, 0))
+        brand_text.pack(side="left", padx=(10, 0))
 
         tk.Label(
             brand_text,
             text="AntiOS",
             bg=THEME["sidebar"],
             fg=THEME["text"],
-            font=("Segoe UI", 16, "bold"),
+            font=("Segoe UI", 17, "bold"),
         ).pack(anchor="w")
         tk.Label(
             brand_text,
@@ -611,7 +622,7 @@ class Dashboard:
             bg=THEME["sidebar"],
             fg=THEME["muted_2"],
             font=("Segoe UI Semibold", 8),
-        ).pack(anchor="w", padx=22, pady=(0, 8))
+        ).pack(anchor="w", padx=18, pady=(0, 8))
 
         for key, label in [
             ("overview", self.t("nav.overview")),
@@ -663,35 +674,36 @@ class Dashboard:
 
         trust = tk.Frame(
             self.sidebar,
-            bg=THEME["surface"],
-            highlightthickness=1,
-            highlightbackground=THEME["border"],
+            bg=THEME["surface_alt"],
+            highlightthickness=0,
         )
-        trust.pack(fill="x", padx=14, pady=(0, 14))
+        trust.pack(fill="x", padx=12, pady=(0, 12))
 
+        trust_top = tk.Frame(trust, bg=THEME["surface_alt"])
+        trust_top.pack(fill="x", padx=11, pady=(9, 3))
         tk.Label(
-            trust,
-            text=self.t("sidebar.local_mode"),
-            bg=THEME["surface"],
+            trust_top,
+            text="●",
+            bg=THEME["surface_alt"],
             fg=THEME["ok"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left", padx=(0, 6))
+        tk.Label(
+            trust_top,
+            text=self.t("sidebar.local_mode"),
+            bg=THEME["surface_alt"],
+            fg=THEME["text"],
             font=("Segoe UI Semibold", 8),
-        ).pack(anchor="w", padx=12, pady=(11, 4))
+        ).pack(side="left")
         tk.Label(
             trust,
             text=self.t("sidebar.no_telemetry"),
             justify="left",
-            wraplength=180,
-            bg=THEME["surface"],
-            fg=THEME["muted"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=12, pady=(0, 7))
-        tk.Label(
-            trust,
-            text="F5  •  Ctrl+E  •  Ctrl+,",
-            bg=THEME["surface"],
+            wraplength=170,
+            bg=THEME["surface_alt"],
             fg=THEME["muted_2"],
             font=("Segoe UI", 8),
-        ).pack(anchor="w", padx=12, pady=(0, 11))
+        ).pack(anchor="w", padx=11, pady=(0, 9))
 
         sidebar_links = tk.Frame(self.sidebar, bg=THEME["sidebar"])
         sidebar_links.pack(fill="x", padx=14, pady=(0, 16))
@@ -711,7 +723,7 @@ class Dashboard:
         self.content.pack(side="left", fill="both", expand=True)
 
         self.header = tk.Frame(self.content, bg=THEME["bg"])
-        self.header.pack(fill="x", padx=30, pady=(24, 18))
+        self.header.pack(fill="x", padx=28, pady=(24, 17))
 
         title_block = tk.Frame(self.header, bg=THEME["bg"])
         title_block.pack(side="left", fill="both", expand=True)
@@ -721,7 +733,7 @@ class Dashboard:
             text=self.t("nav.overview"),
             bg=THEME["bg"],
             fg=THEME["text"],
-            font=("Segoe UI", 22, "bold"),
+            font=("Segoe UI", 24, "bold"),
         )
         self.page_title.pack(anchor="w")
 
@@ -737,6 +749,7 @@ class Dashboard:
 
         header_actions = tk.Frame(self.header, bg=THEME["bg"])
         header_actions.pack(side="right", before=title_block)
+        self.header_actions = header_actions
         self.header.bind(
             "<Configure>",
             lambda event: self.page_subtitle.configure(
@@ -764,8 +777,8 @@ class Dashboard:
         self.page_host.pack(
             fill="both",
             expand=True,
-            padx=30,
-            pady=(0, 22),
+            padx=28,
+            pady=(0, 24),
         )
 
     def _build_pages(self) -> None:
@@ -2167,21 +2180,24 @@ class Dashboard:
             bg = THEME["accent"]
             fg = THEME["accent_text"]
             active_bg = THEME["accent_hover"]
+            border = THEME["accent"]
         elif kind == "danger":
             bg = THEME["warn"]
             fg = "#FFFFFF"
             active_bg = THEME["warn"]
+            border = THEME["warn"]
         else:
             bg = THEME["surface_alt"]
             fg = THEME["text"]
             active_bg = THEME["surface_hover"]
+            border = THEME["border"]
 
         button = self.tk.Button(
             parent,
             text=text,
             command=command,
-            padx=15,
-            pady=8,
+            padx=14,
+            pady=9,
             bg=bg,
             fg=fg,
             activebackground=active_bg,
@@ -2189,6 +2205,9 @@ class Dashboard:
             disabledforeground=THEME["muted_2"],
             bd=0,
             relief="flat",
+            highlightthickness=1,
+            highlightbackground=border,
+            highlightcolor=border,
             cursor="hand2",
             takefocus=True,
             font=("Segoe UI Semibold", 9),
@@ -2441,6 +2460,17 @@ class Dashboard:
         title, subtitle = titles[name]
         self.page_title.configure(text=title)
         self.page_subtitle.configure(text=subtitle)
+
+        # Pages with their own action model stay visually quiet; health/report
+        # actions return only where they are relevant.
+        if name in {"antivirus", "cleanup", "settings"}:
+            self.export_button.pack_forget()
+            self.refresh_button.pack_forget()
+        else:
+            if not self.export_button.winfo_manager():
+                self.export_button.pack(side="left", padx=(0, 10))
+            if not self.refresh_button.winfo_manager():
+                self.refresh_button.pack(side="left")
 
         for key, button in self.nav_buttons.items():
             selected = key == name
