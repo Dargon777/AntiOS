@@ -53,6 +53,7 @@ AntiOS checks common things that are scattered across different Windows screens:
 - architecture, processor and uptime;
 - duplicate files and potential duplicate-space savings;
 - old large files, installers/archives and empty-file cleanup candidates.
+- explicit multi-select cleanup with permanent deletion or a verified backup-before-delete workflow.
 
 Windows health results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. The Settings hub preserves language, theme and Storage Cleanup preferences. These checks describe Windows health settings; a completed health check is not a malware scan.
 
