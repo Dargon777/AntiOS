@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -163,8 +164,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     av = sub.add_parser("virus-scan", help="Read-only, on-demand antivirus scan of a file or folder.")
     av.add_argument("path")
-    av.add_argument("--engine", choices=("amsi", "clamav"), default="amsi",
-                    help="AMSI (default) or independent local ClamAV at 127.0.0.1:3310.")
+    av.add_argument("--engine", choices=("clamav", "amsi"), default="clamav",
+                    help="Independent managed ClamAV (default) or Windows AMSI compatibility mode.")
     av.add_argument("--signatures", help="Optional local schema-1 SHA-256 signature database.")
     av.add_argument("--max-mb", type=int, default=DEFAULT_MAX_BYTES // (1024 * 1024))
     av.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
@@ -176,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     quarantine_list.add_argument("--json", action="store_true")
     quarantine_add = quarantine_sub.add_parser("add", help="Rescan a file, then preview or isolate a confirmed detection.")
     quarantine_add.add_argument("path")
-    quarantine_add.add_argument("--engine", choices=("amsi", "clamav"), default="amsi")
+    quarantine_add.add_argument("--engine", choices=("clamav", "amsi"), default="clamav")
     quarantine_add.add_argument("--signatures")
     quarantine_add.add_argument("--yes", action="store_true")
     quarantine_add.add_argument("--json", action="store_true")
@@ -341,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "virus-scan":
             result = scan_files(args.path, signature_path=args.signatures,
                                 engine=args.engine,
+                                require_verified_peer=(args.engine == "clamav" and os.name == "nt"),
                                 max_bytes=args.max_mb * 1024 * 1024, max_files=args.max_files,
                                 excluded_paths=(default_quarantine_path(),))
             if args.json:
@@ -361,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 result = scan_files(args.path, signature_path=args.signatures,
                                     engine=args.engine,
+                                    require_verified_peer=(args.engine == "clamav" and os.name == "nt"),
                                     excluded_paths=(default_quarantine_path(),))
                 if not Path(args.path).is_file():
                     raise ValueError("Quarantine add requires one file")
