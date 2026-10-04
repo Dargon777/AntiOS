@@ -1,29 +1,62 @@
-# AntiOS v2.0.0 alpha 15
+# AntiOS v2.0.0 alpha 16
 
-Alpha 15 gives AntiOS its production-facing visual identity and wires protection state directly into the Windows tray.
+Alpha 16 is mostly about making the antivirus side behave like an installed
+product instead of a collection of pieces you have to assemble yourself.
 
-## Branding
+## Protection is prepared by Setup
 
-- The green primary AntiOS emblem is embedded into the CLI, GUI and Resident Guard executables.
-- Desktop and Start Menu shortcuts inherit the primary green application icon.
-- `AntiOS-Setup.exe` and the generated uninstaller use the same primary icon.
-- The running AntiOS dashboard uses the dedicated red taskbar/window icon and a stable Windows AppUserModelID.
-- Windows icon resources are generated as multi-size ICO files during CI for crisp shell rendering from 16 px through 256 px.
+A normal `AntiOS-Setup.exe` install now bootstraps the managed ClamAV engine
+automatically. AntiOS downloads the pinned official Windows x64 package, verifies
+its SHA-256, requires valid matching Authenticode signatures on `clamd.exe` and
+`freshclam.exe`, then installs the ClamD service and recurring FreshClam
+signature updates.
 
-## Resident Guard tray status
+When UAC is approved by the same Windows user who is currently logged in, Setup
+also enables Resident Guard for Downloads, Desktop and Documents. If a different
+administrator account was used for elevation, that per-user step is deferred
+rather than being configured under the wrong profile.
 
-- The frozen Windows Resident Guard now owns a system-tray icon while it is running.
-- Green tray state means Guard is actively monitoring or scanning.
-- Red tray state means protection is starting, needs attention, is degraded, failed or stopped.
-- Tray state follows the Guard's real protection-state transitions rather than a separate cosmetic flag.
-- Tray rendering is best-effort: any tray/backend failure is contained and never stops the protection loop.
+There is also a new repair path:
 
-## Packaging and validation
+```powershell
+AntiOS.exe protection-repair
+AntiOS.exe protection-repair --yes --update-signatures
+```
 
-- Source PNG artwork is packaged with the Python distribution and explicitly bundled into the GUI/Guard PyInstaller payloads.
-- Windows CI verifies generated ICO resources and checks that frozen runtime branding assets are present.
-- The Setup build receives the generated primary ICO directly so installer branding cannot silently fall back to the NSIS default.
+It can restore the known service policy, protected ACLs and updater task, but
+will refuse to take ownership of an ambiguous third-party ClamD service.
 
-## Existing protection
+## Faster repeated scans
 
-Alpha 15 keeps the independent ClamAV default engine, verified ClamD service identity, Resident Guard, encrypted quarantine, actionable Storage Cleanup and the conventional machine-wide Windows Setup introduced in earlier alphas.
+ClamD scans can now use four bounded parallel requests by default (up to eight).
+
+AntiOS also caches clean results, but a cache hit is not trusted from timestamps
+alone: the file is opened through the normal stable-file path and SHA-256 is
+checked again before the repeat ClamD submission is skipped. Changing the file,
+ClamAV/database identity or local signature set invalidates the old result.
+
+## Safer recovery and updating
+
+The Windows quarantine vault now removes inherited access and restricts itself to
+the current user, SYSTEM and Administrators. `quarantine verify` checks every
+stored item's authenticated payload and SHA-256 without restoring it.
+
+AntiOS can now check GitHub releases and download a newer Setup. Automatic
+installation is deliberately stricter: it requires a valid Authenticode
+signature and re-checks both the file hash and signature immediately before
+launching the installer.
+
+Direct-download signing is **not enabled yet**, so `AntiOS.exe update --yes`
+will currently refuse to auto-install an unsigned release. That is intentional;
+`update` and `update --download-only` still work for discovery and
+hash-verified downloads.
+
+## Native protection work
+
+The experimental minifilter remains outside the normal Setup. Its Windows VM
+acceptance test now requires separate evidence for execute-open, real
+`CreateProcess`, and `SEC_IMAGE` image-section mapping.
+
+This is a stricter test, not a certification claim. Production deployment still
+needs Microsoft-assigned minifilter altitude, signed-driver/Driver Verifier/HVCI
+acceptance, and the external Windows antimalware integration gates.
