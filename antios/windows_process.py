@@ -1,0 +1,45 @@
+"""Windows child-process helpers used by the GUI and installer-facing code.
+
+GUI builds must never flash console windows for background diagnostics.  Keep
+that policy in one place so new subprocess call sites do not accidentally
+regress the desktop experience.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import subprocess
+from typing import Any
+
+
+def system_executable(relative: str) -> Path:
+    """Return an absolute executable path below the real Windows directory.
+
+    AntiOS is Windows-x64 only in packaged builds.  Using an absolute System32
+    path avoids PATH/current-directory executable resolution for privileged or
+    security-sensitive helpers.
+    """
+    if os.name != "nt":
+        raise OSError("Windows system executable requested on a non-Windows host")
+    root = Path(os.environ.get("SystemRoot") or r"C:\Windows")
+    candidate = root / "System32" / relative
+    return candidate
+
+
+def hidden_process_kwargs() -> dict[str, Any]:
+    """subprocess kwargs that suppress a console window on Windows.
+
+    CREATE_NO_WINDOW prevents creation of a console for console-subsystem
+    helpers. STARTUPINFO/SW_HIDE is kept as a second layer for tools that still
+    honor the show-window field.
+    """
+    if os.name != "nt":
+        return {}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+    startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    return {
+        "creationflags": flags,
+        "startupinfo": startupinfo,
+    }
