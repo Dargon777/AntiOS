@@ -11,6 +11,7 @@ import tempfile
 from urllib.request import Request, urlopen
 
 from . import __version__
+from .windows_process import hidden_process_kwargs, system_executable
 
 RELEASES_API = "https://api.github.com/repos/Dargon777/AntiOS/releases"
 MAX_RELEASE_RESPONSE = 2 * 1024 * 1024
@@ -114,7 +115,7 @@ def _parse_checksum(content: bytes) -> str:
 def _authenticode(path: Path) -> dict:
     if os.name != "nt":
         raise OSError("Authenticode verification requires Windows")
-    powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    powershell = system_executable("WindowsPowerShell/v1.0/powershell.exe")
     command = (
         "$s=Get-AuthenticodeSignature -LiteralPath $args[0];"
         "[pscustomobject]@{Status=[string]$s.Status;"
@@ -129,7 +130,7 @@ def _authenticode(path: Path) -> dict:
         stderr=subprocess.PIPE,
         text=True,
         timeout=20,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        **hidden_process_kwargs(),
     )
     if result.returncode != 0:
         raise RuntimeError((result.stderr or "Authenticode verification failed").strip())
@@ -215,8 +216,7 @@ def schedule_install(setup_path: str | Path, expected_sha256: str) -> dict:
         """finally { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue }\n""",
         encoding="utf-8",
     )
-    powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    powershell = system_executable("WindowsPowerShell/v1.0/powershell.exe")
     process = subprocess.Popen(
         [
             str(powershell), "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
@@ -226,8 +226,10 @@ def schedule_install(setup_path: str | Path, expected_sha256: str) -> dict:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        creationflags=flags,
         close_fds=True,
+        **hidden_process_kwargs(
+            extra_creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        ),
     )
     return {
         "scheduled": True,
