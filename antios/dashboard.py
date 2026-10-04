@@ -303,7 +303,7 @@ class Dashboard:
         self._storage_cancel = threading.Event()
         self.antivirus_path = default_scan_path()
         self.antivirus_signatures: Path | None = None
-        self.antivirus_engine = "amsi"
+        self.antivirus_engine = "clamav"
         self.antivirus_result: dict[str, Any] | None = None
         self.antivirus_items: list[dict] = []
         self.antivirus_queue: queue.Queue = queue.Queue()
