@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import base64
+import csv
 import ctypes
 import hashlib
 import json
 import os
 import re
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Protocol
@@ -71,6 +73,51 @@ class DPAPIProtector:
         return self._transform(content, encrypt=False)
 
 
+def _current_windows_sid() -> str:
+    if os.name != "nt":
+        raise OSError("Windows SID lookup requires Windows")
+    whoami = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "whoami.exe"
+    result = subprocess.run(
+        [str(whoami), "/user", "/fo", "csv", "/nh"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=5,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode != 0:
+        raise OSError((result.stderr or "Unable to resolve current Windows SID").strip())
+    rows = list(csv.reader(result.stdout.splitlines()))
+    if not rows or len(rows[0]) < 2 or not re.fullmatch(r"S-1-[0-9-]+", rows[0][1].strip()):
+        raise OSError("Unable to parse current Windows SID")
+    return rows[0][1].strip()
+
+
+def _harden_windows_directory(path: Path) -> None:
+    """Remove inherited access and restrict the vault to user/SYSTEM/admins."""
+    if os.name != "nt":
+        return
+    sid = _current_windows_sid()
+    icacls = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "icacls.exe"
+    grants = (
+        f"*{sid}:(OI)(CI)F",
+        "*S-1-5-18:(OI)(CI)F",
+        "*S-1-5-32-544:(OI)(CI)F",
+    )
+    result = subprocess.run(
+        [str(icacls), str(path), "/inheritance:r", "/grant:r", *grants, "/t", "/c"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode != 0:
+        raise OSError((result.stderr or result.stdout or "Failed to harden quarantine ACL").strip())
+
+
 def _move_without_overwrite(source: Path, target: Path) -> None:
     if os.name == "nt":
         # Windows rename refuses an existing destination.
@@ -95,6 +142,7 @@ class Quarantine:
         checked_path(ancestor)
         if create:
             self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            _harden_windows_directory(self.root)
         root = checked_path(self.root)
         if not root.is_dir():
             raise ValueError("Quarantine location must be a directory")
@@ -137,6 +185,22 @@ class Quarantine:
             except (OSError, ValueError, TypeError) as exc:
                 items.append({"id": path.stem, "error": str(exc)})
         return items
+
+    def verify_all(self) -> dict:
+        if not self.root.exists() and not self.root.is_symlink():
+            return {"checked": 0, "valid": 0, "corrupt": 0, "issues": []}
+        checked = valid = corrupt = 0
+        issues = []
+        for path in sorted(self._root().glob("*.aq")):
+            checked += 1
+            try:
+                self._read(path.stem)
+                valid += 1
+            except (OSError, ValueError, TypeError) as exc:
+                corrupt += 1
+                if len(issues) < 1000:
+                    issues.append({"id": path.stem, "error": str(exc)})
+        return {"checked": checked, "valid": valid, "corrupt": corrupt, "issues": issues}
 
     def _save_record(self, record: dict, *, new: bool) -> Path:
         sealed = self.protector.protect(json.dumps(record).encode("utf-8"))
