@@ -24,6 +24,8 @@ public static class NativeExecuteOpen {
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
   public static extern IntPtr CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
   [DllImport("kernel32.dll", SetLastError=true)] public static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern IntPtr CreateFileMapping(IntPtr file, IntPtr attributes, uint protect, uint maxHigh, uint maxLow, string name);
 }
 '@
 try {
@@ -59,6 +61,29 @@ try {
     $report.markedProcessStarted = $started; $report.processError = $startError
     if ($enforce -and ($started -or $startError -ne 225)) { throw 'Actual CreateProcess prevention failed.' }
     if (-not $enforce -and -not $started) { throw 'Audit unexpectedly prevented CreateProcess.' }
+
+    # Exercise image-section mapping separately from CreateProcess. A filter that
+    # only happens to catch FILE_EXECUTE opens is not sufficient loader coverage.
+    $readHandle = [NativeExecuteOpen]::CreateFile($marked, 0x80000000, 7, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
+    if ($readHandle -eq [IntPtr](-1)) { throw 'Could not open marked fixture for image-section test.' }
+    $mapping = [IntPtr]::Zero
+    try {
+        $mapping = [NativeExecuteOpen]::CreateFileMapping($readHandle, [IntPtr]::Zero, (0x01000000 -bor 0x02), 0, 0, $null)
+        $mappingError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        $mapped = $mapping -ne [IntPtr]::Zero
+        $report.markedImageMapped = $mapped
+        $report.imageMapError = if ($mapped) { 0 } else { $mappingError }
+        if ($enforce -and ($mapped -or $mappingError -ne 225)) {
+            throw 'SEC_IMAGE mapping prevention failed; loader coverage is incomplete.'
+        }
+        if (-not $enforce -and -not $mapped) {
+            throw 'Audit unexpectedly prevented SEC_IMAGE mapping.'
+        }
+    } finally {
+        if ($mapping -ne [IntPtr]::Zero) { [void][NativeExecuteOpen]::CloseHandle($mapping) }
+        [void][NativeExecuteOpen]::CloseHandle($readHandle)
+    }
+
     $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = $clean; $info.UseShellExecute = $false
     $process = [Diagnostics.Process]::Start($info)
