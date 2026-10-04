@@ -1,0 +1,95 @@
+name: Windows protection acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  managed-clamav:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install AntiOS
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate protection scripts
+        shell: pwsh
+        run: |
+          foreach ($path in @(
+            ".\scripts\protection-engine.ps1",
+            ".\scripts\protection-bootstrap.ps1",
+            ".\scripts\protection-repair.ps1"
+          )) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) {
+              $errors | Format-List | Out-String | Write-Error
+              exit 1
+            }
+          }
+
+      - name: Install, verify, repair and remove managed engine
+        shell: pwsh
+        run: |
+          $installed = $false
+          try {
+            $preview = .\scripts\protection-bootstrap.ps1 -ManifestPath .\release\clamav-windows.json -Json | ConvertFrom-Json
+            if (-not $preview.dry_run -or $preview.version -ne "1.5.4") {
+              throw "Unexpected bootstrap preview."
+            }
+
+            .\scripts\protection-bootstrap.ps1 -ManifestPath .\release\clamav-windows.json -Apply
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $installed = $true
+
+            $statusText = antios protection-status --json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $status = $statusText | ConvertFrom-Json
+            if (-not $status.capabilities.standalone_detection_engine) {
+              throw "Managed ClamAV did not become a trusted/current AntiOS engine."
+            }
+            if (-not $status.managed_runtime.healthy) {
+              throw "Managed runtime health check failed."
+            }
+
+            $repairText = antios protection-repair --json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $repair = $repairText | ConvertFrom-Json
+            if (-not $repair.healthy_before) {
+              throw "Freshly installed managed runtime already needs repair: $($repair.issues -join ', ')"
+            }
+
+            $repairApplyText = antios protection-repair --yes --update-signatures --json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $repairApply = $repairApplyText | ConvertFrom-Json
+            if (-not $repairApply.actions) {
+              throw "Repair apply did not report its policy refresh actions."
+            }
+
+            $statusText | Set-Content -Encoding utf8 .\protection-status.json
+          } finally {
+            if ($installed -or (Get-Service -Name clamd -ErrorAction SilentlyContinue)) {
+              .\scripts\protection-engine.ps1 -Uninstall -Apply
+            }
+          }
+
+      - name: Upload acceptance status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: antios-managed-protection-acceptance
+          path: protection-status.json
+          if-no-files-found: ignore
