@@ -216,6 +216,7 @@ class AntivirusPanel:
         engine = self.app.antivirus_engine
         self._run("scan", lambda: run_scan_process(
             path, signature_path=signatures, engine=engine,
+            require_verified_peer=(engine == "clamav" and sys.platform == "win32"),
             cancelled=self.app.antivirus_cancel.is_set,
             progress=lambda data: self.app.antivirus_queue.put(("progress", data)),
         ), cancelable=True)

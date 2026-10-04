@@ -6,6 +6,43 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a13] - 2026-10-04
+
+### Added
+
+- Storage Cleanup now supports multi-select actions instead of read-only results.
+- Selected cleanup candidates can be deleted permanently or copied into a
+  verified backup set before the originals are removed.
+- Backup mode preserves relative paths, records a JSON manifest and verifies
+  every copied file with SHA-256 before deletion.
+- "Select extra duplicates" keeps one file from each duplicate group selected
+  out of the destructive set by default, while still allowing manual adjustment.
+- The cleanup page now has selected-size feedback, a progress bar, horizontal
+  table scrolling, polished summary cards and a dedicated action panel.
+
+### Changed
+
+- Managed ClamAV is now the default antivirus engine for GUI scans, CLI
+  `virus-scan` and quarantine confirmation.
+- Windows ClamAV scans require the configured trusted SCM peer before AntiOS
+  sends file content to the local ClamD service.
+- Windows AMSI remains available only as an explicit compatibility mode; AntiOS
+  does not silently switch engines after a failure.
+- Microsoft Store development package version advanced to `2.0.13.0`.
+
+### Fixed
+
+- Updated the Windows ClamAV regression fixture to accept the verified-peer
+  constructor arguments used by the production scanner path.
+
+### Safety
+
+- Defender remains enabled/unchanged; alpha 13 does not claim Windows Security
+  Center registration, ELAM/PPL status or certified primary-antivirus support.
+- The experimental native minifilter remains outside the normal release package
+  pending signed-driver, altitude and installed-VM acceptance gates.
+
+
 ## [2.0.0a12] - 2026-10-04
 
 ### Added
@@ -317,6 +354,9 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 - File logging avoids generated/scanned identity values.
 - Release artifacts are checksummed and built in GitHub Actions.
 
+[2.0.0a13]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.13
+[2.0.0a12]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.12
+[2.0.0a11]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.11
 [2.0.0a10]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.10
 [2.0.0a9]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.9
 [2.0.0a8]: https://github.com/Dargon777/AntiOS/releases/tag/v2.0.0-alpha.8

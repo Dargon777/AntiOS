@@ -65,6 +65,9 @@ def test_storage_cleanup_translation_keys_exist_for_all_locales():
         assert tr.t("nav.cleanup") != "nav.cleanup"
         assert tr.t("cleanup.scan") != "cleanup.scan"
         assert tr.t("cleanup.note", days=180) != "cleanup.note"
+        assert tr.t("cleanup.delete_backup") != "cleanup.delete_backup"
+        assert tr.t("cleanup.delete_permanent") != "cleanup.delete_permanent"
+        assert tr.t("cleanup.selection", count=2, size="1 GB") != "cleanup.selection"
 
 
 

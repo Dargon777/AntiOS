@@ -6,7 +6,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 12
+> **Pre-release:** 2.0.0 alpha 13
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -26,7 +26,7 @@ Windows executables request Administrator consent at startup. Cancelling UAC can
 Open **Antivirus** from the sidebar or press `Ctrl+6`:
 
 - Scan a selected file or folder without changing its contents.
-- Choose Windows AMSI or an independent local ClamAV engine, alongside local SHA-256 signatures.
+- Use the managed independent ClamAV engine by default; Windows AMSI remains available as an explicit compatibility mode, alongside local SHA-256 signatures.
 - Inspect detections, skipped files, access errors and incomplete coverage.
 - Encrypt and isolate a selected detection in current-user Windows DPAPI quarantine.
 - Restore selected quarantined items without overwriting existing files.
@@ -53,6 +53,7 @@ AntiOS checks common things that are scattered across different Windows screens:
 - architecture, processor and uptime;
 - duplicate files and potential duplicate-space savings;
 - old large files, installers/archives and empty-file cleanup candidates.
+- explicit multi-select cleanup with permanent deletion or a verified backup-before-delete workflow.
 
 Windows health results use simple **OK / Review / Warning / Info** states and keep the underlying detail visible. The Settings hub preserves language, theme and Storage Cleanup preferences. These checks describe Windows health settings; a completed health check is not a malware scan.
 
@@ -278,7 +279,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a12-py3-none-any.whl
+python -m pip install .\antios-2.0.0a13-py3-none-any.whl
 antios-gui
 ```
 

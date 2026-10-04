@@ -3,8 +3,10 @@
 AntiOS can now use ClamAV instead of Windows AMSI. This separates file detection
 from Defender: ClamAV supplies its own engine, official signatures, archive and
 file-format parsers. AntiOS supplies traversal, safe snapshot reads, reports,
-manual quarantine and GUI cancellation. The default remains AMSI; selection is
-explicit, with no silent switch to a different engine on failure.
+manual quarantine and GUI cancellation. ClamAV is the default AntiOS scan path;
+AMSI remains an explicit compatibility mode, with no silent fallback between
+engines on failure. On Windows, ordinary AntiOS scans require the configured
+trusted ClamD SCM peer before file bytes are sent.
 
 This is **not Windows real-time protection**. There is no filesystem interception,
 Windows Security Center registration, boot/memory protection or replacement for
