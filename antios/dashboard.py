@@ -35,6 +35,7 @@ from .storage_cleanup import (
     format_bytes,
     scan_storage,
 )
+from .tray import icon_asset
 
 PROJECT_URL = "https://github.com/Dargon777/AntiOS"
 RELEASES_URL = PROJECT_URL + "/releases"
@@ -173,6 +174,31 @@ def _open_settings(uri: str) -> None:
     if os.name != "nt":
         return
     os.startfile(uri)  # type: ignore[attr-defined]
+
+
+def _configure_windows_identity() -> None:
+    """Give the running dashboard a stable Windows taskbar identity."""
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            ctypes.c_wchar_p("DargonITP.AntiOS")
+        )
+    except Exception:
+        pass
+
+
+def _apply_window_icon(root: Any) -> None:
+    """Use the dedicated running-state icon for the Tk window/taskbar."""
+    try:
+        image = root.tk.call(
+            "image", "create", "photo",
+            "-file", str(icon_asset("app_taskbar.png")),
+        )
+        root.tk.call("wm", "iconphoto", root._w, "-default", image)
+        root._antios_taskbar_icon = image
+    except Exception:
+        pass
 
 
 def _enable_dark_titlebar(root: Any, dark: bool = True) -> None:
@@ -2627,8 +2653,10 @@ def launch(language: str | None = None) -> int:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
             pass
+        _configure_windows_identity()
 
     root = tk.Tk()
+    _apply_window_icon(root)
     Dashboard(root, language=language)
     root.mainloop()
     return 0
@@ -2662,8 +2690,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         import tkinter as tk
 
+        _configure_windows_identity()
         root = tk.Tk()
         root.withdraw()
+        _apply_window_icon(root)
         dashboard = Dashboard(
             root,
             language=args.lang,
