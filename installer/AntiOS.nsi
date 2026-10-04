@@ -1,5 +1,7 @@
 Unicode true
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
+!include "x64.nsh"
 
 #ifndef APP_VERSION
   !define APP_VERSION "2.0.0a14"
@@ -10,6 +12,9 @@ Unicode true
 #ifndef SOURCE_DIR
   !define SOURCE_DIR "..\installer-stage"
 #endif
+#ifndef OUTPUT_FILE
+  !define OUTPUT_FILE "..\installer-output\AntiOS-Setup.exe"
+#endif
 
 !define PRODUCT_NAME "AntiOS"
 !define PUBLISHER "DargonITP"
@@ -18,9 +23,8 @@ Unicode true
 !define APP_PATH_KEY "Software\Microsoft\Windows\CurrentVersion\App Paths\AntiOS-GUI.exe"
 
 Name "${PRODUCT_NAME} ${APP_VERSION}"
-OutFile "..\installer-output\AntiOS-Setup.exe"
+OutFile "${OUTPUT_FILE}"
 InstallDir "$PROGRAMFILES64\AntiOS"
-InstallDirRegKey HKLM "${INSTALL_KEY}" "InstallDir"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64
@@ -57,15 +61,28 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright 2026 Dargon777 and AntiOS
 !insertmacro MUI_LANGUAGE "Russian"
 
 Function .onInit
+  ${IfNot} ${RunningX64}
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS requires 64-bit Windows."
+    Abort
+  ${EndIf}
+
+  SetRegView 64
+  ReadRegStr $0 HKLM "${INSTALL_KEY}" "InstallDir"
+  ${If} $0 != ""
+    StrCpy $INSTDIR $0
+  ${EndIf}
+
   !insertmacro MUI_LANGDLL_DISPLAY
 FunctionEnd
 
 Function un.onInit
+  SetRegView 64
   !insertmacro MUI_UNGETLANGUAGE
 FunctionEnd
 
 Section "AntiOS" SecMain
   SectionIn RO
+  SetRegView 64
 
   IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +3
     ExecWait '"$INSTDIR\AntiOS-Guard.exe" stop' $0
@@ -92,22 +109,23 @@ Section "AntiOS" SecMain
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
 
-  CreateDirectory "$SMPROGRAMS\AntiOS"
-  CreateShortCut "$SMPROGRAMS\AntiOS\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
-  CreateShortCut "$SMPROGRAMS\AntiOS\AntiOS Command Line.lnk" "$INSTDIR\AntiOS.exe" "" "$INSTDIR\AntiOS.exe" 0
-  CreateShortCut "$SMPROGRAMS\AntiOS\Uninstall AntiOS.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortCut "$DESKTOP\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
+  CreateDirectory "$COMMONPROGRAMS\AntiOS"
+  CreateShortCut "$COMMONPROGRAMS\AntiOS\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
+  CreateShortCut "$COMMONPROGRAMS\AntiOS\AntiOS Command Line.lnk" "$INSTDIR\AntiOS.exe" "" "$INSTDIR\AntiOS.exe" 0
+  CreateShortCut "$COMMONPROGRAMS\AntiOS\Uninstall AntiOS.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortCut "$COMMONDESKTOP\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
 
 SectionEnd
 
 Section "Uninstall"
+  SetRegView 64
   IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +2
     ExecWait '"$INSTDIR\AntiOS-Guard.exe" stop' $0
   IfFileExists "$INSTDIR\guard-startup.ps1" 0 +2
     ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply' $0
 
-  Delete "$DESKTOP\AntiOS.lnk"
-  RMDir /r "$SMPROGRAMS\AntiOS"
+  Delete "$COMMONDESKTOP\AntiOS.lnk"
+  RMDir /r "$COMMONPROGRAMS\AntiOS"
 
   DeleteRegKey HKLM "${APP_PATH_KEY}"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
