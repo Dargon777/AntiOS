@@ -2,11 +2,11 @@
 
 **Languages:** English · [Русский](README.ru.md) · [Español](README.es.md) · [简体中文](README.zh-CN.md) · [Suomi](README.fi.md) · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
-**On-demand antivirus scanning, encrypted quarantine and Windows Health, Privacy & Diagnostics.**
+**Resident protection, independent antivirus scanning, encrypted quarantine and Windows Health diagnostics.**
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 16
+> **Pre-release:** 2.0.0 alpha 19
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -26,7 +26,7 @@ Setup requests Administrator consent, installs AntiOS to **`C:\\Program Files\\A
 Open **Antivirus** from the sidebar or press `Ctrl+6`:
 
 - Scan a selected file or folder without changing its contents.
-- Use the managed independent ClamAV engine by default; Windows AMSI remains available as an explicit compatibility mode, alongside local SHA-256 signatures.
+- AntiOS uses its managed ClamAV engine automatically; provider details, local signatures and Defender compatibility tools stay under Advanced.
 - Inspect detections, skipped files, access errors and incomplete coverage.
 - Encrypt and isolate a selected detection in current-user Windows DPAPI quarantine.
 - Restore selected quarantined items without overwriting existing files.
@@ -268,7 +268,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a16-py3-none-any.whl
+python -m pip install .\antios-2.0.0a19-py3-none-any.whl
 antios-gui
 ```
 
