@@ -6,3 +6,6 @@ __pycache__/
 build/
 dist/
 antios-backup*.json
+
+installer-stage/
+installer-output/
