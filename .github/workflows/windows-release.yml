@@ -182,146 +182,22 @@ jobs:
       - name: Stage Windows installer payload
         shell: pwsh
         run: |
-          .\scripts\stage-installer.ps1
+          ./scripts/stage-installer.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build AntiOS Setup
         shell: pwsh
         run: |
-          $version = (Get-Content .\release\VERSION -Raw).Trim()
+          $version = (Get-Content ./release/VERSION -Raw).Trim()
           $parts = $version -replace '^2\.0\.0a', ''
-          if ($parts -notmatch '^\d+
-        shell: pwsh
-        run: |
-          .\dist\AntiOS-Guard\AntiOS-Guard.exe status | ConvertFrom-Json | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .\dist\AntiOS\AntiOS.exe --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .\dist\AntiOS\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .\dist\AntiOS\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/smoke-antivirus.py .\dist\AntiOS\AntiOS.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .\dist\AntiOS-GUI\AntiOS-GUI.exe --self-test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .\dist\AntiOS-GUI\AntiOS-GUI.exe --ui-self-test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Package portable release
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force package | Out-Null
-          Copy-Item .\dist\AntiOS\* .\package\ -Recurse -Force
-          Copy-Item .\dist\AntiOS-GUI\* .\package\ -Recurse -Force
-          Copy-Item .\dist\AntiOS-Guard\* .\package\ -Recurse -Force
-          Copy-Item .\scripts\guard-startup.ps1 .\package\guard-startup.ps1
-          Copy-Item .\scripts\protection-engine.ps1 .\package\protection-engine.ps1
-          Copy-Item .\scripts\install.ps1 .\package\install.ps1
-          Copy-Item .\scripts\uninstall.ps1 .\package\uninstall.ps1
-          Copy-Item .\README.md .\package\README.md
-          Copy-Item .\README.ru.md .\package\README.ru.md
-          Copy-Item .\README.es.md .\package\README.es.md
-          Copy-Item .\README.zh-CN.md .\package\README.zh-CN.md
-          Copy-Item .\README.fi.md .\package\README.fi.md
-          Copy-Item .\README.pl.md .\package\README.pl.md
-          Copy-Item .\README.mn.md .\package\README.mn.md
-          Copy-Item .\PRIVACY.md .\package\PRIVACY.md
-          Copy-Item .\SUPPORT.md .\package\SUPPORT.md
-          Copy-Item .\SECURITY.md .\package\SECURITY.md
-          Copy-Item .\CHANGELOG.md .\package\CHANGELOG.md
-          Copy-Item .\CODE_OF_CONDUCT.md .\package\CODE_OF_CONDUCT.md
-          Copy-Item .\LICENSE .\package\LICENSE
-          Copy-Item .\NOTICE .\package\NOTICE
-          Copy-Item .\docs\SIGNING.md .\package\SIGNING.md
-          Copy-Item .\docs\ANTIVIRUS.md .\package\ANTIVIRUS.md
-          Copy-Item .\docs\CLAMAV.md .\package\CLAMAV.md
-          Copy-Item .\docs\GUARD.md .\package\GUARD.md
-          Copy-Item .\config\clamav .\package\clamav-config -Recurse
-          $version = (Get-Content .\release\VERSION -Raw).Trim()
-          $commit = "$env:GITHUB_SHA"
-          $python = (python --version 2>&1).Trim()
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $signature = Get-AuthenticodeSignature .\package\AntiOS-GUI.exe
-          $signing = if ($signature.Status -eq "Valid") {
-            "Valid Authenticode: $($signature.SignerCertificate.Subject)"
-          } else {
-            Write-Warning "Unsigned direct-download build; publisher metadata is not Authenticode. See docs/SIGNING.md."
-            "Unsigned direct-download build"
-          }
-          @(
-            "AntiOS version: $version",
-            "Commit: $commit",
-            "Build runner: windows-latest",
-            "Python: $python",
-            "License: Apache-2.0",
-            "Product publisher: DargonITP",
-            "Code signing: $signing"
-          ) | Set-Content .\package\BUILD_INFO.txt
-          "- Authenticode: $signing" | Add-Content $env:GITHUB_STEP_SUMMARY
-          Compress-Archive -Path .\package\* -DestinationPath .\AntiOS-windows-x64.zip -Force
-          $hash = (Get-FileHash .\AntiOS-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  AntiOS-windows-x64.zip" | Set-Content -NoNewline .\AntiOS-windows-x64.zip.sha256
-          Copy-Item .\installer-output\AntiOS-Setup.exe .\AntiOS-Setup.exe -Force
-          $setupHash = (Get-FileHash .\AntiOS-Setup.exe -Algorithm SHA256).Hash.ToLower()
-          "$setupHash  AntiOS-Setup.exe" | Set-Content -NoNewline .\AntiOS-Setup.exe.sha256
-
-      - name: Attest Windows archive provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: actions/attest@v4
-        with:
-          subject-path: |
-            AntiOS-windows-x64.zip
-            AntiOS-Setup.exe
-
-      - name: Attest Python distribution provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: actions/attest@v4
-        with:
-          subject-path: python-dist/*
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: AntiOS-release-artifacts
-          path: |
-            AntiOS-windows-x64.zip
-            AntiOS-windows-x64.zip.sha256
-            AntiOS-Setup.exe
-            AntiOS-Setup.exe.sha256
-            python-dist/*
-          if-no-files-found: error
-
-      - name: Publish alpha release on master
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = (Get-Content .\release\TAG -Raw).Trim()
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Warning "Release $tag already exists; these artifacts will NOT replace its downloads. Use a new release version and tag to publish fixes."
-            exit 0
-          }
-          $pythonArtifacts = Get-ChildItem .\python-dist\* | ForEach-Object { $_.FullName }
-          gh release create $tag `
-            .\AntiOS-windows-x64.zip `
-            .\AntiOS-windows-x64.zip.sha256 `
-            .\AntiOS-Setup.exe `
-            .\AntiOS-Setup.exe.sha256 `
-            $pythonArtifacts `
-            --target $env:GITHUB_SHA `
-            --prerelease `
-            --title "AntiOS $tag" `
-            --notes-file .\release\RELEASE_NOTES.md
-) { throw "Unexpected release version: $version" }
+          if ($parts -notmatch '^\d+$') { throw "Unexpected release version: $version" }
           $numericVersion = "2.0.$parts.0"
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          $sourceDir = (Resolve-Path ".\installer-stage").Path
-          New-Item -ItemType Directory -Force .\installer-output | Out-Null
-          & $makensis "/DAPP_VERSION=$version" "/DNUMERIC_VERSION=$numericVersion" "/DSOURCE_DIR=$sourceDir" ".\installer\AntiOS.nsi"
+          $sourceDir = (Resolve-Path "./installer-stage").Path
+          New-Item -ItemType Directory -Force ./installer-output | Out-Null
+          & $makensis "/DAPP_VERSION=$version" "/DNUMERIC_VERSION=$numericVersion" "/DSOURCE_DIR=$sourceDir" "./installer/AntiOS.nsi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path -LiteralPath ".\installer-output\AntiOS-Setup.exe")) {
+          if (-not (Test-Path -LiteralPath "./installer-output/AntiOS-Setup.exe")) {
             throw "AntiOS-Setup.exe was not produced"
           }
 
@@ -345,7 +221,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
-          $signature = Get-AuthenticodeSignature .\installer-output\AntiOS-Setup.exe
+          $signature = Get-AuthenticodeSignature ./installer-output/AntiOS-Setup.exe
           Write-Host "AntiOS-Setup.exe => $($signature.Status) / $($signature.SignerCertificate.Subject)"
           if ($signature.Status -ne "Valid") {
             throw "Invalid Authenticode signature for AntiOS-Setup.exe ($($signature.Status))"
@@ -356,7 +232,7 @@ jobs:
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "AntiOS-Setup-Smoke"
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
-          .\installer-output\AntiOS-Setup.exe /S "/D=$installDir"
+          ./installer-output/AntiOS-Setup.exe /S "/D=$installDir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "Uninstall.exe")) {
             if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {
@@ -385,7 +261,6 @@ jobs:
           if (Test-Path -LiteralPath $desktopShortcut) {
             throw "Installer smoke uninstall left the desktop shortcut behind"
           }
-
       - name: Smoke-test executables
         shell: pwsh
         run: |
@@ -458,12 +333,17 @@ jobs:
           Compress-Archive -Path .\package\* -DestinationPath .\AntiOS-windows-x64.zip -Force
           $hash = (Get-FileHash .\AntiOS-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  AntiOS-windows-x64.zip" | Set-Content -NoNewline .\AntiOS-windows-x64.zip.sha256
+          Copy-Item ./installer-output/AntiOS-Setup.exe ./AntiOS-Setup.exe -Force
+          $setupHash = (Get-FileHash ./AntiOS-Setup.exe -Algorithm SHA256).Hash.ToLower()
+          "$setupHash  AntiOS-Setup.exe" | Set-Content -NoNewline ./AntiOS-Setup.exe.sha256
 
       - name: Attest Windows archive provenance
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
-          subject-path: AntiOS-windows-x64.zip
+          subject-path: |
+            AntiOS-windows-x64.zip
+            AntiOS-Setup.exe
 
       - name: Attest Python distribution provenance
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -477,6 +357,8 @@ jobs:
           path: |
             AntiOS-windows-x64.zip
             AntiOS-windows-x64.zip.sha256
+            AntiOS-Setup.exe
+            AntiOS-Setup.exe.sha256
             python-dist/*
           if-no-files-found: error
 
@@ -496,6 +378,8 @@ jobs:
           gh release create $tag `
             .\AntiOS-windows-x64.zip `
             .\AntiOS-windows-x64.zip.sha256 `
+            .\AntiOS-Setup.exe `
+            .\AntiOS-Setup.exe.sha256 `
             $pythonArtifacts `
             --target $env:GITHUB_SHA `
             --prerelease `
