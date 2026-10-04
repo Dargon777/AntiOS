@@ -10,6 +10,10 @@ import sys
 from .windows_process import hidden_process_kwargs, system_executable
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def _script_path() -> Path:
     if getattr(sys, "frozen", False):
         candidate = Path(sys.executable).resolve().parent / "protection-repair.ps1"
@@ -22,7 +26,7 @@ def _script_path() -> Path:
 
 def run_protection_repair(*, apply: bool = False, update_signatures: bool = False,
                           timeout: float = 180.0) -> dict:
-    if os.name != "nt":
+    if not _is_windows():
         raise OSError("Protection repair is available on Windows only")
     powershell = system_executable("WindowsPowerShell/v1.0/powershell.exe")
     command = [
