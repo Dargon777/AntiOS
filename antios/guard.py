@@ -107,7 +107,8 @@ def probe_engine(service_name=None):
 
 class Guard:
     def __init__(self, policy, state_dir=None, *, scanner=None,
-                 probe=None, quarantine_factory=Quarantine, watcher_factory=None):
+                 probe=None, quarantine_factory=Quarantine, watcher_factory=None,
+                 status_observer=None):
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
@@ -124,6 +125,8 @@ class Guard:
         self.probe = (lambda: probe_engine(policy.engine_service)) if probe is None else probe
         self.quarantine_factory = quarantine_factory
         self.watcher_factory = watcher_factory or (DirectoryNotifications if os.name == 'nt' else PollNotifications)
+        self.status_observer = status_observer
+        self._last_observed_state = None
         self.pending = OrderedDict()
         self.queue_cursor = None
         self.known, self.failures, self.threats = {}, {}, {}
@@ -137,6 +140,19 @@ class Guard:
                        'errors': 0, 'pending': 0, 'unresolved': 0, 'inventory_issues': [],
                        'capacity_exceeded': False, 'notifications': 'starting',
                        'notification_resyncs': 0}
+
+    def _notify_status(self):
+        if self.status_observer is None:
+            return
+        state = str(self.status.get('state') or 'starting')
+        if state == self._last_observed_state:
+            return
+        self._last_observed_state = state
+        try:
+            self.status_observer(dict(self.status))
+        except Exception:
+            # Tray/UI observers are cosmetic and must never weaken protection.
+            pass
 
     def invalidate_changes(self, batch):
         # Events identify work; only inventory may admit files to the scan queue.
@@ -184,6 +200,7 @@ class Guard:
             return stop.is_set()
 
         store.publish(self.status)
+        self._notify_status()
         store.event('started', {'roots': self.status['roots'], 'mode': self.status['mode']})
         try:
             while not cancelled():
@@ -258,6 +275,7 @@ class Guard:
                     del self.pending[path]
                     self.status.update(state='scanning', current_path=str(path))
                     store.publish(self.status)
+                    self._notify_status()
                     try:
                         result = self.scanner(path, engine='clamav', timeout=45, cancelled=cancelled)
                         if cancelled():
@@ -312,6 +330,7 @@ class Guard:
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
                             self.status['engine'].get('database_freshness') != 'current')
                 self.status['state'] = 'degraded' if degraded else 'attention' if self.threats else 'monitoring'
+                self._notify_status()
                 if watcher is not None:
                     try:
                         batch = watcher.wait(0.05 if ready else 0.25)
@@ -337,6 +356,7 @@ class Guard:
             raise
         except BaseException as exc:
             self.status.update(state='failed', last_error=str(exc)[:500])
+            self._notify_status()
             raise
         finally:
             if watcher is not None:
@@ -345,6 +365,7 @@ class Guard:
                                unresolved=len(self.failures), active_threats=len(self.threats))
             if self.status['state'] != 'failed':
                 self.status['state'] = 'stopped'
+            self._notify_status()
             try:
                 store.publish(self.status)
                 store.event('stopped', {'state': self.status['state']})
@@ -391,6 +412,7 @@ def main(argv=None):
     for name in ('status', 'stop', 'history'):
         commands.add_parser(name).add_argument('--state-dir', type=Path)
     args = parser.parse_args(argv)
+    tray = None
     try:
         if args.command != 'run':
             status = read_guard_state(args.state_dir, history=args.command == 'history', stop=args.command == 'stop')
@@ -406,13 +428,25 @@ def main(argv=None):
         if policy.auto_quarantine and os.name != 'nt':
             raise ValueError('Automatic encrypted quarantine requires Windows DPAPI')
         print('AntiOS Guard: post-write detection for selected directories; pre-execution blocking is unavailable.', flush=True)
-        Guard(policy, args.state_dir).run()
+        observer = None
+        if os.name == 'nt' and getattr(sys, 'frozen', False):
+            try:
+                from .tray import GuardTray
+                tray = GuardTray()
+                tray.start('starting')
+                observer = tray.set_state
+            except Exception:
+                tray = None
+        Guard(policy, args.state_dir, status_observer=observer).run()
         return 0
     except KeyboardInterrupt:
         return 130
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         print(f'AntiOS Guard: {exc}', file=sys.stderr)
         return 2
+    finally:
+        if tray is not None:
+            tray.stop()
 
 
 def launch_guard(root):

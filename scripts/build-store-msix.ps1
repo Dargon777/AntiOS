@@ -2,7 +2,7 @@ param(
     [string]$IdentityName = "DargonsITP.AntiOS",
     [string]$Publisher = "CN=D0D34602-FED2-4FE0-B705-18B9041C45F3",
     [string]$PublisherDisplayName = "DargonITP",
-    [string]$PackageVersion = "2.0.14.0",
+    [string]$PackageVersion = "2.0.15.0",
     [string]$GuiPath = ".\dist\AntiOS-GUI\AntiOS-GUI.exe",
     [string]$OutputPath = ".\store-output\AntiOS.msix"
 )
@@ -37,6 +37,11 @@ foreach ($doc in @("README.md", "PRIVACY.md", "LICENSE", "NOTICE")) {
 
 Add-Type -AssemblyName System.Drawing
 
+$brandSource = Join-Path $repoRoot "antios\assets\icons\app_main.png"
+if (-not (Test-Path -LiteralPath $brandSource)) {
+    throw "Primary AntiOS artwork not found: $brandSource"
+}
+
 function New-AntiOSAsset {
     param(
         [string]$Path,
@@ -44,28 +49,31 @@ function New-AntiOSAsset {
         [int]$Height
     )
 
-    $bitmap = New-Object System.Drawing.Bitmap($Width, $Height)
+    $source = [System.Drawing.Image]::FromFile($brandSource)
+    $bitmap = New-Object System.Drawing.Bitmap($Width, $Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-    $graphics.Clear([System.Drawing.Color]::FromArgb(14, 20, 32))
+    $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+    $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+    $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+    $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $graphics.Clear([System.Drawing.Color]::Transparent)
 
-    $size = [Math]::Max(12, [Math]::Floor([Math]::Min($Width, $Height) * 0.48))
-    $font = New-Object System.Drawing.Font("Segoe UI", $size, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(110, 168, 254))
-    $format = New-Object System.Drawing.StringFormat
-    $format.Alignment = [System.Drawing.StringAlignment]::Center
-    $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+    $margin = [Math]::Max(1, [Math]::Floor([Math]::Min($Width, $Height) * 0.07))
+    $availableWidth = $Width - (2 * $margin)
+    $availableHeight = $Height - (2 * $margin)
+    $scale = [Math]::Min($availableWidth / $source.Width, $availableHeight / $source.Height)
+    $drawWidth = [Math]::Max(1, [Math]::Round($source.Width * $scale))
+    $drawHeight = [Math]::Max(1, [Math]::Round($source.Height * $scale))
+    $x = [Math]::Floor(($Width - $drawWidth) / 2)
+    $y = [Math]::Floor(($Height - $drawHeight) / 2)
 
-    $rect = New-Object System.Drawing.RectangleF(0, 0, $Width, $Height)
-    $graphics.DrawString("A", $font, $brush, $rect, $format)
+    $graphics.DrawImage($source, $x, $y, $drawWidth, $drawHeight)
     $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
 
-    $format.Dispose()
-    $brush.Dispose()
-    $font.Dispose()
     $graphics.Dispose()
     $bitmap.Dispose()
+    $source.Dispose()
 }
 
 New-AntiOSAsset (Join-Path $assets "StoreLogo.png") 50 50

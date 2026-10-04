@@ -6,7 +6,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 14
+> **Pre-release:** 2.0.0 alpha 15
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -19,7 +19,7 @@ AntiOS answers one simple question first: **does anything on this Windows PC nee
 
 https://github.com/Dargon777/AntiOS/releases
 
-Setup requests Administrator consent, installs AntiOS to **`C:\Program Files\AntiOS`**, registers it in Windows Installed Apps, creates Start Menu entries and a desktop shortcut, and provides a normal uninstaller. The ZIP remains available as a portable/developer fallback. Quarantine and restore still require explicit confirmation.
+Setup requests Administrator consent, installs AntiOS to **`C:\Program Files\AntiOS`**, registers it in Windows Installed Apps, creates Start Menu entries and a desktop shortcut, and provides a normal uninstaller. Alpha 15 also ships the new AntiOS branding across the executable, Setup, taskbar and Resident Guard tray states. The ZIP remains available as a portable/developer fallback. Quarantine and restore still require explicit confirmation.
 
 ## Antivirus
 
@@ -257,7 +257,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a14-py3-none-any.whl
+python -m pip install .\antios-2.0.0a15-py3-none-any.whl
 antios-gui
 ```
 

@@ -6,6 +6,35 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a15] - 2026-10-04
+
+### Added
+
+- New AntiOS application branding with dedicated main, running-taskbar and
+  Resident Guard tray-state artwork.
+- Multi-resolution Windows ICO resources are generated deterministically during
+  release builds from the checked-in source artwork.
+- Resident Guard now exposes a system-tray status icon while running from the
+  frozen Windows build.
+
+### Changed
+
+- CLI, GUI and Guard executables now embed the green primary AntiOS icon.
+- The running GUI uses the dedicated red taskbar/window icon while its file and
+  shortcuts retain the green primary brand icon.
+- Resident Guard uses the green tray icon only while protection is actively
+  monitoring/scanning and switches to the red icon for starting, attention,
+  degraded, failed and stopped states.
+- NSIS Setup and its generated uninstaller now use the primary AntiOS icon.
+- Release metadata advanced to package `2.0.0a15`, tag
+  `v2.0.0-alpha.15` and Store development package `2.0.15.0`.
+
+### Reliability
+
+- Tray rendering is best-effort and isolated from the protection loop: a tray
+  backend or icon failure cannot stop or weaken Resident Guard.
+
+
 ## [2.0.0a14] - 2026-10-04
 
 ### Added

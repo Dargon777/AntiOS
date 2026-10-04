@@ -4,16 +4,19 @@ Unicode true
 !include "x64.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "2.0.0a14"
+  !define APP_VERSION "2.0.0a15"
 !endif
 !ifndef NUMERIC_VERSION
-  !define NUMERIC_VERSION "2.0.14.0"
+  !define NUMERIC_VERSION "2.0.15.0"
 !endif
 !ifndef SOURCE_DIR
   !define SOURCE_DIR "..\installer-stage"
 !endif
 !ifndef OUTPUT_FILE
   !define OUTPUT_FILE "..\installer-output\AntiOS-Setup.exe"
+!endif
+!ifndef ICON_FILE
+  !define ICON_FILE "..\build\icons\app_main.ico"
 !endif
 
 !define PRODUCT_NAME "AntiOS"
@@ -32,6 +35,8 @@ CRCCheck on
 BrandingText "DargonITP"
 ShowInstDetails nevershow
 ShowUninstDetails nevershow
+Icon "${ICON_FILE}"
+UninstallIcon "${ICON_FILE}"
 
 VIProductVersion "${NUMERIC_VERSION}"
 VIAddVersionKey /LANG=1033 "CompanyName" "${PUBLISHER}"
@@ -42,6 +47,8 @@ VIAddVersionKey /LANG=1033 "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright 2026 Dargon777 and AntiOS contributors"
 
 !define MUI_ABORTWARNING
+!define MUI_ICON "${ICON_FILE}"
+!define MUI_UNICON "${ICON_FILE}"
 !define MUI_LANGDLL_REGISTRY_ROOT HKLM
 !define MUI_LANGDLL_REGISTRY_KEY "${INSTALL_KEY}"
 !define MUI_LANGDLL_REGISTRY_VALUENAME "InstallerLanguage"

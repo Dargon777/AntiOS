@@ -1,31 +1,29 @@
-# AntiOS v2.0.0 alpha 14
+# AntiOS v2.0.0 alpha 15
 
-Alpha 14 replaces the manual ZIP-first Windows experience with a conventional installable application while keeping the portable package available.
+Alpha 15 gives AntiOS its production-facing visual identity and wires protection state directly into the Windows tray.
 
-## Windows Setup
+## Branding
 
-- New single-file `AntiOS-Setup.exe` installer built with NSIS.
-- Requests Administrator consent and installs AntiOS per-machine to `C:\Program Files\AntiOS` by default.
-- Creates an AntiOS desktop shortcut automatically plus Start Menu shortcuts for the GUI, CLI and uninstaller.
-- Registers AntiOS in Windows Installed Apps with publisher, version, icon, install location and quiet-uninstall metadata.
-- Registers `AntiOS-GUI.exe` through Windows App Paths and stores the canonical install directory under `HKLM\Software\DargonITP\AntiOS`.
-- Re-running a newer Setup reuses the registered installation directory and replaces the application payload in place.
-- Existing Resident Guard is stopped before files are replaced.
-- Uninstall stops Resident Guard, removes its startup task, removes shortcuts and application files, while deliberately preserving user settings/quarantine data outside Program Files.
+- The green primary AntiOS emblem is embedded into the CLI, GUI and Resident Guard executables.
+- Desktop and Start Menu shortcuts inherit the primary green application icon.
+- `AntiOS-Setup.exe` and the generated uninstaller use the same primary icon.
+- The running AntiOS dashboard uses the dedicated red taskbar/window icon and a stable Windows AppUserModelID.
+- Windows icon resources are generated as multi-size ICO files during CI for crisp shell rendering from 16 px through 256 px.
 
-## Release pipeline
+## Resident Guard tray status
 
-- Release CI stages a deterministic installer payload from the same tested CLI, GUI and Guard builds used by the portable package.
-- CI installs the generated Setup silently into an isolated directory, verifies the installed CLI/GUI, Windows registry entry and desktop shortcut, then runs the generated uninstaller and verifies cleanup.
-- When Artifact Signing is enabled, application executables are signed before installer staging, then the finished Setup is signed separately.
-- GitHub releases now publish `AntiOS-Setup.exe` and its SHA-256 checksum alongside the portable ZIP and Python distributions.
+- The frozen Windows Resident Guard now owns a system-tray icon while it is running.
+- Green tray state means Guard is actively monitoring or scanning.
+- Red tray state means protection is starting, needs attention, is degraded, failed or stopped.
+- Tray state follows the Guard's real protection-state transitions rather than a separate cosmetic flag.
+- Tray rendering is best-effort: any tray/backend failure is contained and never stops the protection loop.
 
-## Existing alpha 13 functionality
+## Packaging and validation
 
-- Managed ClamAV remains the default antivirus path with verified Windows ClamD peer identity.
-- Storage Cleanup retains explicit permanent deletion and SHA-256-verified backup-before-delete modes.
-- Resident Guard, encrypted quarantine, health/privacy diagnostics and the experimental native boundary remain available as before.
+- Source PNG artwork is packaged with the Python distribution and explicitly bundled into the GUI/Guard PyInstaller payloads.
+- Windows CI verifies generated ICO resources and checks that frozen runtime branding assets are present.
+- The Setup build receives the generated primary ICO directly so installer branding cannot silently fall back to the NSIS default.
 
-## Safety and scope
+## Existing protection
 
-The installer does not hide AntiOS, bypass Windows installation controls, disable Defender or silently enable system persistence. Its install location, shortcuts, uninstall registration and files are conventional and visible to the user. The experimental native driver remains outside the normal release package pending its separate production gates.
+Alpha 15 keeps the independent ClamAV default engine, verified ClamD service identity, Resident Guard, encrypted quarantine, actionable Storage Cleanup and the conventional machine-wide Windows Setup introduced in earlier alphas.
