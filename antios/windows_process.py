@@ -6,13 +6,13 @@ regress the desktop experience.
 """
 from __future__ import annotations
 
+import ntpath
 import os
-from pathlib import Path
 import subprocess
 from typing import Any
 
 
-def system_executable(relative: str) -> Path:
+def system_executable(relative: str) -> str:
     """Return an absolute executable path below the real Windows directory.
 
     AntiOS is Windows-x64 only in packaged builds.  Using an absolute System32
@@ -21,9 +21,8 @@ def system_executable(relative: str) -> Path:
     """
     if os.name != "nt":
         raise OSError("Windows system executable requested on a non-Windows host")
-    root = Path(os.environ.get("SystemRoot") or r"C:\Windows")
-    candidate = root / "System32" / relative
-    return candidate
+    root = os.environ.get("SystemRoot") or r"C:\Windows"
+    return ntpath.join(root, "System32", *relative.replace("/", "\\").split("\\"))
 
 
 def hidden_process_kwargs(*, extra_creationflags: int = 0) -> dict[str, Any]:
