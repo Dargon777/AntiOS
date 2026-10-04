@@ -168,3 +168,34 @@ def test_cleanup_refuses_path_not_in_scan_candidates(tmp_path):
 
     with pytest.raises(ValueError, match="not an approved cleanup candidate"):
         cleanup_files(scan, [str(tmp_path / "ordinary.txt")], mode="delete")
+
+
+
+def test_backup_is_persisted_before_failed_source_delete(tmp_path, monkeypatch):
+    root = tmp_path / "scan"
+    backups = tmp_path / "backups"
+    _write(root / "archive.zip", 1024, b"z")
+    scan = scan_storage(root, duplicate_min_bytes=10_000, large_bytes=10_000)
+    target = root / "archive.zip"
+
+    original_unlink = Path.unlink
+
+    def guarded_unlink(self, *args, **kwargs):
+        if self == target:
+            raise PermissionError("simulated delete failure")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", guarded_unlink)
+    result = cleanup_files(
+        scan,
+        [str(target)],
+        mode="backup",
+        backup_root=backups,
+    )
+
+    assert result["deleted"] == 0
+    assert target.exists()
+    backup_dir = Path(result["backup_dir"])
+    assert (backup_dir / "files" / "archive.zip").read_bytes() == b"z" * 1024
+    manifest = (backup_dir / "manifest.json").read_text(encoding="utf-8")
+    assert "verified-pending-delete" in manifest
