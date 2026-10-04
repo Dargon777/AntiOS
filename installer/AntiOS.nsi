@@ -137,7 +137,10 @@ Section "AntiOS" SecMain
     DetailPrint "Bootstrapping AntiOS protection engine..."
     ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\protection-bootstrap.ps1" -ManifestPath "$INSTDIR\clamav-windows.json" -Apply' $0
     WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapExitCode" $0
-    ${If} $0 != 0
+    ${If} $0 == 0
+      ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply' $2
+      WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionFirstRunExitCode" $2
+    ${Else}
       IfSilent bootstrap_done bootstrap_notice
 bootstrap_notice:
       MessageBox MB_ICONEXCLAMATION|MB_OK "AntiOS was installed, but the protection engine could not be initialized. Open AntiOS and run Protection Repair after checking your Internet connection."
