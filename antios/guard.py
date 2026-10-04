@@ -31,6 +31,7 @@ class GuardPolicy:
     rescan: float = 900
     max_files: int = 50000
     max_queue: int = 256
+    engine_service: str | None = None
 
     def validate(self):
         if not 1 <= len(self.roots) <= 16:
@@ -39,6 +40,9 @@ class GuardPolicy:
             raise ValueError('Invalid guard time limits')
         if not 1 <= self.max_files <= 100000 or not 1 <= self.max_queue <= 4096:
             raise ValueError('Invalid guard capacity limits')
+        if self.engine_service is not None:
+            from .windows_clamd_peer import validate_service_name
+            validate_service_name(self.engine_service)
         roots = tuple(dict.fromkeys(checked_path(root) for root in self.roots))
         if any(not root.is_dir() for root in roots):
             raise ValueError('Guard roots must be directories')
@@ -93,8 +97,8 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
     return files, issues, limited
 
 
-def probe_engine():
-    engine = ClamAVScanner()
+def probe_engine(service_name=None):
+    engine = ClamAVScanner(service_name=service_name, require_verified_peer=os.name == 'nt')
     try:
         return dict(engine.metadata, available=True)
     finally:
@@ -102,8 +106,8 @@ def probe_engine():
 
 
 class Guard:
-    def __init__(self, policy, state_dir=None, *, scanner=run_scan_process,
-                 probe=probe_engine, quarantine_factory=Quarantine, watcher_factory=None):
+    def __init__(self, policy, state_dir=None, *, scanner=None,
+                 probe=None, quarantine_factory=Quarantine, watcher_factory=None):
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
@@ -111,7 +115,14 @@ class Guard:
         for excluded in self.excluded:
             if any(root == excluded or excluded in root.parents for root in self.roots):
                 raise ValueError('A watched root cannot be inside Guard state or quarantine storage')
-        self.scanner, self.probe, self.quarantine_factory = scanner, probe, quarantine_factory
+        if scanner is None:
+            self.scanner = lambda path, **kwargs: run_scan_process(
+                path, engine_service=policy.engine_service,
+                require_verified_peer=os.name == 'nt', **kwargs)
+        else:
+            self.scanner = scanner
+        self.probe = (lambda: probe_engine(policy.engine_service)) if probe is None else probe
+        self.quarantine_factory = quarantine_factory
         self.watcher_factory = watcher_factory or (DirectoryNotifications if os.name == 'nt' else PollNotifications)
         self.pending = OrderedDict()
         self.queue_cursor = None
@@ -348,7 +359,7 @@ def load_policy(path):
     data = json.loads(content)
     if not isinstance(data, dict) or data.get('schema') != 1:
         raise ValueError('Guard policy must use schema 1')
-    if set(data) - {'schema', 'roots', 'auto_quarantine'}:
+    if set(data) - {'schema', 'roots', 'auto_quarantine', 'engine_service'}:
         raise ValueError('Unknown guard policy field')
     roots = data.get('roots')
     if not isinstance(roots, list) or not all(isinstance(p, str) for p in roots):
@@ -358,7 +369,11 @@ def load_policy(path):
     automatic = data.get('auto_quarantine', False)
     if not isinstance(automatic, bool):
         raise ValueError('auto_quarantine must be boolean')
-    return GuardPolicy(tuple(Path(p) for p in roots), auto_quarantine=automatic)
+    engine_service = data.get('engine_service')
+    if engine_service is not None and not isinstance(engine_service, str):
+        raise ValueError('engine_service must be a service name string')
+    return GuardPolicy(tuple(Path(p) for p in roots), auto_quarantine=automatic,
+                       engine_service=engine_service)
 
 
 def main(argv=None):
@@ -368,6 +383,7 @@ def main(argv=None):
     run.add_argument('roots', nargs='*', type=Path)
     run.add_argument('--policy', type=Path)
     run.add_argument('--auto-quarantine', action='store_true', help='Explicitly permit automatic encrypted isolation of confirmed detections.')
+    run.add_argument('--engine-service', help='Windows SCM service name owning the trusted ClamD process.')
     run.add_argument('--state-dir', type=Path)
     for name in ('status', 'stop', 'history'):
         commands.add_parser(name).add_argument('--state-dir', type=Path)
@@ -378,11 +394,12 @@ def main(argv=None):
             print(json.dumps(status, indent=2, ensure_ascii=False))
             return 0
         if args.policy:
-            if args.roots or args.auto_quarantine:
+            if args.roots or args.auto_quarantine or args.engine_service:
                 raise ValueError('Use a policy file or inline roots/options, not both')
             policy = load_policy(args.policy)
         else:
-            policy = GuardPolicy(tuple(args.roots), auto_quarantine=args.auto_quarantine)
+            policy = GuardPolicy(tuple(args.roots), auto_quarantine=args.auto_quarantine,
+                                 engine_service=args.engine_service)
         if policy.auto_quarantine and os.name != 'nt':
             raise ValueError('Automatic encrypted quarantine requires Windows DPAPI')
         print('AntiOS Guard: post-write detection for selected directories; pre-execution blocking is unavailable.', flush=True)
