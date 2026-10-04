@@ -8,6 +8,14 @@ import subprocess
 from .windows_process import hidden_process_kwargs, system_executable
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _powershell_executable() -> str:
+    return system_executable("WindowsPowerShell/v1.0/powershell.exe")
+
+
 class AmsiScanner:
     name = "Windows AMSI"
 
@@ -63,9 +71,9 @@ def defender_action(action: str, *, runner=subprocess.run) -> dict:
     }
     if action not in commands:
         raise ValueError("Defender action must be quick, full or update")
-    if os.name != "nt":
+    if not _is_windows():
         raise OSError("Microsoft Defender operations require Windows")
-    executable = system_executable("WindowsPowerShell/v1.0/powershell.exe")
+    executable = _powershell_executable()
     result = runner(
         [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
          "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; "
