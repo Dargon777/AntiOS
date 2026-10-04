@@ -1,17 +1,15 @@
-# AntiOS v2.0.0 alpha 18
+# AntiOS v2.0.0 alpha 19
 
-Alpha 18 makes AntiOS behave like a resident antivirus instead of a window that
-disappears when you press Close.
+Alpha 19 is the big interface pass.
 
-Closing the dashboard now sends it to the system tray. The tray menu can reopen
-the same window or exit the AntiOS interface explicitly, so active scans are not
-accidentally killed by closing the window.
+The Antivirus page was rebuilt around the things that matter day to day:
+protection state, scanning, Resident Guard, results and quarantine. The manual
+engine selector is gone from the main UI; AntiOS uses its managed ClamAV engine
+automatically. Provider details, custom local signatures and Defender
+compatibility tools are still available under the collapsed Advanced panel.
 
-Resident Guard and the dashboard coordinate tray ownership: while the dashboard
-is alive it owns the AntiOS tray icon; when the interface exits, Guard takes the
-tray back. This avoids duplicate AntiOS icons.
+The rest of the dashboard received the same visual cleanup: tighter navigation,
+real AntiOS branding, quieter page chrome, cleaner controls, spacing and
+light/dark palettes.
 
-Icon state now has one meaning everywhere. Green means Resident Guard is
-actively monitoring or scanning. Red is reserved for attention, degraded,
-failed, unresponsive, stopped or missing protection states. The taskbar/window
-icon follows the same rule instead of being permanently red.
+Protection behavior is unchanged by the redesign.
