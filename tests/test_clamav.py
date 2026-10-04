@@ -197,3 +197,58 @@ def test_cli_selects_independent_engine_and_reports_it(tmp_path, monkeypatch, ca
     result = json.loads(capsys.readouterr().out)
     assert result['engine']['provider'] == 'ClamAV'
     assert result['summary']['provider_scanned'] == 1
+
+
+
+def test_windows_resident_peer_binding_is_explicit_and_verified(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from antios import clamav
+
+    target = tmp_path / 'fixture'
+    target.write_bytes(b'harmless')
+    with daemon() as (port, _):
+        monkeypatch.setattr(clamav, '_is_windows', lambda: True)
+        monkeypatch.setattr(clamav, 'configured_service_name',
+                            lambda explicit=None: explicit or 'AntiOSClamD')
+        monkeypatch.setattr(clamav, 'query_service_process',
+                            lambda name: SimpleNamespace(pid=4242))
+        monkeypatch.setattr(clamav, 'verify_connected_socket',
+                            lambda connection, pid: pid == 4242)
+        result = scan_files(
+            target,
+            engine='clamav',
+            provider_factory=lambda: clamav.ClamAVScanner(
+                port=port, service_name='AntiOSClamD', require_verified_peer=True),
+        )
+    assert result['engine']['peer_verification_required'] is True
+    assert result['engine']['peer_verified'] is True
+    assert result['engine']['peer_identity'] == 'windows-service:AntiOSClamD'
+    assert result['verdict'] == 'no-threats-found'
+
+
+def test_unverified_windows_loopback_never_produces_clean_verdict(tmp_path, monkeypatch):
+    from antios import clamav
+
+    target = tmp_path / 'fixture'
+    target.write_bytes(b'harmless')
+    with daemon() as (port, _):
+        monkeypatch.setattr(clamav, '_is_windows', lambda: True)
+        monkeypatch.setattr(clamav, 'configured_service_name', lambda explicit=None: None)
+        result = scan_files(
+            target,
+            engine='clamav',
+            provider_factory=lambda: clamav.ClamAVScanner(port=port),
+        )
+    assert result['engine']['peer_verification_required'] is True
+    assert result['engine']['peer_verified'] is False
+    assert result['coverage'] == 'limited'
+    assert result['verdict'] == 'incomplete'
+
+
+def test_required_windows_peer_without_service_fails_before_connect(monkeypatch):
+    from antios import clamav
+
+    monkeypatch.setattr(clamav, '_is_windows', lambda: True)
+    monkeypatch.setattr(clamav, 'configured_service_name', lambda explicit=None: None)
+    with pytest.raises(OSError, match='SCM service'):
+        clamav.ClamAVScanner(require_verified_peer=True)
