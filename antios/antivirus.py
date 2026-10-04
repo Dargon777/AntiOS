@@ -108,6 +108,10 @@ def scan_files(
     if provider_factory is None:
         if engine == "amsi":
             provider_factory = AmsiScanner
+        elif engine_service is None and not require_verified_peer:
+            # Preserve the ordinary on-demand provider contract. Strict Windows
+            # peer binding is opt-in here and mandatory in Resident Guard.
+            provider_factory = ClamAVScanner
         else:
             provider_factory = lambda: ClamAVScanner(
                 service_name=engine_service,
