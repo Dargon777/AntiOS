@@ -90,6 +90,17 @@ def _download(url: str, destination: Path, limit: int) -> None:
         os.fsync(stream.fileno())
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            block = stream.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def _parse_checksum(content: bytes) -> str:
     if len(content) > MAX_CHECKSUM_BYTES:
         raise RuntimeError("Update checksum file is too large")
@@ -147,7 +158,7 @@ def download_update(directory: str | Path | None = None, *, require_signature: b
         _download(str(checksum["url"]), checksum_path, MAX_CHECKSUM_BYTES)
         _download(str(setup["url"]), setup_path, MAX_SETUP_BYTES)
         expected = _parse_checksum(checksum_path.read_bytes())
-        actual = hashlib.sha256(setup_path.read_bytes()).hexdigest()
+        actual = _sha256_file(setup_path)
         if actual != expected:
             raise RuntimeError("Downloaded AntiOS Setup failed SHA-256 verification")
         api_digest = setup.get("digest")
