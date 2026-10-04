@@ -7,12 +7,12 @@ from antios import windows_antivirus
 
 
 def test_defender_only_runs_allowlisted_operations(monkeypatch):
-    native_windows = os.name == "nt"
-    monkeypatch.setattr(windows_antivirus.os, "name", "nt")
-    # Avoid making pathlib select WindowsPath on a Linux test host.
-    from pathlib import PosixPath
-    if not native_windows:
-        monkeypatch.setattr(windows_antivirus, "Path", PosixPath)
+    monkeypatch.setattr(windows_antivirus, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        windows_antivirus,
+        "_powershell_executable",
+        lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
     calls = []
     def runner(args, **kwargs):
         calls.append((args, kwargs))
@@ -27,11 +27,12 @@ def test_defender_only_runs_allowlisted_operations(monkeypatch):
 
 
 def test_defender_failures_are_not_reported_as_completed(monkeypatch):
-    native_windows = os.name == "nt"
-    from pathlib import PosixPath
-    monkeypatch.setattr(windows_antivirus.os, "name", "nt")
-    if not native_windows:
-        monkeypatch.setattr(windows_antivirus, "Path", PosixPath)
+    monkeypatch.setattr(windows_antivirus, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        windows_antivirus,
+        "_powershell_executable",
+        lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
     def runner(args, **kwargs):
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="service disabled")
     with pytest.raises(OSError, match="service disabled"):
