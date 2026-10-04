@@ -1,33 +1,31 @@
-# AntiOS v2.0.0 alpha 13
+# AntiOS v2.0.0 alpha 14
 
-Alpha 13 makes the independent ClamAV stack the normal AntiOS antivirus path instead of an optional alternative to AMSI.
+Alpha 14 replaces the manual ZIP-first Windows experience with a conventional installable application while keeping the portable package available.
 
-## Standalone-by-default antivirus
+## Windows Setup
 
-- Managed ClamAV is now the default engine for GUI file/folder scans and CLI `virus-scan`.
-- Quarantine confirmation rescans use ClamAV by default.
-- On Windows, normal ClamAV scans require the configured trusted SCM service peer before file bytes are sent to ClamD.
-- AMSI remains available only when explicitly selected as a compatibility mode; AntiOS does not silently fall back between engines.
-- The alpha 12 managed-engine lifecycle remains in place: protected runtime/data ACLs, automatic ClamD service startup, FreshClam bootstrap and recurring SYSTEM signature updates.
-- Resident Guard continues to require verified engine identity and reports degraded coverage when the engine is missing, stale or untrusted.
-- `protection-status` continues to report detection-engine readiness, database freshness, Guard state and native enforcement separately.
+- New single-file `AntiOS-Setup.exe` installer built with NSIS.
+- Requests Administrator consent and installs AntiOS per-machine to `C:\Program Files\AntiOS` by default.
+- Creates an AntiOS desktop shortcut automatically plus Start Menu shortcuts for the GUI, CLI and uninstaller.
+- Registers AntiOS in Windows Installed Apps with publisher, version, icon, install location and quiet-uninstall metadata.
+- Registers `AntiOS-GUI.exe` through Windows App Paths and stores the canonical install directory under `HKLM\Software\DargonITP\AntiOS`.
+- Re-running a newer Setup reuses the registered installation directory and replaces the application payload in place.
+- Existing Resident Guard is stopped before files are replaced.
+- Uninstall stops Resident Guard, removes its startup task, removes shortcuts and application files, while deliberately preserving user settings/quarantine data outside Program Files.
 
-## Storage Cleanup
+## Release pipeline
 
-- Cleanup results are now selectable with Ctrl/Shift multi-selection.
-- "Select extra duplicates" selects redundant copies while leaving one copy per duplicate group unselected.
-- Selected files can be deleted permanently or backed up first.
-- Backup mode copies into a unique session folder, preserves paths, writes a manifest and verifies SHA-256 before deleting each original.
-- Files that changed after scanning are skipped rather than deleted.
-- The cleanup page has a polished action panel, selection-size summary, progress indicator and refined result table.
+- Release CI stages a deterministic installer payload from the same tested CLI, GUI and Guard builds used by the portable package.
+- CI installs the generated Setup silently into an isolated directory, verifies the installed CLI/GUI, Windows registry entry and desktop shortcut, then runs the generated uninstaller and verifies cleanup.
+- When Artifact Signing is enabled, application executables are signed before installer staging, then the finished Setup is signed separately.
+- GitHub releases now publish `AntiOS-Setup.exe` and its SHA-256 checksum alongside the portable ZIP and Python distributions.
 
-## Reliability
+## Existing alpha 13 functionality
 
-- Updated Windows regression fixtures for the verified-peer constructor contract introduced by the standalone default.
-- Release metadata is synchronized across Python package, Windows executable resources, GitHub tag metadata and Microsoft Store development package version `2.0.13.0`.
+- Managed ClamAV remains the default antivirus path with verified Windows ClamD peer identity.
+- Storage Cleanup retains explicit permanent deletion and SHA-256-verified backup-before-delete modes.
+- Resident Guard, encrypted quarantine, health/privacy diagnostics and the experimental native boundary remain available as before.
 
 ## Safety and scope
 
-Alpha 13 does not disable Microsoft Defender and does not claim Windows Security Center registration, ELAM/PPL protection or certified primary-antivirus status. The experimental native x64 execute-open minifilter and LocalSystem broker remain outside the normal release package until signed-driver/altitude and installed-VM acceptance gates are satisfied.
-
-Use `AntiOS.exe protection-status --json` to inspect the truthful state of every protection layer.
+The installer does not hide AntiOS, bypass Windows installation controls, disable Defender or silently enable system persistence. Its install location, shortcuts, uninstall registration and files are conventional and visible to the user. The experimental native driver remains outside the normal release package pending its separate production gates.
