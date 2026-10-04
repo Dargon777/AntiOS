@@ -41,7 +41,7 @@ Then:
   -IdentityName "DargonsITP.AntiOS" `
   -Publisher "CN=D0D34602-FED2-4FE0-B705-18B9041C45F3" `
   -PublisherDisplayName "DargonITP" `
-  -PackageVersion "2.0.15.0"
+  -PackageVersion "2.0.16.0"
 ```
 
 Output:
