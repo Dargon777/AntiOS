@@ -1,4 +1,5 @@
 import os
+import socket
 
 import pytest
 
@@ -34,3 +35,31 @@ def test_environment_binding_is_available_cross_platform(monkeypatch):
 def test_scm_query_never_falls_back_to_guessing_off_windows():
     with pytest.raises(OSError, match="only on Windows"):
         query_service_process("clamd")
+
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows SCM integration")
+def test_missing_windows_service_fails_without_guessing():
+    with pytest.raises(OSError):
+        query_service_process("AntiOSDefinitelyMissingClamD")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows TCP owner integration")
+def test_exact_loopback_connection_is_bound_to_server_pid():
+    from antios.windows_clamd_peer import verify_connected_socket
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        client.connect(listener.getsockname())
+        server, _ = listener.accept()
+        try:
+            assert verify_connected_socket(client, os.getpid())
+            assert not verify_connected_socket(client, os.getpid() + 100000)
+        finally:
+            server.close()
+    finally:
+        client.close()
+        listener.close()
