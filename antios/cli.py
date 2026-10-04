@@ -101,6 +101,16 @@ def build_parser() -> argparse.ArgumentParser:
     protection_cmd.add_argument("--json", action="store_true")
     protection_cmd.add_argument("--engine-service", help="Explicit trusted Windows ClamD SCM service name.")
 
+    repair_cmd = sub.add_parser(
+        "protection-repair",
+        help="Preview or repair the managed ClamAV service, ACLs and updater task.",
+    )
+    repair_cmd.add_argument("--yes", action="store_true",
+                            help="Apply repairs. Without --yes, only diagnose and preview.")
+    repair_cmd.add_argument("--update-signatures", action="store_true",
+                            help="Run FreshClam while applying the repair.")
+    repair_cmd.add_argument("--json", action="store_true")
+
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
     version_cmd.add_argument("--json", action="store_true")
 
@@ -303,6 +313,24 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(status)
             else:
                 print(render_protection_status(status))
+            return 0
+
+        if args.command == "protection-repair":
+            from .protection_repair import run_protection_repair
+            payload = run_protection_repair(
+                apply=args.yes,
+                update_signatures=args.update_signatures,
+            )
+            if args.json:
+                _print_json(payload)
+            else:
+                print("AntiOS protection repair")
+                print(f"Mode: {'applied' if args.yes else 'preview'}")
+                print(f"Healthy before: {payload.get('healthy_before')}")
+                issues = payload.get("issues") or []
+                actions = payload.get("actions") or []
+                print("Issues: " + (", ".join(issues) if issues else "none"))
+                print("Actions: " + (", ".join(actions) if actions else "none"))
             return 0
 
         if args.command == "config":
