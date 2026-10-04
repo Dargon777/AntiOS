@@ -50,14 +50,14 @@ jobs:
           python -m pip install -e .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Install Inno Setup compiler
+      - name: Install NSIS compiler
         shell: pwsh
         run: |
-          choco install innosetup --no-progress -y
+          choco install nsis --no-progress -y
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path -LiteralPath $iscc)) {
-            throw "Inno Setup compiler not found at $iscc"
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            throw "NSIS compiler not found at $makensis"
           }
 
       - name: Validate release version
@@ -143,18 +143,7 @@ jobs:
           python scripts/verify-windows-build.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Stage Windows installer payload
-        shell: pwsh
-        run: |
-          .\scripts\stage-installer.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Build AntiOS Setup
-        shell: pwsh
-        run: |
-          $version = (Get-Content .\release\VERSION -Raw).Trim()
-          $parts = $version -replace '^2\.0\.0a', ''
-          if ($parts -notmatch '^\d+
+      - name: Azure login for Artifact Signing
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         uses: azure/login@v3
         with:
@@ -178,11 +167,11 @@ jobs:
           description: DargonITP AntiOS Antivirus
           description-url: https://github.com/Dargon777/AntiOS
 
-      - name: Verify Authenticode signatures
+      - name: Verify application Authenticode signatures
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
-          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe", ".\installer-output\AntiOS-Setup.exe")) {
+          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe")) {
             $signature = Get-AuthenticodeSignature $file
             Write-Host "$file => $($signature.Status) / $($signature.SignerCertificate.Subject)"
             if ($signature.Status -ne "Valid") {
@@ -190,7 +179,18 @@ jobs:
             }
           }
 
-      - name: Smoke-test executables
+      - name: Stage Windows installer payload
+        shell: pwsh
+        run: |
+          .\scripts\stage-installer.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build AntiOS Setup
+        shell: pwsh
+        run: |
+          $version = (Get-Content .\release\VERSION -Raw).Trim()
+          $parts = $version -replace '^2\.0\.0a', ''
+          if ($parts -notmatch '^\d+
         shell: pwsh
         run: |
           .\dist\AntiOS-Guard\AntiOS-Guard.exe status | ConvertFrom-Json | Out-Null
@@ -316,11 +316,39 @@ jobs:
             --notes-file .\release\RELEASE_NOTES.md
 ) { throw "Unexpected release version: $version" }
           $numericVersion = "2.0.$parts.0"
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          & $iscc "/DMyAppVersion=$version" "/DMyNumericVersion=$numericVersion" ".\installer\AntiOS.iss"
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          $sourceDir = (Resolve-Path ".\installer-stage").Path
+          New-Item -ItemType Directory -Force .\installer-output | Out-Null
+          & $makensis "/DAPP_VERSION=$version" "/DNUMERIC_VERSION=$numericVersion" "/DSOURCE_DIR=$sourceDir" ".\installer\AntiOS.nsi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path -LiteralPath ".\installer-output\AntiOS-Setup.exe")) {
             throw "AntiOS-Setup.exe was not produced"
+          }
+
+      - name: Sign AntiOS Setup
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\installer-output
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: DargonITP AntiOS Setup
+          description-url: https://github.com/Dargon777/AntiOS
+
+      - name: Verify Setup Authenticode signature
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature .\installer-output\AntiOS-Setup.exe
+          Write-Host "AntiOS-Setup.exe => $($signature.Status) / $($signature.SignerCertificate.Subject)"
+          if ($signature.Status -ne "Valid") {
+            throw "Invalid Authenticode signature for AntiOS-Setup.exe ($($signature.Status))"
           }
 
       - name: Smoke-test AntiOS Setup
@@ -328,58 +356,39 @@ jobs:
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "AntiOS-Setup-Smoke"
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
-          .\installer-output\AntiOS-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$installDir" /MERGETASKS=desktopicon
+          .\installer-output\AntiOS-Setup.exe /S "/D=$installDir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "unins000.exe")) {
+
+          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "Uninstall.exe")) {
             if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {
               throw "Installer smoke missing $required"
             }
           }
+
+          $desktop = [Environment]::GetFolderPath("Desktop")
+          $desktopShortcut = Join-Path $desktop "AntiOS.lnk"
+          if (-not (Test-Path -LiteralPath $desktopShortcut)) {
+            throw "Installer did not create the desktop shortcut"
+          }
+
+          $registered = (Get-ItemProperty "HKLM:\Software\DargonITP\AntiOS" -Name InstallDir).InstallDir
+          if ([System.IO.Path]::GetFullPath($registered) -ne [System.IO.Path]::GetFullPath($installDir)) {
+            throw "Registered install directory mismatch: $registered"
+          }
+
           & (Join-Path $installDir "AntiOS.exe") --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $installDir "AntiOS-GUI.exe") --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & (Join-Path $installDir "unins000.exe") /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+
+          & (Join-Path $installDir "Uninstall.exe") /S
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Start-Sleep -Seconds 2
           if (Test-Path -LiteralPath (Join-Path $installDir "AntiOS-GUI.exe")) {
             throw "Installer smoke uninstall left AntiOS-GUI.exe behind"
           }
-
-      - name: Azure login for Artifact Signing
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
-        uses: azure/login@v3
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Sign Windows executables
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
-        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
-        with:
-          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
-          files-folder: ${{ github.workspace }}\dist
-          files-folder-filter: exe
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          description: DargonITP AntiOS Antivirus
-          description-url: https://github.com/Dargon777/AntiOS
-
-      - name: Verify Authenticode signatures
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
-        shell: pwsh
-        run: |
-          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe")) {
-            $signature = Get-AuthenticodeSignature $file
-            Write-Host "$file => $($signature.Status) / $($signature.SignerCertificate.Subject)"
-            if ($signature.Status -ne "Valid") {
-              throw "Invalid Authenticode signature: $file ($($signature.Status))"
-            }
+          if (Test-Path -LiteralPath $desktopShortcut) {
+            throw "Installer smoke uninstall left the desktop shortcut behind"
           }
 
       - name: Smoke-test executables
