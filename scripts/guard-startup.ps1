@@ -5,6 +5,7 @@ param(
     [string[]]$Roots = @(),
     [ValidateSet('notify', 'quarantine')][string]$Mode = 'notify',
     [ValidatePattern('^[A-Za-z0-9_-]{1,80}
+    [switch]$Apply
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,8 +59,11 @@ function Assert-ManagedUnsignedGuard([string]$Path) {
     $acl = Get-Acl -LiteralPath $installDir
     foreach ($rule in $acl.Access) {
         if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
-        try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
-        catch { continue }
+        try {
+            $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        } catch {
+            continue
+        }
         if ($sid -in $dangerousSids -and (($rule.FileSystemRights -band $dangerousRights) -ne 0)) {
             throw "AntiOS install directory is writable by an untrusted broad principal: $sid"
         }
