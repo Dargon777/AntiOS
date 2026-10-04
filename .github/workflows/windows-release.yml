@@ -358,29 +358,24 @@ jobs:
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
           .\installer-output\AntiOS-Setup.exe /S "/D=$installDir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
           foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "Uninstall.exe")) {
             if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {
               throw "Installer smoke missing $required"
             }
           }
-
           $desktop = [Environment]::GetFolderPath("Desktop")
           $desktopShortcut = Join-Path $desktop "AntiOS.lnk"
           if (-not (Test-Path -LiteralPath $desktopShortcut)) {
             throw "Installer did not create the desktop shortcut"
           }
-
           $registered = (Get-ItemProperty "HKLM:\Software\DargonITP\AntiOS" -Name InstallDir).InstallDir
           if ([System.IO.Path]::GetFullPath($registered) -ne [System.IO.Path]::GetFullPath($installDir)) {
             throw "Registered install directory mismatch: $registered"
           }
-
           & (Join-Path $installDir "AntiOS.exe") --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $installDir "AntiOS-GUI.exe") --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
           & (Join-Path $installDir "Uninstall.exe") /S
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Start-Sleep -Seconds 2
