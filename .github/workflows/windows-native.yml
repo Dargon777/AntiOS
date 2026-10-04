@@ -1,0 +1,59 @@
+name: Experimental native antivirus boundary
+on:
+  pull_request:
+    paths: ['native/**', 'tests/test_native*', '.github/workflows/windows-native.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-build:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile unsigned x64 service and filter with pinned WDK
+        shell: pwsh
+        run: ./native/windows/build.ps1 -Restore
+      - name: Test native Windows socket client and diagnostics (no driver install)
+        env:
+          ANTIOS_NATIVE_EXE: build/native/windows/AntiOS-Service.exe
+          ANTIOS_REQUIRE_NATIVE_WINDOWS: '1'
+        run: |
+          python -m pip install pytest -e .
+          python -m pytest tests/test_native_service_windows.py -v
+      - name: Upload compile artifacts, not a release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AntiOS-native-UNSIGNED-EXPERIMENTAL-x64
+          path: |
+            build/native/windows/AntiOS-Service.exe
+            build/native/windows/AntiOS-Filter.sys
+            build/native/windows/Native-Inert.exe
+            build/native/windows/EXPERIMENTAL.txt
+            build/native/windows/LICENSE.microsoft
+  engine-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install real ClamD and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav-daemon gcc
+          python -m pip install pytest -e .
+      - name: Native protocol, cancellation and real archive scanning
+        env:
+          ANTIOS_REQUIRE_NATIVE: '1'
+          ANTIOS_REQUIRE_CLAMD: '1'
+          ANTIOS_TEST_CLAMD: /usr/sbin/clamd
+        run: python -m pytest tests/test_native_engine.py -v
+      - name: Address and undefined-behavior sanitizers
+        run: |
+          gcc -std=c11 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror native/tests/protocol_sanitizer.c native/windows/engine/protocol.c -o /tmp/antios-protocol-check
+          /tmp/antios-protocol-check

@@ -194,3 +194,30 @@ def test_cli_scan_exit_codes_and_structured_output(tmp_path, monkeypatch, capsys
         antivirus.scan_files(path, **options, provider_factory=lambda: Provider(32768)))
     assert cli.main(["--config", str(tmp_path / "none.toml"), "virus-scan", str(target)]) == 1
     assert target.exists()
+
+
+def test_unreadable_directory_entry_does_not_hide_its_siblings(tmp_path, monkeypatch):
+    good = tmp_path / 'good'
+    good.write_bytes(b'harmless')
+    class Entry:
+        def __init__(self, path, broken=False):
+            self.path, self.broken = str(path), broken
+        def stat(self, **kwargs):
+            if self.broken:
+                raise PermissionError('unreadable entry')
+            return Path(self.path).stat()
+    class Entries:
+        def __enter__(self):
+            return iter([Entry(tmp_path / 'bad', True), Entry(good)])
+        def __exit__(self, *args):
+            pass
+    monkeypatch.setattr(antivirus.os, 'scandir', lambda folder: Entries())
+    result = antivirus.scan_files(tmp_path, provider_factory=Provider)
+    assert result['summary']['errors'] == 1
+    assert result['summary']['files_scanned'] == 1
+    assert result['verdict'] == 'incomplete'
+
+
+def test_unknown_engine_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match='engine'):
+        antivirus.scan_files(tmp_path, engine='unknown')

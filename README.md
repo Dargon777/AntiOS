@@ -26,14 +26,16 @@ Windows executables request Administrator consent at startup. Cancelling UAC can
 Open **Antivirus** from the sidebar or press `Ctrl+6`:
 
 - Scan a selected file or folder without changing its contents.
-- Check content through the installed Windows AMSI provider and optional local SHA-256 signatures.
+- Choose Windows AMSI or an independent local ClamAV engine, alongside local SHA-256 signatures.
 - Inspect detections, skipped files, access errors and incomplete coverage.
 - Encrypt and isolate a selected detection in current-user Windows DPAPI quarantine.
 - Restore selected quarantined items without overwriting existing files.
 - Run Defender quick/full scans or update its signatures after confirmation.
 - Export a JSON scan report.
+- Explore the separate [experimental native Windows filter/service](native/README.md); source and lab tooling only, not part of the release package.
+- Run the optional [resident Guard](docs/GUARD.md) for automatic post-write checks in selected folders, with explicit opt-in quarantine.
 
-This alpha is an **on-demand scanner**, not an independent real-time antivirus. AMSI submits buffers to the installed provider; it does not reproduce a full filesystem antivirus engine. Persistent protection remains with the installed antivirus. The built-in local database contains only the EICAR test hash; there is no independent malware feed. Archives are not unpacked. Default limits are 32 MiB per file and 100,000 files, with skipped files and failed provider calls explicitly reported.
+This development branch includes on-demand scanning and an optional post-write folder monitor. It is not yet a full real-time Windows antivirus replacement; see the [readiness gates](docs/DEFENDER_REPLACEMENT.md). AMSI submits buffers to the installed provider; it does not reproduce a full filesystem antivirus engine. Persistent protection remains with the installed antivirus. The built-in local database contains only the EICAR test hash. Optional [ClamAV integration](docs/CLAMAV.md) adds independent signatures and archive analysis through a separately installed daemon and its official updater. Default limits are 32 MiB per file and 100,000 files, with skipped files and failed provider calls explicitly reported.
 
 Details, CLI examples, exit codes and quarantine recovery: [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
 

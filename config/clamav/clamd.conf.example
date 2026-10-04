@@ -1,0 +1,26 @@
+# Copy to your protected ClamAV installation; adjust both directory paths.
+# AntiOS connects only to this local IPv4 endpoint.
+TCPAddr 127.0.0.1
+TCPSocket 3310
+DatabaseDirectory C:\ProgramData\AntiOS-ClamAV\database
+TemporaryDirectory C:\ProgramData\AntiOS-ClamAV\tmp
+Foreground yes
+OfficialDatabaseOnly yes
+FailIfCvdOlderThan 7
+SelfCheck 600
+ScanArchive yes
+AlertEncrypted yes
+AlertExceedsMax yes
+HeuristicAlerts yes
+StreamMaxLength 256M
+MaxFileSize 256M
+MaxScanSize 512M
+MaxRecursion 16
+MaxFiles 10000
+MaxScanTime 20000
+ReadTimeout 30
+CommandReadTimeout 10
+MaxThreads 2
+MaxQueue 4
+BytecodeSecurity TrustSigned
+BytecodeUnsigned no

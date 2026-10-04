@@ -1,0 +1,51 @@
+; Experimental x64 primitive minifilter; generate only with an assigned altitude.
+[Version]
+Signature="$WINDOWS NT$"
+Class="AntiVirus"
+ClassGuid={b1d1a169-c54f-4379-81db-bee7d88d7454}
+Provider=%Provider%
+DriverVer=@DATE@,0.1.0.0
+CatalogFile=AntiOS-Filter.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DriverFiles=13
+
+[DefaultInstall.NTamd64.10.0...26100]
+CopyFiles=DriverFiles
+
+[DefaultInstall.NTamd64.10.0...26100.Services]
+AddService=AntiOS-Filter,,DriverService
+
+[DriverService]
+DisplayName=%ServiceDescription%
+Description=%ServiceDescription%
+ServiceBinary=%13%\AntiOS-Filter.sys
+ServiceType=2
+StartType=3
+ErrorControl=1
+LoadOrderGroup="FSFilter Anti-Virus"
+Dependencies=FltMgr
+AddReg=DriverRegistry
+
+[DriverRegistry]
+HKR,"Parameters","Enforcement",0x00010001,0
+HKR,"Parameters","LocalScanTimeout",0x00010001,5000
+HKR,"Parameters\Instances","DefaultInstance",0x00000000,%Instance%
+HKR,"Parameters\Instances\"%Instance%,"Altitude",0x00000000,"@ALTITUDE@"
+HKR,"Parameters\Instances\"%Instance%,"Flags",0x00010001,0
+
+[DriverFiles]
+AntiOS-Filter.sys
+
+[SourceDisksFiles]
+AntiOS-Filter.sys=1
+
+[SourceDisksNames]
+1=%DiskName%,,,
+
+[Strings]
+Provider="DargonITP"
+ServiceDescription="AntiOS Experimental Execute-Open Filter"
+Instance="AntiOS Execute-Open"
+DiskName="AntiOS Native Experimental"

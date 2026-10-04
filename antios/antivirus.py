@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .windows_antivirus import AmsiScanner
+from .clamav import ClamAVScanner, ScanOutcome
 
 DEFAULT_MAX_BYTES = 32 * 1024 * 1024
 DEFAULT_MAX_FILES = 100_000
@@ -95,10 +96,15 @@ def scan_files(
     max_files: int = DEFAULT_MAX_FILES,
     progress: Callable[[dict], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
-    provider_factory: Callable = AmsiScanner,
+    provider_factory: Callable | None = None,
+    engine: str = "amsi",
     excluded_paths: tuple[Path, ...] = (),
     checkpoint: Callable[[dict], None] | None = None,
 ) -> dict[str, Any]:
+    if engine not in {"amsi", "clamav"}:
+        raise ValueError("Unknown scan engine")
+    if provider_factory is None:
+        provider_factory = AmsiScanner if engine == "amsi" else ClamAVScanner
     if not 1 <= max_bytes <= 256 * 1024 * 1024 or not 1 <= max_files <= 1_000_000:
         raise ValueError("Scan limits must be 1..256 MiB and 1..1000000 files")
     target = checked_path(path)
@@ -110,7 +116,7 @@ def scan_files(
         "started_at": utc_now(), "finished_at": None,
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
                    "max_entries": max_files * 2},
-        "engine": {"provider": "Windows AMSI", "available": False,
+        "engine": {"provider": "Windows AMSI" if engine == "amsi" else "ClamAV", "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or "")},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
                     "bytes_scanned": 0, "threats": 0, "reviews": 0, "skipped": 0,
@@ -125,6 +131,7 @@ def scan_files(
     try:
         provider = provider_factory()
         result["engine"]["available"] = True
+        result["engine"].update(getattr(provider, "metadata", {}))
     except (OSError, RuntimeError) as exc:
         result["engine"]["detail"] = str(exc)
 
@@ -162,7 +169,11 @@ def scan_files(
                         if exclude(item):
                             issue(item, "quarantine-excluded")
                             continue
-                        info = entry.stat(follow_symlinks=False)
+                        try:
+                            info = entry.stat(follow_symlinks=False)
+                        except OSError as exc:
+                            issue(item, str(exc), error=True)
+                            continue
                         if is_link(info):
                             issue(item, "link-or-reparse-point")
                         elif stat.S_ISDIR(info.st_mode):
@@ -176,6 +187,7 @@ def scan_files(
             except (OSError, ValueError) as exc:
                 issue(folder, str(exc), error=True)
 
+    provider_failed = False
     try:
         for item in candidates():
             if stopped():
@@ -205,11 +217,16 @@ def scan_files(
                 finding = None
                 if label:
                     finding = {"kind": "threat", "engine": "SHA-256", "name": label}
-                if provider is not None:
+                if provider is not None and not provider_failed:
                     try:
                         value = provider.scan(content, str(item))
                         summary["provider_scanned"] += 1
-                        if value >= 32768:
+                        if isinstance(value, ScanOutcome):
+                            if value.kind == "review":
+                                result["engine"]["limited_results"] = result["engine"].get("limited_results", 0) + 1
+                            if value.kind and finding is None:
+                                finding = {"kind": value.kind, "engine": "ClamAV", "name": value.name}
+                        elif value >= 32768:
                             finding = finding or {"kind": "threat", "engine": "Windows AMSI",
                                                   "name": "AMSI malware detection"}
                             finding["amsi_result"] = value
@@ -218,6 +235,11 @@ def scan_files(
                                        "name": "Blocked by administrator policy", "amsi_result": value}
                     except (OSError, RuntimeError) as exc:
                         issue(item, str(exc), error=True)
+                        # Avoid a timeout per remaining file after an engine failure.
+                        # Hash scans continue, but provider coverage remains incomplete.
+                        provider_failed = True
+                        result["engine"]["detail"] = str(exc)
+                        result["engine"]["failed_during_scan"] = True
                 summary["files_scanned"] += 1
                 summary["bytes_scanned"] += len(content)
                 if finding:
@@ -241,8 +263,11 @@ def scan_files(
     complete = (summary["files_scanned"] > 0 and not any(
         summary[key] for key in ("cancelled", "limit_reached", "errors", "skipped")
     ))
+    if engine == "clamav" and (result["engine"].get("limited_results") or
+            result["engine"].get("database_freshness") != "current"):
+        complete = False
     if complete and summary["provider_scanned"] == summary["files_scanned"]:
-        result["coverage"] = "provider-and-signatures"
+        result["coverage"] = "provider-and-signatures" if engine == "amsi" else "clamav-and-signatures"
     if summary["threats"]:
         result["verdict"] = "threats-found"
     elif summary["reviews"]:
@@ -259,8 +284,12 @@ def scan_files(
 def render_antivirus_scan(result: dict) -> str:
     summary = result["summary"]
     lines = ["AntiOS on-demand antivirus scan", f"Path: {result['path']}",
+             f"Engine: {result['engine'].get('provider', 'unknown')}",
              f"Verdict: {result['verdict']}; coverage: {result['coverage']}",
              f"Scanned: {summary['files_scanned']}; threats: {summary['threats']}; "
              f"review: {summary['reviews']}; skipped: {summary['skipped']}; errors: {summary['errors']}"]
+    for key in ("version", "database_freshness", "detail"):
+        if key in result["engine"]:
+            lines.append(f"{key}: {result['engine'][key]}")
     lines.extend(f"{f['kind']}: {f['name']} | {f['path']}" for f in result["findings"])
     return "\n".join(lines)

@@ -11,6 +11,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  clamav-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install real ClamD and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav-daemon
+          python -m pip install pytest -e .
+      - name: Test real engine with inert rules and archives
+        env:
+          ANTIOS_REQUIRE_CLAMD: "1"
+          ANTIOS_TEST_CLAMD: /usr/sbin/clamd
+        run: python -m pytest tests/test_clamav_integration.py -v
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

@@ -11,17 +11,29 @@ $CliSource = Join-Path $SourceDirectory "AntiOS.exe"
 $GuiSource = Join-Path $SourceDirectory "AntiOS-GUI.exe"
 $CliTarget = Join-Path $InstallDir "AntiOS.exe"
 $GuiTarget = Join-Path $InstallDir "AntiOS-GUI.exe"
+$GuardSource = Join-Path $SourceDirectory "AntiOS-Guard.exe"
+$GuardTarget = Join-Path $InstallDir "AntiOS-Guard.exe"
+$StartupSource = Join-Path $SourceDirectory "guard-startup.ps1"
 
-foreach ($required in @($CliSource, $GuiSource, (Join-Path $SourceDirectory "_cli"), (Join-Path $SourceDirectory "_gui"))) {
+foreach ($required in @($CliSource, $GuiSource, $GuardSource, $StartupSource, (Join-Path $SourceDirectory "_cli"), (Join-Path $SourceDirectory "_gui"), (Join-Path $SourceDirectory "_guard"))) {
     if (-not (Test-Path $required)) {
         throw "Required AntiOS file not found: $required"
+    }
+}
+
+if (Test-Path -LiteralPath $GuardTarget) {
+    $guardState = (& $GuardTarget status | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0 -or $guardState.running) {
+        throw 'Stop AntiOS Guard and verify its status before updating this installation.'
     }
 }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Copy-Item -Force $CliSource $CliTarget
 Copy-Item -Force $GuiSource $GuiTarget
-foreach ($runtime in @("_cli", "_gui")) {
+Copy-Item -Force $GuardSource $InstallDir
+Copy-Item -Force $StartupSource $InstallDir
+foreach ($runtime in @("_cli", "_gui", "_guard")) {
     Copy-Item -Recurse -Force (Join-Path $SourceDirectory $runtime) $InstallDir
 }
 

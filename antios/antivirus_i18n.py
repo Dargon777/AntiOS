@@ -182,3 +182,64 @@ for _locale, _texts in {
     "mn": ("Шалгалтыг зогсоож байна…", "Шалгалт зогссон; дутуу үр дүн"),
 }.items():
     MESSAGES[_locale].update(stopping=_texts[0], stopped=_texts[1])
+
+# Engine selection uses stable protocol names in every locale.
+for _locale, _texts in {
+    "en": ("Engine", "ClamAV requires a local daemon; see docs/CLAMAV.md.",
+           "Read-only on-demand scanning with the selected engine and local hashes. 32 MiB per file. Archive analysis depends on the engine. Keep real-time protection enabled.",
+           "Local signatures: EICAR test hash; additional detection uses the selected engine."),
+    "ru": ("Движок", "Для ClamAV нужен локальный сервис; см. docs/CLAMAV.md.",
+           "Проверка выбранным движком и локальными хешами без изменения файлов. Лимит: 32 МиБ на файл. Анализ архивов зависит от движка. Сохраняйте постоянную защиту включённой.",
+           "Локальные сигнатуры: хеш теста EICAR; остальное проверяет выбранный движок."),
+    "es": ("Motor", "ClamAV necesita un servicio local; ver docs/CLAMAV.md.",
+           "Análisis de solo lectura con el motor elegido y hashes locales. 32 MiB por archivo. El análisis de archivos comprimidos depende del motor. Mantén activa la protección en tiempo real.",
+           "Firmas locales: hash de prueba EICAR; el motor elegido realiza el resto del análisis."),
+    "zh-CN": ("引擎", "ClamAV 需要本地服务；参见 docs/CLAMAV.md。",
+              "使用所选引擎和本地哈希进行只读扫描。每个文件限 32 MiB。压缩包分析取决于引擎。请保持实时防护开启。",
+              "本地签名：EICAR 测试哈希；其他检测由所选引擎执行。"),
+    "fi": ("Moottori", "ClamAV tarvitsee paikallisen palvelun; katso docs/CLAMAV.md.",
+           "Vain luku -tarkistus valitulla moottorilla ja paikallisilla tiivisteillä. 32 MiB tiedostoa kohti. Arkistojen analyysi riippuu moottorista. Pidä reaaliaikainen suojaus käytössä.",
+           "Paikalliset tunnisteet: EICAR-testitiiviste; muu tunnistus valitulla moottorilla."),
+    "pl": ("Silnik", "ClamAV wymaga lokalnej usługi; zobacz docs/CLAMAV.md.",
+           "Skanowanie tylko do odczytu wybranym silnikiem i lokalnymi skrótami. 32 MiB na plik. Analiza archiwów zależy od silnika. Zachowaj ochronę w czasie rzeczywistym.",
+           "Lokalne sygnatury: skrót testu EICAR; pozostałe wykrywanie przez wybrany silnik."),
+    "mn": ("Хөдөлгүүр", "ClamAV-д дотоод үйлчилгээ хэрэгтэй; docs/CLAMAV.md-г үзнэ үү.",
+           "Сонгосон хөдөлгүүр болон дотоод хэшээр файлыг өөрчлөхгүй шалгана. Файл бүр 32 МиБ хязгаартай. Архивын шинжилгээ хөдөлгүүрээс хамаарна. Байнгын хамгаалалтыг асаалттай байлгана уу.",
+           "Дотоод гарын үсэг: EICAR туршилтын хэш; бусад илрүүлэлтийг сонгосон хөдөлгүүр гүйцэтгэнэ."),
+}.items():
+    MESSAGES[_locale].update(engine=_texts[0], engine_hint=_texts[1],
+                             note=_texts[2], signatures_builtin=_texts[3])
+
+for _locale, _texts in {
+    "en": ("Database date: current", "Database is older than 7 days; run FreshClam", "Database date is unknown", "Database date is in the future; check the clock"),
+    "ru": ("Дата базы актуальна", "База старше 7 дней; запустите FreshClam", "Дата базы неизвестна", "Дата базы в будущем; проверьте часы"),
+    "es": ("Fecha de la base actual", "Base de más de 7 días; ejecuta FreshClam", "Fecha de la base desconocida", "Fecha futura; comprueba el reloj"),
+    "zh-CN": ("数据库日期有效", "数据库超过 7 天；请运行 FreshClam", "数据库日期未知", "数据库日期在未来；请检查时钟"),
+    "fi": ("Tietokannan päiväys on ajantasainen", "Tietokanta yli 7 päivää vanha; suorita FreshClam", "Tietokannan päiväys tuntematon", "Päiväys tulevaisuudessa; tarkista kello"),
+    "pl": ("Data bazy jest aktualna", "Baza starsza niż 7 dni; uruchom FreshClam", "Nieznana data bazy", "Data w przyszłości; sprawdź zegar"),
+    "mn": ("Сангийн огноо шинэ", "Сан 7 хоногоос хуучин; FreshClam ажиллуулна уу", "Сангийн огноо тодорхойгүй", "Сангийн огноо ирээдүйд байна; цагаа шалгана уу"),
+}.items():
+    MESSAGES[_locale].update(zip(("db_current", "db_stale", "db_unknown", "db_future-date"), _texts))
+
+for _locale, _texts in {
+    'en': ('Watch folder', 'Stop Guard', 'Guard history', 'Guard: {state} · Detections: {count}', 'Start background monitoring of the selected folder? It continues after closing the dashboard. It reports threats without automatic quarantine and does not block execution. Use Stop Guard to stop it.'),
+    'ru': ('Следить за папкой', 'Остановить Guard', 'Журнал Guard', 'Guard: {state} · Находок: {count}', 'Начать фоновую проверку выбранной папки? Она продолжится после закрытия окна. Угрозы регистрируются без автоматического карантина; запуск файлов не блокируется. Для остановки нажмите «Остановить Guard».'),
+    'es': ('Vigilar carpeta', 'Detener Guard', 'Historial Guard', 'Guard: {state} · Detecciones: {count}', '¿Vigilar la carpeta en segundo plano? Continúa al cerrar la ventana. Informa sin cuarentena automática y no bloquea la ejecución. Usa Detener Guard para terminar.'),
+    'zh-CN': ('监视文件夹', '停止 Guard', 'Guard 历史', 'Guard：{state} · 检测：{count}', '在后台监视所选文件夹？关闭窗口后仍会运行。仅报告威胁，不会自动隔离或阻止执行。请用“停止 Guard”结束。'),
+    'fi': ('Valvo kansiota', 'Pysäytä Guard', 'Guard-historia', 'Guard: {state} · Havainnot: {count}', 'Valvotaanko kansiota taustalla? Valvonta jatkuu ikkunan sulkemisen jälkeen. Se ilmoittaa uhista ilman automaattista karanteenia eikä estä suoritusta. Lopeta Pysäytä Guard -painikkeella.'),
+    'pl': ('Obserwuj folder', 'Zatrzymaj Guard', 'Historia Guard', 'Guard: {state} · Wykrycia: {count}', 'Monitorować folder w tle? Działa po zamknięciu okna. Zgłasza zagrożenia bez automatycznej kwarantanny i nie blokuje uruchamiania. Zakończ przyciskiem Zatrzymaj Guard.'),
+    'mn': ('Хавтас хянах', 'Guard зогсоох', 'Guard түүх', 'Guard: {state} · Илрүүлэлт: {count}', 'Сонгосон хавтсыг ард хянах уу? Цонх хаасны дараа үргэлжилнэ. Аюулыг мэдээлэх боловч автоматаар хорионд оруулахгүй, ажиллуулахыг хориглохгүй. Guard зогсоох товчоор дуусгана.'),
+}.items():
+    MESSAGES[_locale].update(zip(('guard_start', 'guard_stop', 'guard_history', 'guard_status', 'guard_confirm'), _texts))
+
+for _locale, _states in {
+    'en': ('starting', 'scanning', 'monitoring', 'degraded', 'attention needed', 'stopped', 'failed', 'not running', 'unresponsive', 'unavailable'),
+    'ru': ('запускается', 'проверяет', 'наблюдает', 'работает с ограничениями', 'требует внимания', 'остановлен', 'сбой', 'не запущен', 'не отвечает', 'недоступен'),
+    'es': ('iniciando', 'analizando', 'vigilando', 'limitado', 'requiere atención', 'detenido', 'error', 'inactivo', 'sin respuesta', 'no disponible'),
+    'zh-CN': ('启动中', '扫描中', '监视中', '功能受限', '需要注意', '已停止', '失败', '未运行', '无响应', '不可用'),
+    'fi': ('käynnistyy', 'tarkistaa', 'valvoo', 'rajoitettu', 'vaatii huomiota', 'pysäytetty', 'virhe', 'ei käynnissä', 'ei vastaa', 'ei käytettävissä'),
+    'pl': ('uruchamianie', 'skanowanie', 'monitorowanie', 'ograniczone działanie', 'wymaga uwagi', 'zatrzymany', 'błąd', 'nie działa', 'nie odpowiada', 'niedostępny'),
+    'mn': ('эхэлж байна', 'шалгаж байна', 'хянаж байна', 'хязгаарлагдсан', 'анхаарах шаардлагатай', 'зогссон', 'алдаа', 'ажиллаагүй', 'хариу өгөхгүй', 'боломжгүй'),
+}.items():
+    MESSAGES[_locale].update(('guard_state_' + key, text) for key, text in zip(
+        ('starting', 'scanning', 'monitoring', 'degraded', 'attention', 'stopped', 'failed', 'not-running', 'unresponsive', 'unavailable'), _states))

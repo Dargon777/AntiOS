@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 
 import pefile
 
-for name in ('AntiOS', 'AntiOS-GUI'):
+for name in ('AntiOS', 'AntiOS-GUI', 'AntiOS-Guard'):
     executable = Path('dist') / name / (name + '.exe')
     pe = pefile.PE(str(executable))
     values = {}
@@ -25,7 +25,8 @@ for name in ('AntiOS', 'AntiOS-GUI'):
                     manifests.append(ET.fromstring(pe.get_data(data.OffsetToData, data.Size)))
     levels = [level.attrib['level'] for root in manifests
               for level in root.iter('{urn:schemas-microsoft-com:asm.v3}requestedExecutionLevel')]
-    assert levels == ['requireAdministrator'], levels
+    expected_level = 'asInvoker' if name == 'AntiOS-Guard' else 'requireAdministrator'
+    assert levels == [expected_level], levels
     pe.close()
     with tempfile.TemporaryDirectory() as folder:
         request, events = Path(folder) / 'request.json', Path(folder) / 'events.jsonl'
@@ -37,4 +38,4 @@ for name in ('AntiOS', 'AntiOS-GUI'):
         result = [value for kind, value in records if kind == 'checkpoint'][-1]
         assert result['summary']['files_scanned'] == 1, result
         assert result['summary']['threats'] == 0, result
-    print(f'{name}: DargonITP metadata, requireAdministrator manifest, frozen worker OK')
+    print(f'{name}: DargonITP metadata, {expected_level} manifest, frozen worker OK')

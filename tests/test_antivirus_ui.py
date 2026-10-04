@@ -41,7 +41,14 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         app.antivirus_path = target
         app.antivirus_signatures = signatures
         app.show_page("antivirus")
+        app.antivirus_panel.engine_var.set("clamav")
+        app.antivirus_panel._engine_changed()
+        app._rebuild_ui("antivirus")
+        assert app.antivirus_panel.engine_var.get() == "clamav"
+        app.antivirus_panel.engine_var.set("amsi")
+        app.antivirus_panel._engine_changed()
         app.antivirus_panel._scan()
+        assert str(app.antivirus_panel.engine_choice["state"]) == "disabled"
         # Rebuild while a job is running: no destroyed-widget callback may fire.
         app.theme_mode = "light"
         app._rebuild_ui("antivirus")
@@ -63,6 +70,16 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         root.geometry("960x650")
         root.update()
         assert panel.export_button.winfo_ismapped()
+        assert panel.tree.winfo_ismapped()
+        assert panel.tree.winfo_height() >= 60
+        # Store/GUI-only packages must not offer a companion they do not ship.
+        import sys
+        with monkeypatch.context() as context:
+            context.setattr(sys, "frozen", True, raising=False)
+            context.setattr(sys, "executable", str(tmp_path / "GUI-only.exe"))
+            panel._set_busy()
+            assert str(panel.guard_start_button["state"]) == "disabled"
+        panel._set_busy()
         assert panel.export_button.winfo_rooty() + panel.export_button.winfo_height() <= root.winfo_rooty() + root.winfo_height()
         for language in SUPPORTED_LANGUAGES:
             app.language = language
@@ -70,6 +87,8 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
             app._rebuild_ui("antivirus")
             root.update()
             assert app.antivirus_panel.status["text"]
+            assert app.antivirus_panel.export_button.winfo_ismapped()
+            assert app.antivirus_panel.tree.winfo_ismapped()
         app.antivirus_panel._scan()
         app.antivirus_panel._cancel()
         deadline = time.monotonic() + 10

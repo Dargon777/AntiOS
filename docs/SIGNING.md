@@ -72,3 +72,15 @@ These resource strings are not a digital signature. Windows derives the verified
 The existing Azure signing path runs on master pushes when configured. Pull request artifacts remain unsigned. Store packaging success is not certification or publication, and `allowElevation` requires Microsoft's approval. Never disable SmartScreen or install a self-signed root certificate to make a public build appear trusted.
 
 References: [SmartScreen reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation), [restricted elevation capability](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations#restricted-capability-list).
+
+## Publishing signing or validation fixes
+
+An existing release is not overwritten by the workflow. After validating fixes,
+advance the package/release versions, release tag, Windows version resources and
+Store version together before publishing new downloads. Re-running alpha 11
+only produces workflow artifacts; it does not repair its existing assets.
+
+Configure the Azure variables and certificate profile before enabling signing.
+An unsigned CI build remains a development artifact even when its metadata says
+DargonITP. Confirm `Valid` on both released executables, not just a successful CI
+job or a GitHub provenance attestation.

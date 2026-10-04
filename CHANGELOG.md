@@ -4,6 +4,47 @@ All notable AntiOS v2 changes are documented here.
 
 The format follows Keep a Changelog principles. AntiOS v2 is currently pre-release software.
 
+## [Unreleased]
+
+### Added
+
+- Native broker binds each ClamD connection to the configured LocalSystem SCM
+  process before sending commands/content; missing configuration or changed
+  identity yields UNKNOWN. Added verified diagnostics and VM preflight.
+
+- Separate experimental native x64 Windows service and execute-open minifilter,
+  bounded ClamD protocol, default audit policy, kernel status counters, signed
+  service installation gate and inert Windows loader acceptance tooling.
+- Dedicated native compilation/integration workflow; artifacts are unsigned lab
+  builds and excluded from the normal release and Microsoft Store package.
+
+- Independent local ClamAV scanning, official FreshClam configuration examples,
+  bounded protocol requests and explicit database-freshness/coverage reporting.
+- Resident selected-folder Guard with isolated scan workers, local history,
+  explicit automatic quarantine, GUI/CLI controls and a signed-build logon task.
+- A separate `AntiOS-Guard.exe` onedir build with an `asInvoker` manifest.
+
+### Fixed
+
+- Windows change notifications invalidate cached results even when file metadata
+  matches; lost or ambiguous notifications trigger root reconciliation.
+- Bounded queue admission rotates through the inventory during repeated changes.
+- Active alerts clear after a verified benign replacement while history remains.
+- Worker deadlines, stale/failed engine handling and GUI result visibility.
+
+### Validation
+
+- Peer-binding transport changes: 33 native engine tests pass, including real
+  ClamD; eight Windows executable tests are pending. PowerShell syntax and the
+  C parser sanitizer pass. Windows process-owner validation is not executed here.
+
+- Previous baseline: 263 local tests passed with real ClamAV and Tk; eleven
+  Windows-dependent tests were skipped on Linux. Windows packaging, signatures and installation require CI
+  and installed-system acceptance before release.
+- Guard remains post-write detection. The separate native execute-open prototype
+  has not passed Windows runtime/signing acceptance. ELAM/PPL and primary antivirus
+  registration remain unimplemented; see [the readiness gates](docs/DEFENDER_REPLACEMENT.md).
+
 ## [2.0.0a11] - 2026-10-01
 
 - Force-stop GUI file scans in an isolated worker process; preserve incomplete checkpoints.
