@@ -6,6 +6,31 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a14] - 2026-10-04
+
+### Added
+
+- Single-file NSIS `AntiOS-Setup.exe` for normal Windows installation.
+- Machine-wide installation under `C:\Program Files\AntiOS` with UAC.
+- Desktop, Start Menu and standard Windows Installed Apps integration.
+- Stable HKLM install-location/App Paths registration and generated uninstaller.
+- Release CI install/uninstall smoke testing for the generated Setup.
+- SHA-256 checksum and provenance publishing for the Setup artifact.
+
+### Changed
+
+- `AntiOS-Setup.exe` is now the recommended Windows download; the ZIP remains
+  available as a portable/developer fallback.
+- Release metadata advanced to package `2.0.0a14`, tag
+  `v2.0.0-alpha.14` and Store development package `2.0.14.0`.
+
+### Safety
+
+- Setup remains visible and conventional: it does not disable Defender, hide
+  files, or create persistence outside explicit AntiOS components.
+- Uninstall preserves per-user settings/quarantine outside Program Files.
+
+
 ## [2.0.0a13] - 2026-10-04
 
 ### Added

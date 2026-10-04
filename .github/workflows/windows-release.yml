@@ -7,6 +7,7 @@ on:
       - "antios/**"
       - "tests/**"
       - "scripts/**"
+      - "installer/**"
       - "release/**"
       - "LICENSE"
       - "NOTICE"
@@ -48,6 +49,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install -e .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install NSIS compiler
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            throw "NSIS compiler not found at $makensis"
+          }
 
       - name: Validate release version
         shell: pwsh
@@ -156,7 +167,7 @@ jobs:
           description: DargonITP AntiOS Antivirus
           description-url: https://github.com/Dargon777/AntiOS
 
-      - name: Verify Authenticode signatures
+      - name: Verify application Authenticode signatures
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
@@ -168,6 +179,89 @@ jobs:
             }
           }
 
+      - name: Stage Windows installer payload
+        shell: pwsh
+        run: |
+          ./scripts/stage-installer.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build AntiOS Setup
+        shell: pwsh
+        run: |
+          $version = (Get-Content ./release/VERSION -Raw).Trim()
+          $parts = $version -replace '^2\.0\.0a', ''
+          if ($parts -notmatch '^\d+$') { throw "Unexpected release version: $version" }
+          $numericVersion = "2.0.$parts.0"
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          $sourceDir = (Resolve-Path "./installer-stage").Path
+          New-Item -ItemType Directory -Force ./installer-output | Out-Null
+          $outputFile = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) "installer-output\AntiOS-Setup.exe"))
+          & $makensis "/DAPP_VERSION=$version" "/DNUMERIC_VERSION=$numericVersion" "/DSOURCE_DIR=$sourceDir" "/DOUTPUT_FILE=$outputFile" "./installer/AntiOS.nsi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath "./installer-output/AntiOS-Setup.exe")) {
+            throw "AntiOS-Setup.exe was not produced"
+          }
+
+      - name: Sign AntiOS Setup
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\installer-output
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: DargonITP AntiOS Setup
+          description-url: https://github.com/Dargon777/AntiOS
+
+      - name: Verify Setup Authenticode signature
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature ./installer-output/AntiOS-Setup.exe
+          Write-Host "AntiOS-Setup.exe => $($signature.Status) / $($signature.SignerCertificate.Subject)"
+          if ($signature.Status -ne "Valid") {
+            throw "Invalid Authenticode signature for AntiOS-Setup.exe ($($signature.Status))"
+          }
+
+      - name: Smoke-test AntiOS Setup
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "AntiOS-Setup-Smoke"
+          Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+          ./installer-output/AntiOS-Setup.exe /S "/D=$installDir"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "Uninstall.exe")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {
+              throw "Installer smoke missing $required"
+            }
+          }
+          $desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+          $desktopShortcut = Join-Path $desktop "AntiOS.lnk"
+          if (-not (Test-Path -LiteralPath $desktopShortcut)) {
+            throw "Installer did not create the desktop shortcut"
+          }
+          $registered = (Get-ItemProperty "HKLM:\Software\DargonITP\AntiOS" -Name InstallDir).InstallDir
+          if ([System.IO.Path]::GetFullPath($registered) -ne [System.IO.Path]::GetFullPath($installDir)) {
+            throw "Registered install directory mismatch: $registered"
+          }
+          & (Join-Path $installDir "AntiOS.exe") --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $installDir "AntiOS-GUI.exe") --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $installDir "Uninstall.exe") /S
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Start-Sleep -Seconds 2
+          if (Test-Path -LiteralPath (Join-Path $installDir "AntiOS-GUI.exe")) {
+            throw "Installer smoke uninstall left AntiOS-GUI.exe behind"
+          }
+          if (Test-Path -LiteralPath $desktopShortcut) {
+            throw "Installer smoke uninstall left the desktop shortcut behind"
+          }
       - name: Smoke-test executables
         shell: pwsh
         run: |
@@ -240,12 +334,17 @@ jobs:
           Compress-Archive -Path .\package\* -DestinationPath .\AntiOS-windows-x64.zip -Force
           $hash = (Get-FileHash .\AntiOS-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  AntiOS-windows-x64.zip" | Set-Content -NoNewline .\AntiOS-windows-x64.zip.sha256
+          Copy-Item ./installer-output/AntiOS-Setup.exe ./AntiOS-Setup.exe -Force
+          $setupHash = (Get-FileHash ./AntiOS-Setup.exe -Algorithm SHA256).Hash.ToLower()
+          "$setupHash  AntiOS-Setup.exe" | Set-Content -NoNewline ./AntiOS-Setup.exe.sha256
 
       - name: Attest Windows archive provenance
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
-          subject-path: AntiOS-windows-x64.zip
+          subject-path: |
+            AntiOS-windows-x64.zip
+            AntiOS-Setup.exe
 
       - name: Attest Python distribution provenance
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -259,6 +358,8 @@ jobs:
           path: |
             AntiOS-windows-x64.zip
             AntiOS-windows-x64.zip.sha256
+            AntiOS-Setup.exe
+            AntiOS-Setup.exe.sha256
             python-dist/*
           if-no-files-found: error
 
@@ -278,6 +379,8 @@ jobs:
           gh release create $tag `
             .\AntiOS-windows-x64.zip `
             .\AntiOS-windows-x64.zip.sha256 `
+            .\AntiOS-Setup.exe `
+            .\AntiOS-Setup.exe.sha256 `
             $pythonArtifacts `
             --target $env:GITHUB_SHA `
             --prerelease `
