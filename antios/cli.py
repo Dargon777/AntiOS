@@ -326,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
             if not args.download_only and not args.yes:
                 payload = latest_alpha()
             else:
-                payload = download_update(args.directory, require_signature=True)
+                payload = download_update(args.directory, require_signature=args.yes)
                 if args.yes and payload.get("downloaded"):
                     payload["installer"] = schedule_install(
                         payload["setup_path"], payload["sha256"]
