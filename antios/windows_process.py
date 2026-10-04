@@ -32,7 +32,7 @@ def hidden_process_kwargs(*, extra_creationflags: int = 0) -> dict[str, Any]:
     helpers. STARTUPINFO/SW_HIDE is kept as a second layer for tools that still
     honor the show-window field.
     """
-    if os.name != "nt":
+    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
         return {}
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | int(extra_creationflags)
     startupinfo = subprocess.STARTUPINFO()
