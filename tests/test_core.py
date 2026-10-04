@@ -113,17 +113,10 @@ def test_restore_ignores_unapproved_registry_paths():
     assert all("Danger" not in item["target"] for item in operations)
 
 
-def test_scan_reports_current_package_version():
-    from antios.core import scan
+def test_scan_reports_current_package_version(monkeypatch):
+    import antios.core as core
 
-    class Backend:
-        def read(self, target):
-            class Value:
-                exists = False
-                value = None
-                def to_dict(self):
-                    return {"target": {"name": target.name}, "exists": False, "value": None}
-            return Value()
-
-    data = scan(Backend())
+    monkeypatch.setattr(core, "collect_system_info", lambda _backend: {})
+    monkeypatch.setattr(core, "_registry_entries", lambda _backend: [])
+    data = core.scan(object())
     assert data["antios_version"] == __version__
