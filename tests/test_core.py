@@ -1,3 +1,4 @@
+from antios import __version__
 import pytest
 
 from antios.core import (
@@ -110,3 +111,19 @@ def test_restore_ignores_unapproved_registry_paths():
     )
 
     assert all("Danger" not in item["target"] for item in operations)
+
+
+def test_scan_reports_current_package_version():
+    from antios.core import scan
+
+    class Backend:
+        def read(self, target):
+            class Value:
+                exists = False
+                value = None
+                def to_dict(self):
+                    return {"target": {"name": target.name}, "exists": False, "value": None}
+            return Value()
+
+    data = scan(Backend())
+    assert data["antios_version"] == __version__
