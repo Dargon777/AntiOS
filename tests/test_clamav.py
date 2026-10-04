@@ -153,7 +153,9 @@ def test_unverified_database_cannot_produce_clean_verdict(tmp_path, banner, fres
     assert result['verdict'] == 'incomplete'
 
 
-def test_valid_database_and_scan_produce_explicit_independent_coverage(tmp_path):
+def test_valid_database_and_scan_produce_explicit_independent_coverage(tmp_path, monkeypatch):
+    from antios import clamav
+    monkeypatch.setattr(clamav, '_is_windows', lambda: False)
     target = tmp_path / 'fixture'
     target.write_bytes(b'harmless')
     with daemon() as (port, _):
@@ -187,7 +189,8 @@ def test_hash_detection_does_not_hide_archive_coverage_limit(tmp_path):
 
 def test_cli_selects_independent_engine_and_reports_it(tmp_path, monkeypatch, capsys):
     import json
-    from antios import antivirus, cli
+    from antios import antivirus, cli, clamav
+    monkeypatch.setattr(clamav, '_is_windows', lambda: False)
     target = tmp_path / 'fixture'
     target.write_bytes(b'harmless')
     with daemon() as (port, _):
