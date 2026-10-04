@@ -49,6 +49,8 @@ def worker_main(request_path: str, events_path: str) -> int:
         try:
             scan_files(request["path"], signature_path=request.get("signatures"),
                        engine=request.get("engine", "amsi"),
+                       engine_service=request.get("engine_service"),
+                       require_verified_peer=bool(request.get("require_verified_peer", False)),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint)
             emit("done", None)
             return 0
@@ -76,6 +78,8 @@ def _terminate(process: subprocess.Popen) -> None:
 
 def run_scan_process(path: Path, *, signature_path: Path | None = None,
                      engine: str = "amsi",
+                     engine_service: str | None = None,
+                     require_verified_peer: bool = False,
                      timeout: float | None = None,
                      cancelled: Callable[[], bool] = lambda: False,
                      progress: Callable[[dict], None] | None = None) -> dict:
@@ -85,9 +89,13 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
     done, failure = False, None
     with tempfile.TemporaryDirectory(prefix="antios-scan-") as folder:
         request, events = Path(folder) / "request.json", Path(folder) / "events.jsonl"
-        request.write_text(json.dumps({"path": str(Path(path).absolute()), "engine": engine,
-                                      "signatures": str(signature_path.absolute()) if signature_path else None}),
-                           encoding="utf-8")
+        request.write_text(json.dumps({
+            "path": str(Path(path).absolute()),
+            "engine": engine,
+            "engine_service": engine_service,
+            "require_verified_peer": bool(require_verified_peer),
+            "signatures": str(signature_path.absolute()) if signature_path else None,
+        }), encoding="utf-8")
         events.touch()
         process = subprocess.Popen(worker_command(request, events), stdin=subprocess.DEVNULL,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

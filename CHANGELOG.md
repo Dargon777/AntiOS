@@ -6,6 +6,30 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a12] - 2026-10-04
+
+### Added
+
+- Managed Windows ClamAV lifecycle with protected runtime/data directories, SCM
+  startup, official FreshClam bootstrap and recurring SYSTEM signature updates.
+- Verified Windows ClamD peer identity for Python scans and Resident Guard:
+  AntiOS binds the exact loopback TCP connection to the configured own-process
+  LocalSystem SCM service and rejects service/PID changes during a request.
+- `protection-status` reports engine/database readiness, Guard state and native
+  service/minifilter enforcement without claiming Windows primary-AV registration.
+- FreshClam reload notification through the managed ClamD configuration.
+
+### Security
+
+- Windows resident protection no longer trusts an arbitrary process that occupies
+  127.0.0.1:3310. Missing/unverified engine identity degrades coverage instead of
+  producing a clean verdict.
+- Managed engine setup is preview-first, refuses ambiguous existing installations,
+  rejects reparse-point sources and defaults to verified Authenticode binaries.
+- AntiOS continues to leave Defender, Secure Boot and Windows Security registration
+  unchanged.
+
+
 ### Added
 
 - Native broker binds each ClamD connection to the configured LocalSystem SCM

@@ -6,12 +6,12 @@ themselves supply prevention, tamper protection or Windows antivirus registratio
 
 | Component | Current state | Remaining acceptance condition |
 | --- | --- | --- |
-| Independent content detection | ClamAV integration; functional tests | Official-database and representative malware/benign corpus testing, measured false positives and performance |
+| Independent content detection | ClamAV integration, managed engine setup and verified Windows service peer | Official-database and representative malware/benign corpus testing, measured false positives and performance |
 | Resident scanning | Selected-folder, post-write Guard with bounded queue and recovery | Windows load, sleep/resume, removable media, disk-error and long-running tests |
 | Remediation | Explicit opt-in DPAPI quarantine with revalidation | Windows failure/recovery matrix and safe update/uninstall testing |
-| Updates | Separate official FreshClam | Supported deployment, update failure handling and operational monitoring on Windows |
+| Updates | AntiOS-managed FreshClam bootstrap + SYSTEM scheduled updates + ClamD reload notification | Long-running Windows failure/recovery telemetry, engine-version update policy and signed-package supply-chain validation |
 | Pre-execution prevention | Experimental execute-open minifilter + native ClamD broker; default audit; compiled locally | Actual CreateProcess/section-reuse coverage, signed deployment, concurrency/Verifier and Windows acceptance |
-| Windows service | Native SCM service and actual protection-level diagnostics implemented | Signed Windows installation, stop/recovery, authenticated engine identity and update lifecycle |
+| Windows service | Native SCM service diagnostics plus Python/Guard binding to a verified own-process LocalSystem ClamD peer | Signed Windows installation, stop/recovery, native service PPL path and full upgrade lifecycle |
 | Boot protection / protected service | ELAM/PPL not implemented; SCM service is not protected | ELAM eligibility, page-hash signing, protected dependencies/engine and Windows integration |
 | Primary antivirus registration | Not implemented | Applicable Microsoft partner onboarding and documented integration |
 | Publisher/driver identity | Unresolved | Required account verification, trusted signing and driver signing approvals |
@@ -32,8 +32,14 @@ require MVI membership for the early-launch submission route.
 require an ELAM driver and appropriate signing of the service and dependencies.
 These are external program and validation gates; code changes cannot grant them.
 
+The repository now also exposes `antios protection-status`, which reports engine
+freshness/identity, Resident Guard state and native service/driver enforcement
+separately. It deliberately keeps `production_primary_antivirus=false` while the
+external registration/certification gates remain unresolved.
+
 Next engineering work should happen in disposable Windows VMs with rollback:
-validate Guard and its installer, run the [native boundary acceptance matrix](../native/README.md),
-complete signed-driver Windows CI and failure-injection testing, and measure
-real-world detection. The native source is deliberately excluded from the normal
-release and Store package. Do not deploy an untested filesystem filter to users.
+exercise the managed ClamAV install/update/uninstall path, validate Guard under
+sleep/resume and failure injection, run the
+[native boundary acceptance matrix](../native/README.md), obtain a Microsoft
+minifilter altitude and production driver signing, and measure real-world
+detection/false positives. Do not deploy an untested filesystem filter to users.

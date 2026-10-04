@@ -1,17 +1,25 @@
 """Read-only ClamD client with loopback-only transport and bounded requests.
 
-ClamD is installed and maintained separately. Its TCP protocol has no peer
-authentication: the local machine and daemon must be trusted.
+ClamD TCP does not authenticate its peer.  On Windows, AntiOS can bind requests
+to an administrator-configured running LocalSystem SCM service and verify that
+the server side of each established loopback connection belongs to that PID.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
 import math
+import os
 import re
 import socket
 import struct
 import time
+
+from .windows_clamd_peer import (
+    configured_service_name,
+    query_service_process,
+    verify_connected_socket,
+)
 
 
 @dataclass(frozen=True)
@@ -20,21 +28,47 @@ class ScanOutcome:
     name: str = ""
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 class ClamAVScanner:
     name = "ClamAV"
 
-    def __init__(self, *, port: int = 3310, timeout: float = 30) -> None:
+    def __init__(self, *, port: int = 3310, timeout: float = 30,
+                 service_name: str | None = None,
+                 require_verified_peer: bool = False) -> None:
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError("ClamAV port must be between 1 and 65535")
         if not math.isfinite(timeout) or not 0 < timeout <= 300:
             raise ValueError("ClamAV timeout must be between 0 and 300 seconds")
         self.port, self.timeout = port, timeout
+        self.service_name = configured_service_name(service_name) if _is_windows() else None
+        self.require_verified_peer = bool(require_verified_peer)
+        if _is_windows() and self.require_verified_peer and not self.service_name:
+            raise OSError(
+                "Resident ClamAV protection requires an administrator-configured "
+                "ClamD SCM service (policy engine_service, ANTIOS_CLAMD_SERVICE, "
+                "or AntiOS registry binding)"
+            )
         version = self._request(b"zVERSION\0")
         if not re.fullmatch(r"ClamAV [ -~]{1,500}", version):
             raise OSError("ClamAV returned an invalid VERSION response")
-        self.metadata = {"version": version, "endpoint": f"127.0.0.1:{port}",
-                         "database_freshness": self._freshness(version),
-                         "archive_policy": "managed-by-clamd.conf"}
+        peer_required = _is_windows()
+        peer_verified = bool(self.service_name) if peer_required else None
+        self.metadata = {
+            "version": version,
+            "endpoint": f"127.0.0.1:{port}",
+            "database_freshness": self._freshness(version),
+            "archive_policy": "managed-by-clamd.conf",
+            "peer_verification_required": peer_required,
+            "peer_verified": peer_verified,
+            "peer_identity": (
+                f"windows-service:{self.service_name}" if peer_verified
+                else "unverified-loopback" if peer_required
+                else "not-enforced-on-this-platform"
+            ),
+        }
 
     @staticmethod
     def _freshness(version: str) -> str:
@@ -57,6 +91,9 @@ class ClamAVScanner:
 
     def _request(self, command: bytes, content: bytes | None = None) -> str:
         deadline = time.monotonic() + self.timeout
+        expected_pid = None
+        if self.service_name:
+            expected_pid = query_service_process(self.service_name).pid
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
             def remaining() -> None:
                 seconds = deadline - time.monotonic()
@@ -66,6 +103,8 @@ class ClamAVScanner:
 
             remaining()
             connection.connect(("127.0.0.1", self.port))
+            if expected_pid is not None and not verify_connected_socket(connection, expected_pid):
+                raise OSError("ClamD loopback peer is not owned by the configured SCM service")
             remaining()
             connection.sendall(command)
             if content is not None:
@@ -88,6 +127,10 @@ class ClamAVScanner:
                 if b"\0" in block:
                     if not reply.endswith(b"\0") or reply.count(0) != 1:
                         raise OSError("ClamAV returned multiple or malformed responses")
+                    if expected_pid is not None:
+                        current = query_service_process(self.service_name)
+                        if current.pid != expected_pid:
+                            raise OSError("Configured ClamD service changed during the request")
                     try:
                         return reply[:-1].decode("utf-8", errors="strict")
                     except UnicodeDecodeError as exc:

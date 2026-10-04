@@ -98,13 +98,25 @@ def scan_files(
     cancelled: Callable[[], bool] | None = None,
     provider_factory: Callable | None = None,
     engine: str = "amsi",
+    engine_service: str | None = None,
+    require_verified_peer: bool = False,
     excluded_paths: tuple[Path, ...] = (),
     checkpoint: Callable[[dict], None] | None = None,
 ) -> dict[str, Any]:
     if engine not in {"amsi", "clamav"}:
         raise ValueError("Unknown scan engine")
     if provider_factory is None:
-        provider_factory = AmsiScanner if engine == "amsi" else ClamAVScanner
+        if engine == "amsi":
+            provider_factory = AmsiScanner
+        elif engine_service is None and not require_verified_peer:
+            # Preserve the ordinary on-demand provider contract. Strict Windows
+            # peer binding is opt-in here and mandatory in Resident Guard.
+            provider_factory = ClamAVScanner
+        else:
+            provider_factory = lambda: ClamAVScanner(
+                service_name=engine_service,
+                require_verified_peer=require_verified_peer,
+            )
     if not 1 <= max_bytes <= 256 * 1024 * 1024 or not 1 <= max_files <= 1_000_000:
         raise ValueError("Scan limits must be 1..256 MiB and 1..1000000 files")
     target = checked_path(path)
@@ -264,7 +276,9 @@ def scan_files(
         summary[key] for key in ("cancelled", "limit_reached", "errors", "skipped")
     ))
     if engine == "clamav" and (result["engine"].get("limited_results") or
-            result["engine"].get("database_freshness") != "current"):
+            result["engine"].get("database_freshness") != "current" or
+            (result["engine"].get("peer_verification_required") and
+             result["engine"].get("peer_verified") is not True)):
         complete = False
     if complete and summary["provider_scanned"] == summary["files_scanned"]:
         result["coverage"] = "provider-and-signatures" if engine == "amsi" else "clamav-and-signatures"

@@ -92,6 +92,13 @@ def build_parser() -> argparse.ArgumentParser:
     guard.add_argument("guard_args", nargs=argparse.REMAINDER,
                        help="run ROOT, status, stop or history; use run --help for options")
 
+    protection_cmd = sub.add_parser(
+        "protection-status",
+        help="Show independent engine, resident Guard and native enforcement status.",
+    )
+    protection_cmd.add_argument("--json", action="store_true")
+    protection_cmd.add_argument("--engine-service", help="Explicit trusted Windows ClamD SCM service name.")
+
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
     version_cmd.add_argument("--json", action="store_true")
 
@@ -281,6 +288,15 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(version_info())
             else:
                 print(render_version())
+            return 0
+
+        if args.command == "protection-status":
+            from .protection import collect_protection_status, render_protection_status
+            status = collect_protection_status(args.engine_service)
+            if args.json:
+                _print_json(status)
+            else:
+                print(render_protection_status(status))
             return 0
 
         if args.command == "config":
