@@ -35,7 +35,7 @@ Open **Antivirus** from the sidebar or press `Ctrl+6`:
 - Explore the separate [experimental native Windows filter/service](native/README.md); source and lab tooling only, not part of the release package.
 - Run the optional [resident Guard](docs/GUARD.md) for automatic post-write checks in selected folders, with explicit opt-in quarantine.
 
-This development branch includes on-demand scanning and an optional post-write folder monitor. It is not yet a full real-time Windows antivirus replacement; see the [readiness gates](docs/DEFENDER_REPLACEMENT.md). AMSI submits buffers to the installed provider; it does not reproduce a full filesystem antivirus engine. Persistent protection remains with the installed antivirus. The built-in local database contains only the EICAR test hash. Optional [ClamAV integration](docs/CLAMAV.md) adds independent signatures and archive analysis through a separately installed daemon and its official updater. Default limits are 32 MiB per file and 100,000 files, with skipped files and failed provider calls explicitly reported.
+The current production-core work includes independent ClamAV detection, encrypted quarantine, an optional post-write Resident Guard, a managed ClamAV service/update lifecycle, verified Windows service ownership for the ClamD loopback peer, and an experimental native execute-open minifilter. It is **not yet a certified primary Windows antivirus replacement**; see the [readiness gates](docs/DEFENDER_REPLACEMENT.md). AntiOS does not disable Defender or fake Windows Security registration. The built-in local database contains only the EICAR test hash; [ClamAV integration](docs/CLAMAV.md) supplies independent official signatures and archive/file-format analysis. Default limits are 32 MiB per file and 100,000 files, with skipped files and failed provider calls explicitly reported.
 
 Details, CLI examples, exit codes and quarantine recovery: [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
 
@@ -97,6 +97,8 @@ The Windows release contains:
 ```text
 AntiOS-GUI.exe
 AntiOS.exe
+protection-engine.ps1
+guard-startup.ps1
 install.ps1
 uninstall.ps1
 README.md
@@ -126,6 +128,14 @@ Optional CLI PATH entry:
 
 ```powershell
 .\install.ps1 -AddToPath
+```
+
+Managed independent ClamAV backend (preview first):
+
+```powershell
+.\protection-engine.ps1 -ClamAVDirectory "C:\staging\clamav-1.5.x.win.x64"
+.\protection-engine.ps1 -ClamAVDirectory "C:\staging\clamav-1.5.x.win.x64" -Apply
+.\AntiOS.exe protection-status
 ```
 
 Uninstall:
@@ -166,6 +176,13 @@ Technical diagnostics:
 ```powershell
 antios doctor
 antios doctor --json
+```
+
+Antivirus stack status:
+
+```powershell
+antios protection-status
+antios protection-status --json
 ```
 
 Generate a reversible metadata plan:
