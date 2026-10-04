@@ -174,3 +174,52 @@ def download_update(directory: str | Path | None = None, *, require_signature: b
         setup_path.unlink(missing_ok=True)
         checksum_path.unlink(missing_ok=True)
         raise
+
+
+def schedule_install(setup_path: str | Path, expected_sha256: str) -> dict:
+    """Launch verified Setup only after this AntiOS process exits.
+
+    The helper re-checks SHA-256 and Authenticode immediately before launch to
+    close the verification/use race in the user temp directory.
+    """
+    if os.name != "nt":
+        raise OSError("Automatic AntiOS installation requires Windows")
+    setup = Path(setup_path).resolve()
+    if not setup.is_file():
+        raise FileNotFoundError(setup)
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+        raise ValueError("Invalid expected update digest")
+
+    helper = setup.parent / "install-antios-update.ps1"
+    helper.write_text(
+        """param([int]$WaitPid,[string]$Setup,[string]$Expected)\n"""
+        """$ErrorActionPreference='Stop'\n"""
+        """try { Wait-Process -Id $WaitPid -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 750; """
+        """$actual=(Get-FileHash -LiteralPath $Setup -Algorithm SHA256).Hash.ToLowerInvariant(); """
+        """if($actual -ne $Expected){ throw 'AntiOS update digest changed before install.' }; """
+        """$sig=Get-AuthenticodeSignature -LiteralPath $Setup; """
+        """if($sig.Status -ne 'Valid'){ throw 'AntiOS update signature is no longer valid.' }; """
+        """Start-Process -FilePath $Setup -ArgumentList '/S' -Verb RunAs -Wait } """
+        """finally { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue }\n""",
+        encoding="utf-8",
+    )
+    powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    process = subprocess.Popen(
+        [
+            str(powershell), "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+            "-ExecutionPolicy", "Bypass", "-File", str(helper),
+            "-WaitPid", str(os.getpid()), "-Setup", str(setup), "-Expected", expected_sha256,
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=flags,
+        close_fds=True,
+    )
+    return {
+        "scheduled": True,
+        "helper_pid": process.pid,
+        "setup_path": str(setup),
+        "sha256": expected_sha256,
+    }
