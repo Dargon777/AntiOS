@@ -194,7 +194,7 @@ def test_cli_selects_independent_engine_and_reports_it(tmp_path, monkeypatch, ca
     target = tmp_path / 'fixture'
     target.write_bytes(b'harmless')
     with daemon() as (port, _):
-        monkeypatch.setattr(antivirus, 'ClamAVScanner', lambda: ClamAVScanner(port=port))
+        monkeypatch.setattr(antivirus, 'ClamAVScanner', lambda **kwargs: ClamAVScanner(port=port))
         assert cli.main(['--config', str(tmp_path / 'none.toml'), 'virus-scan',
                          str(target), '--engine', 'clamav', '--json']) == 0
     result = json.loads(capsys.readouterr().out)
