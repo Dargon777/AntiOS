@@ -168,7 +168,8 @@ def download_update(directory: str | Path | None = None, *, require_signature: b
             setup_path=str(setup_path),
             sha256=actual,
             signature=signature,
-            install_ready=not require_signature or bool(signature and signature.get("Status") == "Valid"),
+            signature_required_for_install=True,
+            install_ready=bool(signature and signature.get("Status") == "Valid"),
         )
     except Exception:
         setup_path.unlink(missing_ok=True)
