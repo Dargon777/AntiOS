@@ -93,7 +93,7 @@ if ($existingManaged) {
     if (-not $repair) {
         throw 'Managed engine already exists and protection-repair.ps1 is missing.'
     }
-    & $repair -Apply -UpdateSignatures
+    & $repair -Apply -UpdateSignatures -Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Protection repair failed with exit code $LASTEXITCODE" }
     $plan['action'] = 'repaired-existing'
     if ($Json) { $plan | ConvertTo-Json -Depth 4 } else { [pscustomobject]$plan | Format-List }
@@ -130,7 +130,7 @@ try {
     }
 
     $engineScript = Resolve-EngineScript
-    & $engineScript -ClamAVDirectory $source -Apply -RequireValidSignature $true
+    & $engineScript -ClamAVDirectory $source -Apply -RequireValidSignature $true | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Managed engine installation failed with exit code $LASTEXITCODE" }
 
     $plan['action'] = 'installed'
