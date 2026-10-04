@@ -42,11 +42,24 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install PyInstaller
-        run: python -m pip install pyinstaller
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller -e .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Windows icon resources
+        shell: pwsh
+        run: |
+          python scripts/build-icons.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Store GUI executable
-        run: pyinstaller --clean --noconfirm --onedir --contents-directory _gui --uac-admin --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm --onedir --contents-directory _gui --uac-admin --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build unsigned Store MSIX
         shell: pwsh
