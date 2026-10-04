@@ -12,6 +12,15 @@ Alpha 13 makes the independent ClamAV stack the normal AntiOS antivirus path ins
 - Resident Guard continues to require verified engine identity and reports degraded coverage when the engine is missing, stale or untrusted.
 - `protection-status` continues to report detection-engine readiness, database freshness, Guard state and native enforcement separately.
 
+## Storage Cleanup
+
+- Cleanup results are now selectable with Ctrl/Shift multi-selection.
+- "Select extra duplicates" selects redundant copies while leaving one copy per duplicate group unselected.
+- Selected files can be deleted permanently or backed up first.
+- Backup mode copies into a unique session folder, preserves paths, writes a manifest and verifies SHA-256 before deleting each original.
+- Files that changed after scanning are skipped rather than deleted.
+- The cleanup page has a polished action panel, selection-size summary, progress indicator and refined result table.
+
 ## Reliability
 
 - Updated Windows regression fixtures for the verified-peer constructor contract introduced by the standalone default.
