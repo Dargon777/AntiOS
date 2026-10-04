@@ -33,12 +33,13 @@ class GuardTray:
         self._icon: Any | None = None
         self._thread: threading.Thread | None = None
         self._state: str | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def _image(self, variant: str):
         from PIL import Image
 
-        return Image.open(icon_asset(f"tray_{variant}.png")).convert("RGBA")
+        with Image.open(icon_asset(f"tray_{variant}.png")) as image:
+            return image.convert("RGBA")
 
     @staticmethod
     def _title(state: str | None) -> str:
