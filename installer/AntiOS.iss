@@ -1,8 +1,8 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.0a13"
+  #define MyAppVersion "2.0.0a14"
 #endif
 #ifndef MyNumericVersion
-  #define MyNumericVersion "2.0.13.0"
+  #define MyNumericVersion "2.0.14.0"
 #endif
 #ifndef MySourceDir
   #define MySourceDir "..\installer-stage"
