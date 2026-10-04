@@ -1455,7 +1455,10 @@ class Dashboard:
             for iid, row in self.cleanup_rows.items()
             if str(row.get("path")) in disposable
         ]
-        self.cleanup_tree.selection_set(matches)
+        if matches:
+            self.cleanup_tree.selection_set(matches)
+        else:
+            self.cleanup_tree.selection_remove(self.cleanup_tree.selection())
         self._cleanup_selection_changed()
 
     def _open_cleanup_selection(self) -> None:
@@ -2033,7 +2036,7 @@ class Dashboard:
         elif kind == "danger":
             bg = THEME["warn"]
             fg = "#FFFFFF"
-            active_bg = THEME["warn_bg"]
+            active_bg = THEME["warn"]
         else:
             bg = THEME["surface_alt"]
             fg = THEME["text"]
