@@ -388,6 +388,16 @@ class Dashboard:
         )
 
         style.configure(
+            "AntiOS.Horizontal.TProgressbar",
+            troughcolor=THEME["surface_alt"],
+            background=THEME["accent"],
+            bordercolor=THEME["border"],
+            lightcolor=THEME["accent"],
+            darkcolor=THEME["accent"],
+            thickness=7,
+        )
+
+        style.configure(
             "AntiOS.TCombobox",
             fieldbackground=THEME["surface_alt"],
             background=THEME["surface_alt"],
@@ -986,7 +996,11 @@ class Dashboard:
         )
         self.cleanup_selection_label.pack(side="right")
 
-        self.cleanup_progress = self.ttk.Progressbar(parent, mode="indeterminate")
+        self.cleanup_progress = self.ttk.Progressbar(
+            parent,
+            mode="indeterminate",
+            style="AntiOS.Horizontal.TProgressbar",
+        )
         self.cleanup_progress.pack(fill="x", pady=(0, 12))
 
         summary = tk.Frame(parent, bg=THEME["bg"])
