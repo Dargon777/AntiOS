@@ -64,6 +64,12 @@ Name: "launchatstartup"; Description: "Start AntiOS Resident Guard when I sign i
 [Files]
 Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Registry]
+Root: HKLM; Subkey: "Software\DargonITP\AntiOS"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\DargonITP\AntiOS"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\AntiOS-GUI.exe"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName}"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\AntiOS-GUI.exe"; ValueType: string; ValueName: "Path"; ValueData: "{app}"; Flags: uninsdeletekey
+
 [Icons]
 Name: "{group}\AntiOS"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Comment: "AntiOS Antivirus & Windows Diagnostics"
 Name: "{group}\AntiOS Command Line"; Filename: "{app}\{#MyCliExeName}"; WorkingDir: "{app}"; Comment: "AntiOS command line"
