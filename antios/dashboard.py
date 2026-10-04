@@ -2016,6 +2016,10 @@ class Dashboard:
             bg = THEME["accent"]
             fg = THEME["accent_text"]
             active_bg = THEME["accent_hover"]
+        elif kind == "danger":
+            bg = THEME["warn"]
+            fg = "#FFFFFF"
+            active_bg = THEME["warn_bg"]
         else:
             bg = THEME["surface_alt"]
             fg = THEME["text"]
