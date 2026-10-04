@@ -39,7 +39,9 @@ def test_ambiguous_paths_force_rescan_instead_of_admitting_paths(tmp_path, name)
     struct.pack('<III', 17, 3, 2) + b'a\x00' + bytes(20),
     struct.pack('<III', 999999, 3, 2) + b'a\x00',
     struct.pack('<III', 0, 3, 2) + b'\x00\xd8',
-    packet('a') + packet('undeclared-record')])
+    packet('a') + packet('undeclared-record')],
+    ids=['empty', 'short', 'oversized', 'truncated', 'odd-length', 'unknown-action',
+         'short-offset', 'unaligned-offset', 'outside-offset', 'invalid-unicode', 'trailing-record'])
 def test_lost_or_malformed_records_force_root_rescan(tmp_path, data):
     assert decode_changes(tmp_path, data) == ChangeBatch(reset_roots=(tmp_path,))
 

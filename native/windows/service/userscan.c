@@ -167,7 +167,7 @@ static DWORD WINAPI scan_worker(void *context) {
         worker->scan_id = 0;
         LeaveCriticalSection(&worker->lock);
         /* A timed-out request is not a dead service; keep serving subsequent opens. */
-        if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_FLT_NO_WAITER_FOR_REPLY)) {
+        if (FAILED(result) && result != ERROR_FLT_NO_WAITER_FOR_REPLY) {
             fail(broker, result); break;
         }
     }

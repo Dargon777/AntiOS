@@ -68,7 +68,7 @@ def daemon(reply=b'stream: OK\0', *, banner=None, delay=0):
                             # Fragmented responses exercise buffering as on TCP.
                             connection.sendall(reply[:5])
                             connection.sendall(reply[5:])
-                        except (BrokenPipeError, ConnectionResetError):
+                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                             pass
         except Exception as exc:
             failures.append(exc)
@@ -85,7 +85,8 @@ def daemon(reply=b'stream: OK\0', *, banner=None, delay=0):
         assert not failures
 
 
-@pytest.mark.parametrize('payload', [b'', b'inert bytes\x00with nul', b'x' * 150000])
+@pytest.mark.parametrize('payload', [b'', b'inert bytes\x00with nul', b'x' * 150000],
+                         ids=['empty', 'embedded-nul', 'multi-chunk'])
 def test_streams_exact_snapshot_and_never_sends_filename(payload):
     with daemon() as (port, received):
         engine = ClamAVScanner(port=port)

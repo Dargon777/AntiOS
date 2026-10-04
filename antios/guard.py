@@ -73,7 +73,9 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
                     if any(path == root or root in path.parents for root in excluded):
                         continue
                     try:
-                        info = child.stat(follow_symlinks=False)
+                        # Windows DirEntry.stat may omit file IDs. Use the same stat
+                        # source as post-scan validation so stable files can be cached.
+                        info = path.stat(follow_symlinks=False) if os.name == 'nt' else child.stat(follow_symlinks=False)
                         if is_link(info):
                             raise ValueError('link-or-reparse-point')
                         if stat.S_ISDIR(info.st_mode):

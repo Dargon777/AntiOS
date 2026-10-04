@@ -431,3 +431,11 @@ def test_repeated_root_rescans_do_not_starve_files_beyond_queue_capacity(tmp_pat
         stop.set()
         thread.join(3)
     assert not failures
+
+
+def test_inventory_identity_matches_post_scan_stat(tmp_path):
+    target = tmp_path / 'stable.txt'
+    target.write_bytes(b'ordinary')
+    files, issues, limited = guard.inventory((tmp_path,))
+    assert not issues and not limited
+    assert files[target] == guard.file_identity(target.stat())

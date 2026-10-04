@@ -39,8 +39,8 @@ try {
         Invoke-Checked -Program 'cl.exe' -Arguments @('/nologo','/TC','/W4','/WX','/O2','/MT','/guard:cf','/DUNICODE','/D_UNICODE',
             '/D_WIN32_WINNT=0x0A00','/D_CRT_SECURE_NO_WARNINGS',
             "$PSScriptRoot\service\main.c","$PSScriptRoot\service\userscan.c",
-            "$PSScriptRoot\service\engine_peer.c","$PSScriptRoot\engine\protocol.c","$PSScriptRoot\engine\clamd.c",'service.res',
-            '/Fe:AntiOS-Service.exe','/link','fltlib.lib','ws2_32.lib','iphlpapi.lib','advapi32.lib','/DYNAMICBASE','/NXCOMPAT','/guard:cf')
+            "$PSScriptRoot\service\engine_peer.c","$PSScriptRoot\engine\protocol.c","$PSScriptRoot\engine\clamd.c",
+            '/Fe:AntiOS-Service.exe','/link','service.res','fltlib.lib','ws2_32.lib','iphlpapi.lib','advapi32.lib','/DYNAMICBASE','/NXCOMPAT','/guard:cf')
         Invoke-Checked -Program 'cl.exe' -Arguments @('/nologo','/TC','/W4','/WX','/O2','/MT',"$PSScriptRoot\..\tests\inert_program.c",'/Fe:Native-Inert.exe')
     }
     if ($Target -in @('Driver','All')) {
