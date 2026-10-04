@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from antios.storage_cleanup import scan_storage
+from antios.storage_cleanup import cleanup_files, scan_storage
 
 
 def _write(path: Path, size: int, byte: bytes = b"x") -> None:
@@ -102,3 +102,69 @@ def test_old_file_rule_is_explicitly_not_an_unused_claim(tmp_path):
 
     assert result["rules"]["unused_claim"] is False
     assert "last-modified" in result["rules"]["note"]
+
+
+
+def test_cleanup_permanent_deletes_only_selected_candidate(tmp_path):
+    _write(tmp_path / "a.bin", 2048, b"a")
+    _write(tmp_path / "b.bin", 2048, b"a")
+    _write(tmp_path / "keep.bin", 2048, b"k")
+
+    scan = scan_storage(tmp_path, duplicate_min_bytes=1000, large_bytes=10_000)
+    selected = str(tmp_path / "b.bin")
+    result = cleanup_files(scan, [selected], mode="delete")
+
+    assert result["deleted"] == 1
+    assert result["bytes_freed"] == 2048
+    assert not (tmp_path / "b.bin").exists()
+    assert (tmp_path / "a.bin").exists()
+    assert (tmp_path / "keep.bin").exists()
+
+
+def test_cleanup_backup_verifies_copy_and_writes_manifest(tmp_path):
+    root = tmp_path / "scan"
+    backup_root = tmp_path / "backups"
+    _write(root / "old.iso", 4096, b"x")
+    old = time.time() - 400 * 86400
+    os.utime(root / "old.iso", (old, old))
+
+    scan = scan_storage(root, old_days=180, large_bytes=1024)
+    result = cleanup_files(
+        scan,
+        [str(root / "old.iso")],
+        mode="backup",
+        backup_root=backup_root,
+    )
+
+    assert result["deleted"] == 1
+    assert result["backed_up"] == 1
+    assert not (root / "old.iso").exists()
+    backup_dir = Path(result["backup_dir"])
+    copied = backup_dir / "files" / "old.iso"
+    assert copied.read_bytes() == b"x" * 4096
+    manifest = (backup_dir / "manifest.json").read_text(encoding="utf-8")
+    assert "antios-storage-cleanup-backup" in manifest
+    assert "old.iso" in manifest
+
+
+def test_cleanup_refuses_file_changed_since_scan(tmp_path):
+    _write(tmp_path / "a.bin", 2048, b"a")
+    _write(tmp_path / "b.bin", 2048, b"a")
+    scan = scan_storage(tmp_path, duplicate_min_bytes=1000, large_bytes=10_000)
+
+    target = tmp_path / "b.bin"
+    target.write_bytes(b"changed")
+
+    result = cleanup_files(scan, [str(target)], mode="delete")
+    assert result["deleted"] == 0
+    assert result["errors"]
+    assert target.read_bytes() == b"changed"
+
+
+def test_cleanup_refuses_path_not_in_scan_candidates(tmp_path):
+    _write(tmp_path / "candidate.zip", 1024, b"z")
+    _write(tmp_path / "ordinary.txt", 100, b"o")
+    scan = scan_storage(tmp_path, duplicate_min_bytes=10_000, large_bytes=10_000)
+
+    with pytest.raises(ValueError, match="not an approved cleanup candidate"):
+        cleanup_files(scan, [str(tmp_path / "ordinary.txt")], mode="delete")
