@@ -523,6 +523,7 @@ def cleanup_files(
                 manifest_index = len(manifest["items"]) - 1
                 # Persist recoverability before removing the source.
                 _write_cleanup_manifest(backup_dir, manifest)
+                result["backed_up"] += 1
 
             target.unlink()
 
@@ -530,7 +531,6 @@ def cleanup_files(
             result["bytes_freed"] += int(snapshot.get("size_bytes", 0))
             item["status"] = "deleted"
             if mode == "backup":
-                result["backed_up"] += 1
                 assert manifest is not None and backup_dir is not None
                 assert manifest_index is not None
                 manifest["items"][manifest_index] = dict(item)
