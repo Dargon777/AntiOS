@@ -231,6 +231,7 @@ def scan_files(
 
     effective_workers = workers if engine == "clamav" and provider is not None else 1
     result["limits"]["effective_workers"] = effective_workers
+    result["engine"]["limited_results"] = 0
 
     def apply_outcome(outcome: dict) -> None:
         item = outcome["item"]
@@ -245,6 +246,8 @@ def scan_files(
             issue(item, outcome["provider_error"], error=True)
             result["engine"]["detail"] = outcome["provider_error"]
             result["engine"]["failed_during_scan"] = True
+        if outcome.get("limited_result"):
+            result["engine"]["limited_results"] += 1
         finding = outcome.get("finding")
         if finding:
             finding.update(
@@ -281,14 +284,13 @@ def scan_files(
             finding = {"kind": "threat", "engine": "SHA-256", "name": label} if label else None
             provider_scanned = False
             provider_error = None
+            limited_result = False
             if provider is not None and not provider_failed.is_set():
                 try:
                     value = provider.scan(content, str(item))
                     provider_scanned = True
                     if isinstance(value, ScanOutcome):
-                        if value.kind == "review":
-                            # Main-thread aggregation below keeps the shared report consistent.
-                            pass
+                        limited_result = value.kind == "review"
                         if value.kind and finding is None:
                             finding = {"kind": value.kind, "engine": "ClamAV", "name": value.name}
                     elif value >= 32768:
@@ -313,6 +315,7 @@ def scan_files(
                 "finding": finding,
                 "provider_scanned": provider_scanned,
                 "provider_error": provider_error,
+                "limited_result": limited_result,
             }
         except (OSError, ValueError) as exc:
             return {"item": item, "issue": str(exc), "error": True}
@@ -357,12 +360,26 @@ def scan_files(
 
     pending: list[Path] = []
     executor = ThreadPoolExecutor(max_workers=effective_workers) if effective_workers > 1 else None
+    provider_probe_done = effective_workers <= 1
     try:
         def flush_pending() -> None:
-            nonlocal pending
+            nonlocal pending, provider_probe_done
             if not pending:
                 return
-            if executor is None:
+
+            # Preserve the failure circuit breaker: prove that the provider is
+            # responsive with one request before fanning work out concurrently.
+            # A dead ClamD therefore causes one bounded provider error, not one
+            # timeout per worker.
+            if executor is not None and not provider_probe_done and pending:
+                first = pending.pop(0)
+                apply_outcome(scan_one(first))
+                after_item()
+                provider_probe_done = True
+
+            if not pending:
+                return
+            if executor is None or provider_failed.is_set():
                 outcomes = map(scan_one, pending)
             else:
                 outcomes = executor.map(scan_one, pending)
@@ -391,10 +408,6 @@ def scan_files(
                 flush_pending()
         flush_pending()
         summary["cancelled"] = stopped()
-        result["engine"]["limited_results"] = sum(
-            1 for finding in result["findings"]
-            if finding.get("engine") == "ClamAV" and finding.get("kind") == "review"
-        )
     finally:
         if executor is not None:
             executor.shutdown(wait=True, cancel_futures=True)
