@@ -194,6 +194,7 @@ def test_backup_is_persisted_before_failed_source_delete(tmp_path, monkeypatch):
     )
 
     assert result["deleted"] == 0
+    assert result["backed_up"] == 1
     assert target.exists()
     backup_dir = Path(result["backup_dir"])
     assert (backup_dir / "files" / "archive.zip").read_bytes() == b"z" * 1024
