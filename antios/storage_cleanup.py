@@ -514,16 +514,36 @@ def cleanup_files(
             before_delete = target.lstat()
             if not _same_snapshot(before_delete, snapshot):
                 raise ValueError("file changed before deletion")
+
+            manifest_index = None
+            if mode == "backup":
+                assert manifest is not None and backup_dir is not None
+                manifest_entry = dict(item, status="verified-pending-delete")
+                manifest["items"].append(manifest_entry)
+                manifest_index = len(manifest["items"]) - 1
+                # Persist recoverability before removing the source.
+                _write_cleanup_manifest(backup_dir, manifest)
+
             target.unlink()
 
             result["deleted"] += 1
             result["bytes_freed"] += int(snapshot.get("size_bytes", 0))
+            item["status"] = "deleted"
             if mode == "backup":
                 result["backed_up"] += 1
-                assert manifest is not None
-                manifest["items"].append(dict(item))
-                _write_cleanup_manifest(backup_dir, manifest)
-            item["status"] = "deleted"
+                assert manifest is not None and backup_dir is not None
+                assert manifest_index is not None
+                manifest["items"][manifest_index] = dict(item)
+                try:
+                    _write_cleanup_manifest(backup_dir, manifest)
+                except OSError as exc:
+                    # The already-persisted manifest still identifies a verified
+                    # backup and original path. Report the stale status, but do
+                    # not misreport a successfully deleted source as skipped.
+                    result["errors"].append({
+                        "path": key,
+                        "error": f"backup manifest finalization failed: {exc}",
+                    })
         except (OSError, ValueError) as exc:
             item["status"] = "skipped"
             item["error"] = str(exc)
@@ -535,7 +555,13 @@ def cleanup_files(
         manifest["deleted"] = result["deleted"]
         manifest["bytes_freed"] = result["bytes_freed"]
         manifest["errors"] = result["errors"]
-        _write_cleanup_manifest(backup_dir, manifest)
+        try:
+            _write_cleanup_manifest(backup_dir, manifest)
+        except OSError as exc:
+            result["errors"].append({
+                "path": str(backup_dir / "manifest.json"),
+                "error": f"backup manifest finalization failed: {exc}",
+            })
 
     return result
 
