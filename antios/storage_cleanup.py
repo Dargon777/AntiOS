@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import shutil
+import stat
 import time
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -37,6 +42,10 @@ class FileRecord:
     path: Path
     size: int
     modified: float
+    modified_ns: int
+    created_ns: int
+    device: int
+    inode: int
 
     @property
     def suffix(self) -> str:
@@ -49,6 +58,10 @@ class FileRecord:
             "path": str(self.path),
             "size_bytes": self.size,
             "modified": self.modified,
+            "modified_ns": self.modified_ns,
+            "created_ns": self.created_ns,
+            "device": self.device,
+            "inode": self.inode,
             "age_days": round(age_days, 1),
         }
 
@@ -93,6 +106,10 @@ def _iter_files(
                                 path=Path(entry.path),
                                 size=int(stat.st_size),
                                 modified=float(stat.st_mtime),
+                                modified_ns=int(stat.st_mtime_ns),
+                                created_ns=int(stat.st_ctime_ns),
+                                device=int(stat.st_dev),
+                                inode=int(stat.st_ino),
                             )
                         )
                         if progress and len(records) % 250 == 0:
@@ -289,6 +306,26 @@ def scan_storage(
     )
     errors.extend(hash_errors)
 
+    candidate_paths = {
+        str(path)
+        for group in duplicates
+        for path in group.get("paths", [])
+    }
+    candidate_paths.update(str(item.path) for item in old_large)
+    candidate_paths.update(str(item.path) for item in installer_archives)
+    candidate_paths.update(str(item.path) for item in empty)
+    snapshots = {
+        str(record.path): {
+            "size_bytes": record.size,
+            "modified_ns": record.modified_ns,
+            "created_ns": record.created_ns,
+            "device": record.device,
+            "inode": record.inode,
+        }
+        for record in records
+        if str(record.path) in candidate_paths
+    }
+
     result = {
         "root": str(base),
         "cancelled": bool(cancelled and cancelled()),
@@ -323,6 +360,7 @@ def scan_storage(
         ],
         "empty_files": [item.to_dict(now=timestamp) for item in empty],
         "errors": errors[:200],
+        "candidate_snapshots": snapshots,
     }
 
     if progress:
@@ -331,6 +369,173 @@ def scan_storage(
             "files_scanned": len(records),
             "duplicate_groups": len(duplicates),
         })
+
+    return result
+
+
+
+def default_cleanup_backup_path() -> Path:
+    documents = Path.home() / "Documents"
+    root = documents if documents.is_dir() else Path.home()
+    return root / "AntiOS Backups" / "Storage Cleanup"
+
+
+def _lexical_path(path: str | os.PathLike[str]) -> Path:
+    return Path(os.path.abspath(Path(path).expanduser()))
+
+
+def _same_snapshot(info: os.stat_result, snapshot: dict[str, Any]) -> bool:
+    return (
+        stat.S_ISREG(info.st_mode)
+        and not stat.S_ISLNK(info.st_mode)
+        and not bool(getattr(info, "st_file_attributes", 0) & 0x400)
+        and int(info.st_size) == int(snapshot.get("size_bytes", -1))
+        and int(info.st_mtime_ns) == int(snapshot.get("modified_ns", -1))
+        and int(info.st_ctime_ns) == int(snapshot.get("created_ns", -1))
+        and int(info.st_dev) == int(snapshot.get("device", -1))
+        and int(info.st_ino) == int(snapshot.get("inode", -1))
+    )
+
+
+def _write_cleanup_manifest(folder: Path, payload: dict[str, Any]) -> None:
+    temporary = folder / "manifest.json.tmp"
+    final = folder / "manifest.json"
+    temporary.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    os.replace(temporary, final)
+
+
+def cleanup_files(
+    scan_result: dict[str, Any],
+    selected_paths: Iterable[str | os.PathLike[str]],
+    *,
+    mode: str,
+    backup_root: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    """Delete selected scan candidates permanently or after a verified backup.
+
+    Only paths present in the scan's candidate snapshot may be acted on. Every
+    file is revalidated immediately before the action. Backup mode copies into a
+    unique session directory, verifies SHA-256, then deletes the original.
+    """
+    if mode not in {"delete", "backup"}:
+        raise ValueError("cleanup mode must be 'delete' or 'backup'")
+
+    root = _lexical_path(scan_result.get("root", ""))
+    snapshots = scan_result.get("candidate_snapshots")
+    if not isinstance(snapshots, dict):
+        raise ValueError("cleanup scan does not contain candidate snapshots")
+
+    requested: list[Path] = []
+    seen: set[str] = set()
+    for raw in selected_paths:
+        target = _lexical_path(raw)
+        key = str(target)
+        if key in seen:
+            continue
+        seen.add(key)
+        if key not in snapshots:
+            raise ValueError(f"File is not an approved cleanup candidate: {target}")
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"Cleanup candidate is outside the scanned root: {target}") from exc
+        requested.append(target)
+
+    if not requested:
+        raise ValueError("Select at least one cleanup candidate")
+
+    backup_dir: Path | None = None
+    manifest: dict[str, Any] | None = None
+    if mode == "backup":
+        base = _lexical_path(backup_root or default_cleanup_backup_path())
+        base.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+        backup_dir = base / f"antios-cleanup-{stamp}-{uuid.uuid4().hex[:8]}"
+        backup_dir.mkdir(parents=False, exist_ok=False)
+        manifest = {
+            "schema": 1,
+            "kind": "antios-storage-cleanup-backup",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "scan_root": str(root),
+            "items": [],
+        }
+        _write_cleanup_manifest(backup_dir, manifest)
+
+    result: dict[str, Any] = {
+        "schema": 1,
+        "kind": "antios-storage-cleanup-action",
+        "mode": mode,
+        "requested": len(requested),
+        "deleted": 0,
+        "backed_up": 0,
+        "bytes_freed": 0,
+        "backup_dir": str(backup_dir) if backup_dir else None,
+        "items": [],
+        "errors": [],
+    }
+
+    for target in requested:
+        key = str(target)
+        snapshot = snapshots[key]
+        item = {"path": key, "size_bytes": int(snapshot.get("size_bytes", 0))}
+        try:
+            before = target.lstat()
+            if not _same_snapshot(before, snapshot):
+                raise ValueError("file changed since the cleanup scan")
+
+            if mode == "backup":
+                assert backup_dir is not None and manifest is not None
+                relative = target.relative_to(root)
+                destination = backup_dir / "files" / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if destination.exists():
+                    raise FileExistsError(f"backup destination already exists: {destination}")
+
+                shutil.copy2(target, destination)
+                after_copy = target.lstat()
+                if not _same_snapshot(after_copy, snapshot):
+                    destination.unlink(missing_ok=True)
+                    raise ValueError("file changed while creating the backup")
+
+                source_hash = _full_hash(target)
+                backup_hash = _full_hash(destination)
+                if source_hash != backup_hash:
+                    destination.unlink(missing_ok=True)
+                    raise OSError("backup verification failed")
+
+                item.update(
+                    backup_path=str(destination),
+                    sha256=source_hash,
+                )
+
+            before_delete = target.lstat()
+            if not _same_snapshot(before_delete, snapshot):
+                raise ValueError("file changed before deletion")
+            target.unlink()
+
+            result["deleted"] += 1
+            result["bytes_freed"] += int(snapshot.get("size_bytes", 0))
+            if mode == "backup":
+                result["backed_up"] += 1
+                assert manifest is not None
+                manifest["items"].append(dict(item))
+                _write_cleanup_manifest(backup_dir, manifest)
+            item["status"] = "deleted"
+        except (OSError, ValueError) as exc:
+            item["status"] = "skipped"
+            item["error"] = str(exc)
+            result["errors"].append({"path": key, "error": str(exc)})
+        result["items"].append(item)
+
+    if manifest is not None and backup_dir is not None:
+        manifest["completed_at"] = datetime.now(timezone.utc).isoformat()
+        manifest["deleted"] = result["deleted"]
+        manifest["bytes_freed"] = result["bytes_freed"]
+        manifest["errors"] = result["errors"]
+        _write_cleanup_manifest(backup_dir, manifest)
 
     return result
 
