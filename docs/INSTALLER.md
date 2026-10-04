@@ -1,66 +1,79 @@
 # AntiOS Windows Setup
 
-AntiOS alpha 14 adds a conventional machine-wide Windows installer.
+The normal Windows install is a single `AntiOS-Setup.exe`.
 
-## User flow
+Setup installs AntiOS to `C:\Program Files\AntiOS`, creates the desktop and
+Start Menu shortcuts, registers the app in Windows Installed Apps, and then
+prepares the managed antivirus engine.
 
-1. Download `AntiOS-Setup.exe` from the GitHub release.
-2. Run it and approve the Windows UAC prompt.
-3. Setup installs AntiOS to `C:\Program Files\AntiOS` by default.
-4. AntiOS is available from the desktop and Start Menu.
-5. Remove it later from **Settings > Apps > Installed apps** or from the Start Menu uninstall shortcut.
+## Protection bootstrap
 
-The portable ZIP remains available for testing and development, but normal users should use Setup.
+On a normal install, Setup uses the pinned ClamAV Windows x64 manifest shipped
+with AntiOS. It downloads the official package, verifies its expected size and
+SHA-256, and the lower-level engine installer requires valid matching
+Authenticode signatures on `clamd.exe` and `freshclam.exe`.
 
-## Installed layout
+The managed engine is installed under:
 
-The installer deploys the same tested onedir builds used by the portable release:
+```text
+C:\Program Files\AntiOS\ClamAV
+```
 
-- `AntiOS-GUI.exe` and `_gui`
-- `AntiOS.exe` and `_cli`
-- `AntiOS-Guard.exe` and `_guard`
-- Guard/protection management PowerShell scripts
-- ClamAV configuration templates
-- project documentation and license files
+Its databases/configuration live under:
 
-User settings, quarantine and other per-user state are not stored in Program Files and are intentionally preserved by a normal uninstall.
+```text
+C:\ProgramData\AntiOS-ClamAV
+```
 
-## Windows integration
+ClamD runs as an own-process LocalSystem service. FreshClam runs at startup and
+every two hours.
 
-Setup writes the canonical install location to:
+If the engine is already managed by AntiOS, an application upgrade repairs the
+known service/ACL/task state and refreshes signatures instead of downloading the
+full ClamAV package again.
 
-`HKLM\Software\DargonITP\AntiOS`
+A failed network/bootstrap step does not roll back the application install.
+AntiOS records the bootstrap exit code so `protection-status` can surface the
+problem, and the user can run:
 
-It also registers `AntiOS-GUI.exe` with Windows App Paths and creates a normal uninstall entry under the Windows uninstall registry.
+```powershell
+AntiOS.exe protection-repair --yes --update-signatures
+```
 
-Desktop and Start Menu shortcuts are machine-wide so the install remains visible and usable regardless of which administrator credentials satisfied UAC.
+## Resident Guard first run
+
+After a successful engine bootstrap, Setup enables Guard for Downloads, Desktop
+and Documents when the elevated UAC identity is the same as the active
+interactive Windows user.
+
+If another administrator account was used for UAC, Guard setup is deliberately
+deferred. This avoids creating a per-user scheduled task and policy under the
+wrong profile.
 
 ## Upgrades
 
-The installer uses the registered install directory when an existing AntiOS installation is found. It requests Resident Guard shutdown before replacing files, then installs the new payload in place.
+Setup reuses the registered AntiOS installation directory, stops an existing
+Guard before replacing files, then updates the same installation.
 
-The current installer does not silently migrate the older per-user PowerShell installation under `%LOCALAPPDATA%\Programs\AntiOS`. That legacy path can be removed with its matching `uninstall.ps1` after the new Setup installation is verified.
+The legacy per-user PowerShell install under
+`%LOCALAPPDATA%\Programs\AntiOS` is not silently migrated.
 
 ## Uninstall
 
-The generated uninstaller:
+Uninstall stops/removes Resident Guard startup, removes the AntiOS-managed ClamD
+service/FreshClam task/runtime, then removes the application files, shortcuts and
+machine registration.
 
-- stops Resident Guard if present;
-- removes its configured startup task;
-- removes AntiOS application files;
-- removes desktop and Start Menu shortcuts;
-- removes machine-wide install/App Paths/uninstall registry entries.
+Per-user AntiOS settings and quarantine are deliberately preserved.
 
-It intentionally does not purge per-user settings or quarantine data.
+## CI mode
 
-## Release validation
+`/NOENGINE=1` skips engine bootstrap. It exists for packaging/install smoke
+tests and controlled development; it is not the normal user install path.
 
-Windows CI compiles Setup with NSIS and performs an isolated silent installation. The job verifies:
+Release CI uses that switch so every pull request does not download the large
+official ClamAV package. The bootstrap script itself is syntax-checked and its
+pinned manifest/preview output is validated separately.
 
-- GUI, CLI, Guard and generated uninstaller exist;
-- Windows stores the expected install directory;
-- the common desktop shortcut exists;
-- installed CLI and GUI self-tests execute;
-- silent uninstall removes application files and the desktop shortcut.
-
-When repository Artifact Signing is enabled, the application executables are signed before installer staging and the completed Setup is signed separately.
+The full official-package install/update/removal path belongs in an elevated
+Windows acceptance run because it creates real services and scheduled tasks.
