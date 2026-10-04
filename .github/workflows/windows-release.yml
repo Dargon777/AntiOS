@@ -76,7 +76,13 @@ jobs:
       - name: Validate protection PowerShell syntax
         shell: pwsh
         run: |
-          foreach ($path in @(".\scripts\protection-engine.ps1", ".\scripts\guard-startup.ps1")) {
+          foreach ($path in @(
+            ".\scripts\protection-engine.ps1",
+            ".\scripts\protection-bootstrap.ps1",
+            ".\scripts\protection-repair.ps1",
+            ".\scripts\protection-first-run.ps1",
+            ".\scripts\guard-startup.ps1"
+          )) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors) | Out-Null
@@ -84,6 +90,14 @@ jobs:
               $errors | Format-List | Out-String | Write-Error
               exit 1
             }
+          }
+
+      - name: Preview protection bootstrap
+        shell: pwsh
+        run: |
+          $bootstrap = .\scripts\protection-bootstrap.ps1 -ManifestPath .\release\clamav-windows.json -Json | ConvertFrom-Json
+          if ($bootstrap.version -ne "1.5.4" -or $bootstrap.architecture -ne "x64" -or -not $bootstrap.dry_run) {
+            throw "Protection bootstrap preview is invalid."
           }
 
       - name: Build Python distributions
@@ -245,7 +259,7 @@ jobs:
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "AntiOS-Setup-Smoke"
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
-          ./installer-output/AntiOS-Setup.exe /S "/D=$installDir"
+          ./installer-output/AntiOS-Setup.exe /S /NOENGINE=1 "/D=$installDir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "Uninstall.exe")) {
             if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {

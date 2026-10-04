@@ -18,6 +18,7 @@ from typing import Callable
 
 from .antivirus import scan_files, utc_now
 from .quarantine import default_quarantine_path
+from .scan_cache import default_scan_cache_path
 
 WORKER_FLAG = "--antios-scan-worker"
 
@@ -48,10 +49,13 @@ def worker_main(request_path: str, events_path: str) -> int:
 
         try:
             scan_files(request["path"], signature_path=request.get("signatures"),
-                       engine=request.get("engine", "amsi"),
+                       engine=request.get("engine", "clamav"),
                        engine_service=request.get("engine_service"),
                        require_verified_peer=bool(request.get("require_verified_peer", False)),
-                       excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint)
+                       excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint,
+                       workers=int(request.get("workers", 4)),
+                       cache_path=default_scan_cache_path(),
+                       use_cache=bool(request.get("use_cache", True)))
             emit("done", None)
             return 0
         except Exception as exc:
@@ -77,9 +81,11 @@ def _terminate(process: subprocess.Popen) -> None:
 
 
 def run_scan_process(path: Path, *, signature_path: Path | None = None,
-                     engine: str = "amsi",
+                     engine: str = "clamav",
                      engine_service: str | None = None,
                      require_verified_peer: bool = False,
+                     workers: int = 4,
+                     use_cache: bool = True,
                      timeout: float | None = None,
                      cancelled: Callable[[], bool] = lambda: False,
                      progress: Callable[[dict], None] | None = None) -> dict:
@@ -94,6 +100,8 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
             "engine": engine,
             "engine_service": engine_service,
             "require_verified_peer": bool(require_verified_peer),
+            "workers": workers,
+            "use_cache": bool(use_cache),
             "signatures": str(signature_path.absolute()) if signature_path else None,
         }), encoding="utf-8")
         events.touch()

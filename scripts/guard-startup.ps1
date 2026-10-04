@@ -5,6 +5,7 @@ param(
     [string[]]$Roots = @(),
     [ValidateSet('notify', 'quarantine')][string]$Mode = 'notify',
     [ValidatePattern('^[A-Za-z0-9_-]{1,80}$')][string]$EngineServiceName,
+    [switch]$AllowManagedUnsigned,
     [switch]$Uninstall,
     [switch]$Apply
 )
@@ -45,6 +46,32 @@ $folder = Join-Path $env:LOCALAPPDATA 'AntiOS\Guard'
 $policyPath = Join-Path $folder 'startup-policy.json'
 $signature = Get-AuthenticodeSignature -LiteralPath $exe
 
+function Assert-ManagedUnsignedGuard([string]$Path) {
+    $installKey = 'HKLM:\SOFTWARE\DargonITP\AntiOS'
+    $installDir = Get-ItemPropertyValue -Path $installKey -Name InstallDir -ErrorAction Stop
+    $expected = [IO.Path]::GetFullPath((Join-Path $installDir 'AntiOS-Guard.exe'))
+    if ([IO.Path]::GetFullPath($Path) -ne $expected) {
+        throw 'Unsigned Guard startup is allowed only for the machine-installed AntiOS-Guard.exe.'
+    }
+
+    $dangerousSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
+    $dangerousRights = [Security.AccessControl.FileSystemRights]::Write -bor
+                       [Security.AccessControl.FileSystemRights]::Modify -bor
+                       [Security.AccessControl.FileSystemRights]::FullControl
+    $acl = Get-Acl -LiteralPath $installDir
+    foreach ($rule in $acl.Access) {
+        if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
+        try {
+            $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        } catch {
+            continue
+        }
+        if ($sid -in $dangerousSids -and (($rule.FileSystemRights -band $dangerousRights) -ne 0)) {
+            throw "AntiOS install directory is writable by an untrusted broad principal: $sid"
+        }
+    }
+}
+
 [pscustomobject]@{
     Task = $taskName
     User = $identity.Name
@@ -64,7 +91,10 @@ if (-not $Apply) {
     return
 }
 if ($signature.Status -ne 'Valid') {
-    throw 'Automatic startup requires a valid Authenticode signature. Manual development runs remain available.'
+    if (-not $AllowManagedUnsigned) {
+        throw 'Automatic startup requires a valid Authenticode signature. Manual development runs remain available.'
+    }
+    Assert-ManagedUnsignedGuard $exe
 }
 
 if ($EngineServiceName) {

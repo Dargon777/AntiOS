@@ -192,3 +192,23 @@ def test_native_dpapi_authenticated_roundtrip_and_tamper_detection():
     changed[-1] ^= 1
     with pytest.raises(OSError):
         protector.unprotect(bytes(changed))
+
+
+def test_verify_all_reports_valid_and_corrupt_items(fixture):
+    source, finding, vault = fixture
+    item = vault.add(finding, dry_run=False)
+    first = vault.verify_all()
+    assert first["checked"] == 1
+    assert first["valid"] == 1
+    assert first["corrupt"] == 0
+
+    path = vault.root / (item["id"] + ".aq")
+    data = bytearray(path.read_bytes())
+    data[-1] ^= 1
+    path.write_bytes(data)
+
+    second = vault.verify_all()
+    assert second["checked"] == 1
+    assert second["valid"] == 0
+    assert second["corrupt"] == 1
+    assert second["issues"][0]["id"] == item["id"]

@@ -10,6 +10,60 @@ from .clamav import ClamAVScanner
 from .guard_state import read_guard_state
 
 
+def _managed_runtime_status() -> dict:
+    if os.name != "nt":
+        return {"available": False, "reason": "windows-only"}
+    program_files = Path(os.environ.get("ProgramFiles") or r"C:\Program Files")
+    program_data = Path(os.environ.get("ProgramData") or r"C:\ProgramData")
+    install = program_files / "AntiOS" / "ClamAV"
+    data = program_data / "AntiOS-ClamAV"
+    required = {
+        "clamd": install / "clamd.exe",
+        "freshclam": install / "freshclam.exe",
+        "clamd_config": data / "config" / "clamd.conf",
+        "freshclam_config": data / "config" / "freshclam.conf",
+        "database": data / "database",
+    }
+    files = {key: path.exists() for key, path in required.items()}
+    task = {"available": False}
+    schtasks = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "schtasks.exe"
+    try:
+        process = subprocess.run(
+            [str(schtasks), "/Query", "/TN", "AntiOS ClamAV Signature Update", "/FO", "LIST"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        task = {
+            "available": process.returncode == 0,
+            "exit_code": process.returncode,
+        }
+    except (OSError, subprocess.SubprocessError) as exc:
+        task = {"available": False, "error": str(exc)[:300]}
+
+    bootstrap_exit = None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\DargonITP\AntiOS") as key:
+            bootstrap_exit = int(winreg.QueryValueEx(key, "ProtectionBootstrapExitCode")[0])
+    except (OSError, ValueError):
+        pass
+
+    healthy = all(files.values()) and task.get("available") is True
+    return {
+        "available": install.exists(),
+        "healthy": healthy,
+        "install_root": str(install),
+        "data_root": str(data),
+        "files": files,
+        "updater_task": task,
+        "bootstrap_exit_code": bootstrap_exit,
+    }
+
+
 def _native_status() -> dict:
     if os.name != "nt":
         return {"available": False, "reason": "windows-only"}
@@ -57,6 +111,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         engine = {"available": False, "detail": str(exc)[:500]}
 
     guard = read_guard_state()
+    managed = _managed_runtime_status()
     native = _native_status()
     peer_ok = (not engine.get("peer_verification_required") or
                engine.get("peer_verified") is True)
@@ -94,6 +149,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "kind": "antios-protection-status",
         "engine": engine,
         "guard": guard,
+        "managed_runtime": managed,
         "native": native,
         "capabilities": {
             "standalone_detection_engine": engine_ready,
@@ -110,6 +166,7 @@ def render_protection_status(status: dict) -> str:
     caps = status["capabilities"]
     engine = status["engine"]
     guard = status["guard"]
+    managed = status.get("managed_runtime", {})
     native = status["native"]
     return "\n".join([
         "AntiOS protection status",
@@ -118,6 +175,8 @@ def render_protection_status(status: dict) -> str:
         f"Database: {engine.get('database_freshness', 'unknown')}",
         f"Engine identity: {engine.get('peer_identity', 'unknown')}",
         f"Resident Guard: {guard.get('state', 'not-running')}",
+        f"Managed runtime: {'healthy' if managed.get('healthy') else 'needs review'}",
+        f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
         f"Pre-execution enforcement: {'active' if caps['pre_execution_blocking'] else 'inactive'}",
         "Primary Windows antivirus registration: not claimed",

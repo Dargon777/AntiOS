@@ -24,6 +24,10 @@ foreach ($source in @(
 foreach ($path in @(
     "scripts\guard-startup.ps1",
     "scripts\protection-engine.ps1",
+    "scripts\protection-bootstrap.ps1",
+    "scripts\protection-repair.ps1",
+    "scripts\protection-first-run.ps1",
+    "release\clamav-windows.json",
     "README.md",
     "README.ru.md",
     "README.es.md",
@@ -60,6 +64,10 @@ $required = @(
     "_guard",
     "guard-startup.ps1",
     "protection-engine.ps1",
+    "protection-bootstrap.ps1",
+    "protection-repair.ps1",
+    "protection-first-run.ps1",
+    "clamav-windows.json",
     "LICENSE"
 )
 foreach ($name in $required) {

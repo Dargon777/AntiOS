@@ -6,6 +6,27 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a16] - 2026-10-04
+
+Alpha 16 makes the installed antivirus stack much less manual.
+
+- Setup can bootstrap the pinned official ClamAV x64 package, verify its SHA-256
+  and signed engine binaries, install ClamD/FreshClam, and enable Guard for the
+  active user when the UAC identity is safe to use.
+- Added `protection-repair` to diagnose and restore the managed service, ACLs,
+  updater task and signatures without taking over an ambiguous ClamD install.
+- ClamD scanning now uses bounded parallel requests and a clean-result cache.
+  Cache hits still re-read and SHA-256 the file, and engine/database/signature
+  changes invalidate old results.
+- Quarantine now hardens its Windows ACL and can verify the integrity of every
+  stored item.
+- Added release update discovery/downloads. Automatic installation is gated on a
+  valid Authenticode signature and re-verifies the Setup immediately before launch.
+- Native VM acceptance now includes a separate SEC_IMAGE mapping check in
+  addition to execute-open and CreateProcess testing. The driver remains
+  experimental and outside the normal release.
+
+
 ## [2.0.0a15] - 2026-10-04
 
 ### Added

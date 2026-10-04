@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": "1.5.4",
+  "architecture": "x64",
+  "url": "https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.5.4/clamav-1.5.4.win.x64.zip",
+  "sha256": "0d9e0228b2674137ea1a2853566c98a0278ad52ab2582c3d6dbd75373848c395",
+  "size": 225774978,
+  "extract_dir": "clamav-1.5.4.win.x64",
+  "license": "GPL-2.0-only",
+  "homepage": "https://www.clamav.net/"
+}

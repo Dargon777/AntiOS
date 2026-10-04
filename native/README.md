@@ -11,7 +11,7 @@ antivirus, a certified driver, or a ready-to-install Defender replacement.
   volumes and inspects opens requesting `FILE_EXECUTE`. In explicit enforcement
   mode, a confirmed infected stream causes the open to be cancelled with
   `STATUS_VIRUS_INFECTED`. The **default is audit**, with manual driver/service
-  startup. Actual Windows loader coverage has not yet passed VM acceptance.
+  startup. Loader coverage still requires signed Windows VM acceptance before production use.
 - File contents travel through Filter Manager data-scan sections, not a path
   supplied by an untrusted application. The broker copies the exact EOF length,
   catches inaccessible pages through `ReadProcessMemory`, and submits the
@@ -133,12 +133,12 @@ There is deliberately no test-signing or signature-bypass installer.
    `AntiOS-Service.exe --status` and elevated `--driver-status`. In audit mode,
    run `Test-NativeVm.ps1 -ServiceExecutable <installed-exe> -FixtureDirectory
    <fixtures> -ExpectedMode Audit -ReportPath <audit.json>`. This checks exact
-   execute-access opening, actual process creation, clean execution and counters.
+   execute-access opening, actual process creation, SEC_IMAGE image-section mapping, clean execution and counters.
 5. Only after audit passes, stop the broker and unload the filter in the VM.
    Set `HKLM\SYSTEM\CurrentControlSet\Services\AntiOS-Filter\Parameters\Enforcement`
    to DWORD 1, then reload/restart. Verify the **loaded** policy with driver status.
    Run the same test with `-ExpectedMode Enforce`. It must observe Windows error
-   225 and no marked-fixture process execution; clean execution must still work.
+   225 for the marked execute/process/image-section paths and no marked-fixture process execution; clean execution must still work.
 6. Before considering deployment, also test the matrix below. Revert to audit or
    restore the VM snapshot if any criterion fails. Never label a failed/skipped
    VM test as protection readiness.
@@ -149,7 +149,7 @@ There is deliberately no test-signing or signature-bypass installer.
 | Broker stop, crash, filter disconnect/unload | Outstanding I/O drains, SCM state reflects failure, no freed OVERLAPPED/context use |
 | More than four concurrent opens | Bounded memory/queue, no deadlock, explicit incomplete counts |
 | Concurrent write/truncate/rename/delete, hard links, transactions | No stale clean/positive decision, no kernel crash or indefinite wait |
-| Reused image sections and DLL loads | Measured coverage/bypasses, not inferred from FILE_EXECUTE tests |
+| Reused image sections and DLL loads | SEC_IMAGE acceptance plus measured reuse/DLL coverage and documented bypasses |
 | Ordinary-user malformed/duplicate IPC and handle passing | Cannot connect to scan/abort ports or forge a verdict |
 | Sleep/resume, low memory, disk fault, reboot | Driver Verifier clean, recovery path works, no boot failure |
 | HVCI/Memory Integrity + other antivirus filters | Signed package loads and coexists under normal security settings |

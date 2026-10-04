@@ -14,6 +14,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Validate native PowerShell tooling syntax
+        shell: pwsh
+        run: |
+          foreach ($path in @(
+            ".\native\windows\build.ps1",
+            ".\native\windows\Install-NativeService.ps1",
+            ".\native\windows\New-DriverInf.ps1",
+            ".\native\windows\Test-NativeVm.ps1"
+          )) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) {
+              $errors | Format-List | Out-String | Write-Error
+              exit 1
+            }
+          }
       - name: Compile unsigned x64 service and filter with pinned WDK
         shell: pwsh
         run: ./native/windows/build.ps1 -Restore

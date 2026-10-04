@@ -26,6 +26,7 @@ from .i18n import LANGUAGE_NAMES, detect_language
 from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .quarantine import Quarantine, default_quarantine_path
+from .scan_cache import default_scan_cache_path
 from .windows_antivirus import defender_action
 from .report import render_doctor_human, render_operations_human, render_scan_human
 from .storage_cleanup import (
@@ -100,8 +101,29 @@ def build_parser() -> argparse.ArgumentParser:
     protection_cmd.add_argument("--json", action="store_true")
     protection_cmd.add_argument("--engine-service", help="Explicit trusted Windows ClamD SCM service name.")
 
+    repair_cmd = sub.add_parser(
+        "protection-repair",
+        help="Preview or repair the managed ClamAV service, ACLs and updater task.",
+    )
+    repair_cmd.add_argument("--yes", action="store_true",
+                            help="Apply repairs. Without --yes, only diagnose and preview.")
+    repair_cmd.add_argument("--update-signatures", action="store_true",
+                            help="Run FreshClam while applying the repair.")
+    repair_cmd.add_argument("--json", action="store_true")
+
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
     version_cmd.add_argument("--json", action="store_true")
+
+    update_cmd = sub.add_parser(
+        "update",
+        help="Check for AntiOS updates or download/schedule a verified signed Setup.",
+    )
+    update_cmd.add_argument("--download-only", action="store_true",
+                            help="Download and verify the newest Setup without launching it.")
+    update_cmd.add_argument("--yes", action="store_true",
+                            help="Download, verify and schedule the signed Setup after AntiOS exits.")
+    update_cmd.add_argument("--directory", help="Optional directory for downloaded update files.")
+    update_cmd.add_argument("--json", action="store_true")
 
     config_cmd = sub.add_parser("config", help="Inspect or initialize AntiOS configuration.")
     config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
@@ -169,12 +191,18 @@ def build_parser() -> argparse.ArgumentParser:
     av.add_argument("--signatures", help="Optional local schema-1 SHA-256 signature database.")
     av.add_argument("--max-mb", type=int, default=DEFAULT_MAX_BYTES // (1024 * 1024))
     av.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
+    av.add_argument("--workers", type=int, default=4,
+                    help="ClamD scan concurrency, 1..8 (default: 4). AMSI remains sequential.")
+    av.add_argument("--no-cache", action="store_true",
+                    help="Do not reuse clean results for unchanged files.")
     av.add_argument("--json", action="store_true")
 
     quarantine_cmd = sub.add_parser("quarantine", help="Inspect, isolate or restore encrypted threats.")
     quarantine_sub = quarantine_cmd.add_subparsers(dest="quarantine_command", required=True)
     quarantine_list = quarantine_sub.add_parser("list")
     quarantine_list.add_argument("--json", action="store_true")
+    quarantine_verify = quarantine_sub.add_parser("verify", help="Verify encrypted quarantine integrity.")
+    quarantine_verify.add_argument("--json", action="store_true")
     quarantine_add = quarantine_sub.add_parser("add", help="Rescan a file, then preview or isolate a confirmed detection.")
     quarantine_add.add_argument("path")
     quarantine_add.add_argument("--engine", choices=("clamav", "amsi"), default="clamav")
@@ -291,6 +319,30 @@ def main(argv: list[str] | None = None) -> int:
                 print(render_version())
             return 0
 
+        if args.command == "update":
+            if args.download_only and args.yes:
+                raise ValueError("--download-only and --yes cannot be used together")
+            from .updater import download_update, latest_alpha, schedule_install
+            if not args.download_only and not args.yes:
+                payload = latest_alpha()
+            else:
+                payload = download_update(args.directory, require_signature=args.yes)
+                if args.yes and payload.get("downloaded"):
+                    payload["installer"] = schedule_install(
+                        payload["setup_path"], payload["sha256"]
+                    )
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"Current: {payload.get('current_version')}")
+                print(f"Latest: {payload.get('latest_version')}")
+                print(f"Update available: {payload.get('update_available')}")
+                if payload.get("downloaded"):
+                    print(f"Verified Setup: {payload.get('setup_path')}")
+                if payload.get("installer"):
+                    print("Update scheduled. AntiOS Setup will start after this process exits.")
+            return 0
+
         if args.command == "protection-status":
             from .protection import collect_protection_status, render_protection_status
             status = collect_protection_status(args.engine_service)
@@ -298,6 +350,24 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(status)
             else:
                 print(render_protection_status(status))
+            return 0
+
+        if args.command == "protection-repair":
+            from .protection_repair import run_protection_repair
+            payload = run_protection_repair(
+                apply=args.yes,
+                update_signatures=args.update_signatures,
+            )
+            if args.json:
+                _print_json(payload)
+            else:
+                print("AntiOS protection repair")
+                print(f"Mode: {'applied' if args.yes else 'preview'}")
+                print(f"Healthy before: {payload.get('healthy_before')}")
+                issues = payload.get("issues") or []
+                actions = payload.get("actions") or []
+                print("Issues: " + (", ".join(issues) if issues else "none"))
+                print("Actions: " + (", ".join(actions) if actions else "none"))
             return 0
 
         if args.command == "config":
@@ -344,6 +414,9 @@ def main(argv: list[str] | None = None) -> int:
                                 engine=args.engine,
                                 require_verified_peer=(args.engine == "clamav" and os.name == "nt"),
                                 max_bytes=args.max_mb * 1024 * 1024, max_files=args.max_files,
+                                workers=args.workers,
+                                cache_path=default_scan_cache_path(),
+                                use_cache=not args.no_cache,
                                 excluded_paths=(default_quarantine_path(),))
             if args.json:
                 _print_json(result)
@@ -358,6 +431,8 @@ def main(argv: list[str] | None = None) -> int:
             store = Quarantine()
             if args.quarantine_command == "list":
                 payload = {"items": store.list_items()}
+            elif args.quarantine_command == "verify":
+                payload = store.verify_all()
             elif args.quarantine_command == "restore":
                 payload = store.restore(args.id, destination=args.to, dry_run=not args.yes)
             else:
