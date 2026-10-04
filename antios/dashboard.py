@@ -35,7 +35,12 @@ from .storage_cleanup import (
     format_bytes,
     scan_storage,
 )
-from .tray import icon_asset
+from .tray import (
+    DashboardTray,
+    application_icon_asset,
+    clear_dashboard_presence,
+    mark_dashboard_presence,
+)
 
 PROJECT_URL = "https://github.com/Dargon777/AntiOS"
 RELEASES_URL = PROJECT_URL + "/releases"
@@ -200,12 +205,12 @@ def _configure_windows_identity() -> None:
         pass
 
 
-def _apply_window_icon(root: Any) -> None:
-    """Use the dedicated running-state icon for the Tk window/taskbar."""
+def _apply_window_icon(root: Any, state: str | None = None) -> None:
+    """Green while protected; red only for attention/degraded/no protection."""
     try:
         image = root.tk.call(
             "image", "create", "photo",
-            "-file", str(icon_asset("app_taskbar.png")),
+            "-file", str(application_icon_asset(state)),
         )
         root.tk.call("wm", "iconphoto", root._w, "-default", image)
         root._antios_taskbar_icon = image
@@ -296,6 +301,7 @@ class Dashboard:
         *,
         language: str | None = None,
         auto_refresh: bool = True,
+        tray_enabled: bool = True,
     ) -> None:
         import tkinter as tk
         from tkinter import ttk
@@ -352,12 +358,20 @@ class Dashboard:
         self.antivirus_busy = False
         self.antivirus_cancelable = False
         self.guard_probe_busy = False
+        self._tray_enabled = tray_enabled
+        self._dashboard_tray: DashboardTray | None = None
+        self._tray_commands: queue.Queue[str] = queue.Queue()
+        self._tray_poll_after: str | None = None
+        self._presence_after: str | None = None
+        self._exiting = False
+        self._protection_state = "not-running"
 
         self._configure_root()
         self._configure_ttk()
         self._build_shell()
         self._build_pages()
         self.show_page("overview")
+        self._initialize_tray()
         if auto_refresh:
             self.refresh()
 
@@ -384,9 +398,91 @@ class Dashboard:
         root.protocol("WM_DELETE_WINDOW", self._close)
         _enable_dark_titlebar(root, self.resolved_theme == "dark")
 
+    def _initialize_tray(self) -> None:
+        if not self._tray_enabled or os.name != "nt":
+            _apply_window_icon(self.root, self._protection_state)
+            return
+        tray = DashboardTray(
+            show=lambda: self._tray_commands.put("show"),
+            exit_app=lambda: self._tray_commands.put("exit"),
+        )
+        if not tray.start(self._protection_state):
+            _apply_window_icon(self.root, self._protection_state)
+            return
+        self._dashboard_tray = tray
+        mark_dashboard_presence()
+        self._presence_after = self.root.after(5000, self._presence_heartbeat)
+        self._tray_poll_after = self.root.after(150, self._poll_tray_commands)
+        try:
+            from .guard_state import read_guard_state
+            self.set_protection_state(read_guard_state())
+        except Exception:
+            self.set_protection_state({"state": "not-running"})
+
+    def _presence_heartbeat(self) -> None:
+        if self._exiting or self._dashboard_tray is None:
+            return
+        try:
+            mark_dashboard_presence()
+        finally:
+            self._presence_after = self.root.after(5000, self._presence_heartbeat)
+
+    def _poll_tray_commands(self) -> None:
+        if self._exiting:
+            return
+        for _ in range(10):
+            try:
+                command = self._tray_commands.get_nowait()
+            except queue.Empty:
+                break
+            if command == "show":
+                self._show_window()
+            elif command == "exit":
+                self._exit()
+                return
+        self._tray_poll_after = self.root.after(150, self._poll_tray_commands)
+
+    def _show_window(self) -> None:
+        if self._exiting:
+            return
+        self.root.deiconify()
+        try:
+            self.root.state("normal")
+            self.root.lift()
+            self.root.focus_force()
+        except Exception:
+            pass
+
+    def set_protection_state(self, status: dict[str, Any] | str) -> None:
+        state = status.get("state") if isinstance(status, dict) else status
+        state = str(state or "not-running")
+        self._protection_state = state
+        _apply_window_icon(self.root, state)
+        if self._dashboard_tray is not None:
+            self._dashboard_tray.set_state(state)
+
     def _close(self) -> None:
+        if self._dashboard_tray is not None and self._dashboard_tray.running:
+            self.root.withdraw()
+            return
+        self._exit()
+
+    def _exit(self) -> None:
+        if self._exiting:
+            return
+        self._exiting = True
         self._storage_cancel.set()
         self.antivirus_cancel.set()
+        for after_id in (self._tray_poll_after, self._presence_after):
+            if after_id is not None:
+                try:
+                    self.root.after_cancel(after_id)
+                except Exception:
+                    pass
+        if self._dashboard_tray is not None:
+            self._dashboard_tray.stop()
+            self._dashboard_tray = None
+        clear_dashboard_presence()
         self.root.destroy()
 
     def _configure_ttk(self) -> None:
@@ -2668,7 +2764,7 @@ def launch(language: str | None = None) -> int:
         _configure_windows_identity()
 
     root = tk.Tk()
-    _apply_window_icon(root)
+    _apply_window_icon(root, "not-running")
     Dashboard(root, language=language)
     root.mainloop()
     return 0
@@ -2705,11 +2801,12 @@ def main(argv: list[str] | None = None) -> int:
         _configure_windows_identity()
         root = tk.Tk()
         root.withdraw()
-        _apply_window_icon(root)
+        _apply_window_icon(root, "not-running")
         dashboard = Dashboard(
             root,
             language=args.lang,
             auto_refresh=False,
+            tray_enabled=False,
         )
         dashboard.show_page("settings")
         root.update_idletasks()

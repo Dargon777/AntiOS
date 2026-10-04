@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from antios.tray import icon_asset, tray_variant
+from antios.tray import application_icon_asset, icon_asset, tray_variant
 
 
 def test_all_brand_icon_assets_are_packaged_in_source_tree():
@@ -24,3 +24,11 @@ def test_brand_assets_are_not_empty():
         for name in ("app_main.png", "app_taskbar.png", "tray_alert.png", "tray_ok.png")
     ]
     assert all(size > 1000 for size in sizes)
+
+
+def test_application_icon_is_green_when_protected_and_red_on_alert():
+    assert application_icon_asset("monitoring").name == "app_main.png"
+    assert application_icon_asset("scanning").name == "app_main.png"
+    for state in ("starting", "attention", "degraded", "failed", "unresponsive",
+                  "stopped", "not-running", None):
+        assert application_icon_asset(state).name == "app_taskbar.png"

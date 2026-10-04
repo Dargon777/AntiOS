@@ -378,6 +378,7 @@ class AntivirusPanel:
                 break
             if kind == "guard-state":
                 self.app.guard_probe_busy = False
+                self.app.set_protection_state(value)
                 self.guard_status.configure(text=self.t("guard_status", state=self.t("guard_state_" + value.get("state", "unavailable")),
                                                         count=value.get("detections", 0)))
             elif kind == "guard-action":

@@ -129,3 +129,31 @@ def test_settings_translation_keys_exist_for_all_locales():
         tr = Translator(language)
         for key in keys:
             assert tr.t(key) != key
+
+
+def test_window_close_hides_when_dashboard_tray_is_running():
+    from types import SimpleNamespace
+    from antios.dashboard import Dashboard
+
+    calls = []
+    dashboard = Dashboard.__new__(Dashboard)
+    dashboard.root = SimpleNamespace(withdraw=lambda: calls.append("withdraw"))
+    dashboard._dashboard_tray = SimpleNamespace(running=True)
+    dashboard._exit = lambda: calls.append("exit")
+
+    Dashboard._close(dashboard)
+    assert calls == ["withdraw"]
+
+
+def test_window_close_exits_if_tray_is_unavailable():
+    from types import SimpleNamespace
+    from antios.dashboard import Dashboard
+
+    calls = []
+    dashboard = Dashboard.__new__(Dashboard)
+    dashboard.root = SimpleNamespace(withdraw=lambda: calls.append("withdraw"))
+    dashboard._dashboard_tray = None
+    dashboard._exit = lambda: calls.append("exit")
+
+    Dashboard._close(dashboard)
+    assert calls == ["exit"]

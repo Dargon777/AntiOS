@@ -6,6 +6,17 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a18] - 2026-10-04
+
+- Closing the dashboard now hides AntiOS to the system tray instead of
+  terminating the interface and cancelling active work.
+- Dashboard and Resident Guard coordinate tray ownership so only one AntiOS
+  status icon is shown.
+- Green icons now mean active protection; red icons are reserved for attention,
+  degraded, failed, stopped or unavailable protection states.
+- The taskbar/window icon follows the same protection-state policy.
+
+
 ## [2.0.0a17] - 2026-10-04
 
 - Normal GUI diagnostics and protection helpers no longer flash PowerShell or
