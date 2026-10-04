@@ -72,17 +72,18 @@ function Get-ConfigSource {
 
 function Remove-OwnedRegistry {
     if (Test-Path $AntiOSRegistry) {
-        $current = (Get-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue).EngineServiceName
+        $current = Get-ItemPropertyValue -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue
         if ($current -eq $EngineServiceName) {
             Remove-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue
         }
     }
     if (Test-Path $ClamRegistry) {
-        $values = Get-ItemProperty -Path $ClamRegistry
-        if ($values.ConfDir -eq $ConfigRoot) {
+        $confDir = Get-ItemPropertyValue -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
+        $dataDir = Get-ItemPropertyValue -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
+        if ($confDir -eq $ConfigRoot) {
             Remove-ItemProperty -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
         }
-        if ($values.DataDir -eq $DatabaseRoot) {
+        if ($dataDir -eq $DatabaseRoot) {
             Remove-ItemProperty -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
         }
     }
@@ -136,8 +137,9 @@ if (Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue) {
 if (Test-Path -LiteralPath $InstallRoot) { throw "Managed engine destination already exists: $InstallRoot" }
 if (Test-Path -LiteralPath $DataRoot) { throw "Managed engine data destination already exists: $DataRoot" }
 if (Test-Path $ClamRegistry) {
-    $existing = Get-ItemProperty -Path $ClamRegistry
-    if ($existing.ConfDir -or $existing.DataDir) {
+    $existingConf = Get-ItemPropertyValue -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
+    $existingData = Get-ItemPropertyValue -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
+    if ($existingConf -or $existingData) {
         throw 'Existing machine-wide ClamAV ConfDir/DataDir registry configuration was found; refusing to overwrite another installation.'
     }
 }
@@ -170,7 +172,7 @@ try {
     $engineAcl = New-Object Security.AccessControl.DirectorySecurity
     $engineAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)')
     Set-Acl -LiteralPath $InstallRoot -AclObject $engineAcl
-    Copy-Item -LiteralPath (Join-Path $Source '*') -Destination $InstallRoot -Recurse -Force
+    Copy-Item -Path (Join-Path $Source '*') -Destination $InstallRoot -Recurse -Force
 
     $ManagedClamd = Join-Path $InstallRoot 'clamd.exe'
     $ManagedFresh = Join-Path $InstallRoot 'freshclam.exe'
