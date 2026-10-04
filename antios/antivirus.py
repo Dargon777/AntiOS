@@ -6,12 +6,16 @@ import json
 import os
 import re
 import stat
+import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from .windows_antivirus import AmsiScanner
 from .clamav import ClamAVScanner, ScanOutcome
+from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
 
 DEFAULT_MAX_BYTES = 32 * 1024 * 1024
 DEFAULT_MAX_FILES = 100_000
@@ -102,6 +106,9 @@ def scan_files(
     require_verified_peer: bool = False,
     excluded_paths: tuple[Path, ...] = (),
     checkpoint: Callable[[dict], None] | None = None,
+    workers: int = 4,
+    cache_path: str | Path | None = None,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
     if engine not in {"amsi", "clamav"}:
         raise ValueError("Unknown scan engine")
@@ -119,6 +126,8 @@ def scan_files(
             )
     if not 1 <= max_bytes <= 256 * 1024 * 1024 or not 1 <= max_files <= 1_000_000:
         raise ValueError("Scan limits must be 1..256 MiB and 1..1000000 files")
+    if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
+        raise ValueError("Scan workers must be between 1 and 8")
     target = checked_path(path)
     if not target.is_file() and not target.is_dir():
         raise ValueError("Select a regular file or directory")
@@ -127,11 +136,11 @@ def scan_files(
         "schema": 1, "kind": "antivirus-scan", "path": str(target),
         "started_at": utc_now(), "finished_at": None,
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
-                   "max_entries": max_files * 2},
+                   "max_entries": max_files * 2, "workers": workers},
         "engine": {"provider": "Windows AMSI" if engine == "amsi" else "ClamAV", "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or "")},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
-                    "bytes_scanned": 0, "threats": 0, "reviews": 0, "skipped": 0,
+                    "bytes_scanned": 0, "cache_hits": 0, "threats": 0, "reviews": 0, "skipped": 0,
                     "errors": 0, "cancelled": False, "limit_reached": False},
         "findings": [], "issues": [],
         "coverage": "limited", "verdict": "incomplete",
@@ -199,8 +208,165 @@ def scan_files(
             except (OSError, ValueError) as exc:
                 issue(folder, str(exc), error=True)
 
-    provider_failed = False
+    provider_failed = threading.Event()
+    cache = None
+    cache_engine = ""
+    cache_signatures = make_signature_key(signatures)
+    cache_allowed = bool(
+        use_cache and cache_path and engine == "clamav" and provider is not None
+        and result["engine"].get("database_freshness") == "current"
+        and (not result["engine"].get("peer_verification_required")
+             or result["engine"].get("peer_verified") is True)
+    )
+    if cache_allowed:
+        try:
+            cache = ScanCache(cache_path)
+            cache_engine = make_engine_key(result["engine"])
+            result["engine"]["cache"] = "enabled"
+        except (OSError, sqlite3.Error) as exc:
+            result["engine"]["cache"] = "unavailable"
+            result["engine"]["cache_detail"] = str(exc)[:300]
+    else:
+        result["engine"]["cache"] = "disabled"
+
+    effective_workers = workers if engine == "clamav" and provider is not None else 1
+    result["limits"]["effective_workers"] = effective_workers
+
+    def apply_outcome(outcome: dict) -> None:
+        item = outcome["item"]
+        if outcome.get("issue"):
+            issue(item, outcome["issue"], error=bool(outcome.get("error")))
+            return
+        summary["files_scanned"] += 1
+        summary["bytes_scanned"] += outcome["size"]
+        if outcome.get("provider_scanned"):
+            summary["provider_scanned"] += 1
+        if outcome.get("provider_error"):
+            issue(item, outcome["provider_error"], error=True)
+            result["engine"]["detail"] = outcome["provider_error"]
+            result["engine"]["failed_during_scan"] = True
+        finding = outcome.get("finding")
+        if finding:
+            finding.update(
+                path=str(item),
+                sha256=outcome["sha256"],
+                size=outcome["size"],
+                fingerprint=list(fingerprint(outcome["info"])),
+            )
+            summary["threats" if finding["kind"] == "threat" else "reviews"] += 1
+            result["findings"].append(finding)
+        elif cache is not None and outcome.get("provider_scanned"):
+            try:
+                cache.put(
+                    item, outcome["info"], cache_engine, cache_signatures, outcome["sha256"]
+                )
+            except (OSError, sqlite3.Error):
+                pass
+
+    def scan_one(item: Path) -> dict:
+        try:
+            if stopped():
+                return {"item": item, "issue": "cancelled"}
+            info = item.lstat()
+            if not stat.S_ISREG(info.st_mode) or is_link(info):
+                return {"item": item, "issue": "not-a-regular-file"}
+            if info.st_size > max_bytes:
+                return {"item": item, "issue": "file-size-limit"}
+            content, info = read_regular(item, max_bytes)
+            digest = hashlib.sha256(content).hexdigest()
+            label = signatures.get(digest)
+            if label is None and 68 <= len(content) <= 128:
+                if hashlib.sha256(content.rstrip(b" \t\r\n\x1a")).hexdigest() == EICAR_SHA256:
+                    label = signatures[EICAR_SHA256]
+            finding = {"kind": "threat", "engine": "SHA-256", "name": label} if label else None
+            provider_scanned = False
+            provider_error = None
+            if provider is not None and not provider_failed.is_set():
+                try:
+                    value = provider.scan(content, str(item))
+                    provider_scanned = True
+                    if isinstance(value, ScanOutcome):
+                        if value.kind == "review":
+                            # Main-thread aggregation below keeps the shared report consistent.
+                            pass
+                        if value.kind and finding is None:
+                            finding = {"kind": value.kind, "engine": "ClamAV", "name": value.name}
+                    elif value >= 32768:
+                        finding = finding or {
+                            "kind": "threat", "engine": "Windows AMSI",
+                            "name": "AMSI malware detection",
+                        }
+                        finding["amsi_result"] = value
+                    elif 0x4000 <= value <= 0x4FFF and finding is None:
+                        finding = {
+                            "kind": "review", "engine": "Windows AMSI",
+                            "name": "Blocked by administrator policy", "amsi_result": value,
+                        }
+                except (OSError, RuntimeError) as exc:
+                    provider_failed.set()
+                    provider_error = str(exc)
+            return {
+                "item": item,
+                "info": info,
+                "size": len(content),
+                "sha256": digest,
+                "finding": finding,
+                "provider_scanned": provider_scanned,
+                "provider_error": provider_error,
+            }
+        except (OSError, ValueError) as exc:
+            return {"item": item, "issue": str(exc), "error": True}
+
+    def account_cached(item: Path, info: os.stat_result, digest: str) -> None:
+        summary["files_scanned"] += 1
+        summary["provider_scanned"] += 1
+        summary["bytes_scanned"] += int(info.st_size)
+        summary["cache_hits"] += 1
+
+    def prepare(item: Path) -> tuple[bool, os.stat_result | None]:
+        try:
+            info = item.lstat()
+            if not stat.S_ISREG(info.st_mode) or is_link(info):
+                issue(item, "not-a-regular-file")
+                return False, None
+            if info.st_size > max_bytes:
+                issue(item, "file-size-limit")
+                return False, None
+            if cache is not None:
+                try:
+                    digest = cache.get(item, info, cache_engine, cache_signatures)
+                except (OSError, sqlite3.Error):
+                    digest = None
+                if digest:
+                    account_cached(item, info, digest)
+                    return False, info
+            return True, info
+        except OSError as exc:
+            issue(item, str(exc), error=True)
+            return False, None
+
+    def after_item() -> None:
+        if checkpoint:
+            checkpoint(result)
+        if progress and (summary["files_seen"] == 1 or summary["files_seen"] % 25 == 0):
+            progress(dict(summary))
+
+    pending: list[Path] = []
+    executor = ThreadPoolExecutor(max_workers=effective_workers) if effective_workers > 1 else None
     try:
+        def flush_pending() -> None:
+            nonlocal pending
+            if not pending:
+                return
+            if executor is None:
+                outcomes = map(scan_one, pending)
+            else:
+                outcomes = executor.map(scan_one, pending)
+            for outcome in outcomes:
+                apply_outcome(outcome)
+                after_item()
+            pending = []
+
         for item in candidates():
             if stopped():
                 break
@@ -210,67 +376,31 @@ def scan_files(
             summary["files_seen"] += 1
             if exclude(item):
                 issue(item, "quarantine-excluded")
+                after_item()
                 continue
-            try:
-                info = item.lstat()
-                if not stat.S_ISREG(info.st_mode) or is_link(info):
-                    issue(item, "not-a-regular-file")
-                    continue
-                if info.st_size > max_bytes:
-                    issue(item, "file-size-limit")
-                    continue
-                content, info = read_regular(item, max_bytes)
-                digest = hashlib.sha256(content).hexdigest()
-                label = signatures.get(digest)
-                # EICAR allows trailing whitespace up to 128 bytes.
-                if label is None and 68 <= len(content) <= 128:
-                    if hashlib.sha256(content.rstrip(b" \t\r\n\x1a")).hexdigest() == EICAR_SHA256:
-                        label = signatures[EICAR_SHA256]
-                finding = None
-                if label:
-                    finding = {"kind": "threat", "engine": "SHA-256", "name": label}
-                if provider is not None and not provider_failed:
-                    try:
-                        value = provider.scan(content, str(item))
-                        summary["provider_scanned"] += 1
-                        if isinstance(value, ScanOutcome):
-                            if value.kind == "review":
-                                result["engine"]["limited_results"] = result["engine"].get("limited_results", 0) + 1
-                            if value.kind and finding is None:
-                                finding = {"kind": value.kind, "engine": "ClamAV", "name": value.name}
-                        elif value >= 32768:
-                            finding = finding or {"kind": "threat", "engine": "Windows AMSI",
-                                                  "name": "AMSI malware detection"}
-                            finding["amsi_result"] = value
-                        elif 0x4000 <= value <= 0x4FFF and finding is None:
-                            finding = {"kind": "review", "engine": "Windows AMSI",
-                                       "name": "Blocked by administrator policy", "amsi_result": value}
-                    except (OSError, RuntimeError) as exc:
-                        issue(item, str(exc), error=True)
-                        # Avoid a timeout per remaining file after an engine failure.
-                        # Hash scans continue, but provider coverage remains incomplete.
-                        provider_failed = True
-                        result["engine"]["detail"] = str(exc)
-                        result["engine"]["failed_during_scan"] = True
-                summary["files_scanned"] += 1
-                summary["bytes_scanned"] += len(content)
-                if finding:
-                    finding.update(path=str(item), sha256=digest, size=len(content),
-                                   fingerprint=list(fingerprint(info)))
-                    summary["threats" if finding["kind"] == "threat" else "reviews"] += 1
-                    # Finding count is bounded by max_files; no actionable threat is dropped.
-                    result["findings"].append(finding)
-            except (OSError, ValueError) as exc:
-                issue(item, str(exc), error=True)
-            finally:
-                if checkpoint:
-                    checkpoint(result)
-                if progress and (summary["files_seen"] == 1 or summary["files_seen"] % 25 == 0):
-                    progress(dict(summary))
+            should_scan, _info = prepare(item)
+            if not should_scan:
+                after_item()
+                continue
+            pending.append(item)
+            if len(pending) >= effective_workers * 4:
+                flush_pending()
+        flush_pending()
         summary["cancelled"] = stopped()
+        result["engine"]["limited_results"] = sum(
+            1 for finding in result["findings"]
+            if finding.get("engine") == "ClamAV" and finding.get("kind") == "review"
+        )
     finally:
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
         if provider is not None:
             provider.close()
+        if cache is not None:
+            try:
+                cache.close()
+            except (OSError, sqlite3.Error):
+                pass
     result["finished_at"] = utc_now()
     complete = (summary["files_scanned"] > 0 and not any(
         summary[key] for key in ("cancelled", "limit_reached", "errors", "skipped")
