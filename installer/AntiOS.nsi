@@ -38,6 +38,9 @@ VIAddVersionKey /LANG=1033 "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright 2026 Dargon777 and AntiOS contributors"
 
 !define MUI_ABORTWARNING
+!define MUI_LANGDLL_REGISTRY_ROOT HKLM
+!define MUI_LANGDLL_REGISTRY_KEY "${INSTALL_KEY}"
+!define MUI_LANGDLL_REGISTRY_VALUENAME "InstallerLanguage"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\AntiOS-GUI.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Launch AntiOS"
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
@@ -95,7 +98,6 @@ Section "AntiOS" SecMain
   CreateShortCut "$SMPROGRAMS\AntiOS\Uninstall AntiOS.lnk" "$INSTDIR\Uninstall.exe"
   CreateShortCut "$DESKTOP\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
 
-  WriteRegStr HKLM "${INSTALL_KEY}" "InstallerLanguage" "$LANGUAGE"
 SectionEnd
 
 Section "Uninstall"
