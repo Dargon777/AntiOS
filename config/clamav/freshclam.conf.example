@@ -1,0 +1,4 @@
+# Use the same protected directory as clamd.conf.
+DatabaseDirectory C:\ProgramData\AntiOS-ClamAV\database
+DatabaseMirror database.clamav.net
+Checks 12

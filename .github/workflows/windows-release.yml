@@ -12,6 +12,7 @@ on:
       - "NOTICE"
       - "antios_entry.py"
       - "antios_gui_entry.py"
+      - "antios_guard_entry.py"
       - "pyproject.toml"
       - ".github/workflows/windows-release.yml"
   push:
@@ -42,44 +43,59 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install pytest pyinstaller build twine
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install -e .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Validate release version
         shell: pwsh
         run: |
           $packageVersion = (python -c "import antios; print(antios.__version__) ").Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $releaseVersion = (Get-Content .\release\VERSION -Raw).Trim()
           if ($packageVersion -ne $releaseVersion) {
             throw "Version mismatch: package=$packageVersion release=$releaseVersion"
           }
 
       - name: Run tests
-        run: python -m pytest
+        run: python -m pytest -rs
 
       - name: Build Python distributions
         shell: pwsh
         run: |
           python -m build --outdir python-dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m twine check .\python-dist\*
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify license files in Python distributions
         shell: pwsh
         run: |
           python -c "import glob,zipfile; w=glob.glob('python-dist/*.whl')[0]; n=zipfile.ZipFile(w).namelist(); assert any(x.endswith('/LICENSE') for x in n), n; assert any(x.endswith('/NOTICE') for x in n), n"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -c "import glob,tarfile; s=glob.glob('python-dist/*.tar.gz')[0]; n=tarfile.open(s).getnames(); assert any(x.endswith('/LICENSE') for x in n), n; assert any(x.endswith('/NOTICE') for x in n), n"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Smoke-test built wheel
         shell: pwsh
         run: |
           python -m venv wheel-smoke
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\wheel-smoke\Scripts\python.exe -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $wheel = (Get-ChildItem .\python-dist\*.whl | Select-Object -First 1).FullName
           .\wheel-smoke\Scripts\python.exe -m pip install $wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\wheel-smoke\Scripts\antios.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\wheel-smoke\Scripts\antios.exe version --json | ConvertFrom-Json | Out-Null
-          .\wheel-smoke\Scripts\python.exe -c "import json,subprocess; p=subprocess.run([r'.\wheel-smoke\Scripts\antios.exe','virus-scan',r'.\release\VERSION','--json'],capture_output=True,text=True); print(p.stdout); assert p.returncode in (0,3),(p.returncode,p.stderr); d=json.loads(p.stdout); assert d['summary']['files_scanned']==1 and d['summary']['threats']==0,d"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/smoke-antivirus.py .\wheel-smoke\Scripts\antios.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\wheel-smoke\Scripts\antios-gui.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build CLI executable
         shell: pwsh
@@ -91,10 +107,17 @@ jobs:
         run: |
           pyinstaller --clean --noconfirm --onedir --contents-directory _gui --uac-admin --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
 
+      - name: Build resident guard executable
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm --onedir --contents-directory _guard --version-file release/windows-guard-version.txt --console --name AntiOS-Guard antios_guard_entry.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Verify Windows resources and scan worker
         shell: pwsh
         run: |
           python scripts/verify-windows-build.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Azure login for Artifact Signing
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
@@ -124,7 +147,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
-          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe")) {
+          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe")) {
             $signature = Get-AuthenticodeSignature $file
             Write-Host "$file => $($signature.Status) / $($signature.SignerCertificate.Subject)"
             if ($signature.Status -ne "Valid") {
@@ -135,12 +158,20 @@ jobs:
       - name: Smoke-test executables
         shell: pwsh
         run: |
+          .\dist\AntiOS-Guard\AntiOS-Guard.exe status | ConvertFrom-Json | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\dist\AntiOS\AntiOS.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\dist\AntiOS\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\dist\AntiOS\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
-          python -c "import json,subprocess; p=subprocess.run([r'.\dist\AntiOS\AntiOS.exe','virus-scan',r'.\release\VERSION','--json'],capture_output=True,text=True); print(p.stdout); assert p.returncode in (0,3),(p.returncode,p.stderr); d=json.loads(p.stdout); assert d['summary']['files_scanned']==1 and d['summary']['threats']==0,d"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/smoke-antivirus.py .\dist\AntiOS\AntiOS.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\dist\AntiOS-GUI\AntiOS-GUI.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\dist\AntiOS-GUI\AntiOS-GUI.exe --ui-self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Package portable release
         shell: pwsh
@@ -148,6 +179,8 @@ jobs:
           New-Item -ItemType Directory -Force package | Out-Null
           Copy-Item .\dist\AntiOS\* .\package\ -Recurse -Force
           Copy-Item .\dist\AntiOS-GUI\* .\package\ -Recurse -Force
+          Copy-Item .\dist\AntiOS-Guard\* .\package\ -Recurse -Force
+          Copy-Item .\scripts\guard-startup.ps1 .\package\guard-startup.ps1
           Copy-Item .\scripts\install.ps1 .\package\install.ps1
           Copy-Item .\scripts\uninstall.ps1 .\package\uninstall.ps1
           Copy-Item .\README.md .\package\README.md
@@ -166,13 +199,18 @@ jobs:
           Copy-Item .\NOTICE .\package\NOTICE
           Copy-Item .\docs\SIGNING.md .\package\SIGNING.md
           Copy-Item .\docs\ANTIVIRUS.md .\package\ANTIVIRUS.md
+          Copy-Item .\docs\CLAMAV.md .\package\CLAMAV.md
+          Copy-Item .\docs\GUARD.md .\package\GUARD.md
+          Copy-Item .\config\clamav .\package\clamav-config -Recurse
           $version = (Get-Content .\release\VERSION -Raw).Trim()
           $commit = "$env:GITHUB_SHA"
           $python = (python --version 2>&1).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $signature = Get-AuthenticodeSignature .\package\AntiOS-GUI.exe
           $signing = if ($signature.Status -eq "Valid") {
             "Valid Authenticode: $($signature.SignerCertificate.Subject)"
           } else {
+            Write-Warning "Unsigned direct-download build; publisher metadata is not Authenticode. See docs/SIGNING.md."
             "Unsigned direct-download build"
           }
           @(
@@ -184,6 +222,7 @@ jobs:
             "Product publisher: DargonITP",
             "Code signing: $signing"
           ) | Set-Content .\package\BUILD_INFO.txt
+          "- Authenticode: $signing" | Add-Content $env:GITHUB_STEP_SUMMARY
           Compress-Archive -Path .\package\* -DestinationPath .\AntiOS-windows-x64.zip -Force
           $hash = (Get-FileHash .\AntiOS-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  AntiOS-windows-x64.zip" | Set-Content -NoNewline .\AntiOS-windows-x64.zip.sha256
@@ -218,7 +257,7 @@ jobs:
           $tag = (Get-Content .\release\TAG -Raw).Trim()
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $tag already exists; skipping publication."
+            Write-Warning "Release $tag already exists; these artifacts will NOT replace its downloads. Use a new release version and tag to publish fixes."
             exit 0
           }
           $pythonArtifacts = Get-ChildItem .\python-dist\* | ForEach-Object { $_.FullName }

@@ -1,6 +1,6 @@
 # AntiOS on-demand antivirus — alpha 11
 
-The Antivirus page scans one selected file or folder using Windows AMSI plus local SHA-256 signatures. It never executes selected files. Health checks remain separate from malware scans.
+The Antivirus page scans one selected file or folder using Windows AMSI (default) or an explicitly selected local ClamAV engine, plus local SHA-256 signatures. See [ClamAV setup](CLAMAV.md) for independent detection and database updates. It never executes selected files. Health checks remain separate from malware scans.
 
 Windows AMSI passes content buffers to an installed antivirus provider. Availability and detection depend on that provider and its configuration. The local built-in signature is only the inert EICAR test-file hash. Offline hash-only fallback is explicitly limited and never produces a clean-scan exit code.
 
@@ -64,7 +64,7 @@ Replace the illustrative key with an actual 64-character SHA-256 digest. The loa
 
 - Default: 32 MiB per file, 100,000 files and 200,000 traversed directory entries. CLI permits up to 256 MiB per file and 1,000,000 files.
 - Symlinks, junctions and reparse points are not followed; inaccessible, oversized and special files are reported. Quarantine storage is excluded.
-- Archives are submitted as raw buffers, never unpacked. There is no recursive archive, memory, boot-sector or kernel scan in AntiOS.
+- AntiOS submits archives as raw buffers; it does not unpack them itself. The optional ClamAV engine can analyze archives under its configured limits. There is no memory, boot-sector or kernel scan in AntiOS.
 - No independent real-time interception or behavioral ransomware protection is provided. Keep an installed antivirus active.
 - Current-user DPAPI authenticates file contents and metadata together. Preserve the Windows account profile and quarantine directory if you need recovery.
 - The original is removed only after a durable encrypted copy is verified and the isolated source is rechecked. Errors can leave an encrypted recovery item while the original remains in place. If rollback cannot reclaim its original path, the error names the staged `.antios-isolate-*` file and backup ID; preserve both until reviewed.
@@ -79,3 +79,29 @@ Windows EXEs request UAC Administrator consent before startup. The Python dashbo
 The GUI file scanner runs in a separate read-only process. **Stop** terminates that process, even during a blocked file read or AMSI call. Completed checkpoints are retained; the interrupted file and work since the last checkpoint are not counted as checked. Cancelled reports always have limited coverage. The app waits for the worker to exit before enabling another operation. Closing the window also cancels the file scan. This does not stop independent Microsoft Defender scans, quarantine or restoration.
 
 Executables use directory bundles so elevated launches do not extract executable dependencies into a temporary directory. Keep `_gui` and `_cli` with their EXEs.
+
+## Packaged antivirus validation
+
+CI runs `scripts/smoke-antivirus.py` against both the installed wheel CLI and
+frozen CLI. It checks a harmless file and then detects that same file using a
+temporary local SHA-256 rule. This checks packaging and detection plumbing; it
+is not a malware effectiveness test. The fixture must remain unchanged.
+
+Hosted runners may have no working AMSI provider. In that case the packaging
+check accepts only an explicit limited/incomplete result with exit code 3 and
+writes a warning and job summary. This is not evidence of working native
+antivirus scanning.
+
+Before a release, run the following from an elevated terminal on a Windows
+machine with a working, enabled AMSI provider:
+
+```powershell
+python scripts/smoke-antivirus.py .\AntiOS.exe --require-amsi
+if ($LASTEXITCODE -ne 0) { throw "Native antivirus validation failed" }
+```
+
+Strict mode requires successful provider coverage, no errors, and the expected
+benign verdict. Separately validate EICAR through the installed provider in a
+controlled test environment and record whether the resident antivirus blocks
+file creation before AntiOS can read it. The local hash fixture alone does not
+validate provider detection. Do not disable Defender to make this test pass.

@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -19,6 +21,7 @@ class AntivirusPanel:
         self.items: dict[str, dict] = {}
         self.mode = "findings"
         self.after_id = None
+        self.last_guard_probe = 0.0
         self.labels: list[Any] = []
         self._build()
         parent.bind("<Destroy>", self._destroy, add="+")
@@ -41,10 +44,25 @@ class AntivirusPanel:
     def _resize(self, event: Any) -> None:
         if event.widget == self.parent and event.width > 150:
             for label in self.labels:
-                label.configure(wraplength=max(100, event.width - 8))
+                label.configure(wraplength=max(100, event.width - 30))
+            self.engine_hint.configure(wraplength=max(100, event.width - 240))
 
     def _build(self) -> None:
-        tk, p = self.app.tk, self.parent
+        tk, outer = self.app.tk, self.parent
+        outer.grid_columnconfigure(0, weight=1)
+        outer.grid_rowconfigure(0, weight=1, minsize=150)
+        outer.grid_rowconfigure(1, weight=1, minsize=100)
+        header = tk.Frame(outer, bg=self.palette["bg"])
+        header.grid(row=0, column=0, sticky="nsew")
+        canvas = tk.Canvas(header, bg=self.palette["bg"], highlightthickness=0, height=250)
+        scroll = tk.Scrollbar(header, command=canvas.yview)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        canvas.configure(yscrollcommand=scroll.set)
+        p = tk.Frame(canvas, bg=self.palette["bg"])
+        window = canvas.create_window((0, 0), window=p, anchor="nw")
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
+        p.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
         self._label(p, self.t("note"), wraplength=810).pack(fill="x", pady=(0, 10))
         self.provider_status = self._label(p, self.t("provider_unknown"))
         self.provider_status.pack(fill="x", pady=(0, 10))
@@ -55,14 +73,32 @@ class AntivirusPanel:
         controls = tk.Frame(p, bg=self.palette["bg"])
         controls.pack(fill="x", pady=(0, 10))
         self.buttons: list[Any] = []
+        self.engine_var = tk.StringVar(value=self.app.antivirus_engine)
+        engine_row = tk.Frame(p, bg=self.palette["bg"])
+        engine_row.pack(fill="x", pady=(0, 6), before=controls)
+        self._label(engine_row, self.t("engine")).pack(side="left", padx=(0, 8))
+        self.engine_choice = self.app.ttk.Combobox(engine_row, textvariable=self.engine_var,
+                                                  values=("amsi", "clamav"), state="readonly", width=12)
+        self.engine_choice.pack(side="left")
+        self.engine_choice.bind("<<ComboboxSelected>>", self._engine_changed)
+        self.engine_hint = self._label(engine_row, self.t("engine_hint"))
+        self.engine_hint.pack(side="left", padx=8, fill="x", expand=True)
         specs = [("file", lambda: self._choose(False)), ("folder", lambda: self._choose(True)),
-                 ("signatures", self._choose_signatures), ("scan", self._scan)]
+                 ("signatures", self._choose_signatures)]
         for key, callback in specs:
             button = self.app._button(controls, self.t(key), callback,
                                       kind="primary" if key == "scan" else "secondary")
             button.pack(side="left", padx=(0, 6))
             self.buttons.append(button)
-        self.cancel_button = self.app._button(controls, self.t("stop"), self._cancel, kind="secondary")
+
+        # Scan/stop remain visible even when long paths or engine errors make
+        # the settings header scroll. Results have their own reserved space.
+        scan_controls = tk.Frame(outer, bg=self.palette["bg"])
+        scan_controls.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        scan_button = self.app._button(scan_controls, self.t("scan"), self._scan, kind="primary")
+        scan_button.pack(side="left", padx=(0, 6))
+        self.buttons.append(scan_button)
+        self.cancel_button = self.app._button(scan_controls, self.t("stop"), self._cancel, kind="secondary")
         self.cancel_button.pack(side="left")
 
         defender = tk.Frame(p, bg=self.palette["bg"])
@@ -74,13 +110,26 @@ class AntivirusPanel:
             self.buttons.append(button)
         self.status = self._label(p, self.t("ready"), wraplength=810)
         self.status.pack(fill="x", pady=(0, 10))
+        guard_controls = tk.Frame(p, bg=self.palette["bg"])
+        guard_controls.pack(fill="x", pady=(0, 6))
+        for key, callback in (("guard_start", self._guard_start), ("guard_stop", self._guard_stop),
+                              ("guard_history", self._guard_history)):
+            button = self.app._button(guard_controls, self.t(key), callback, kind="secondary")
+            button.pack(side="left", padx=(0, 6))
+            self.buttons.append(button)
+            if key == "guard_start":
+                self.guard_start_button = button
+        self.guard_status = self._label(p, self.t("guard_status", state="…", count=0))
+        self.guard_status.pack(fill="x", pady=(0, 6))
 
-        tabs = tk.Frame(p, bg=self.palette["bg"])
+        results = tk.Frame(outer, bg=self.palette["bg"])
+        results.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        tabs = tk.Frame(results, bg=self.palette["bg"])
         tabs.pack(fill="x", pady=(0, 6))
         for mode in ("findings", "vault"):
             self.app._button(tabs, self.t(mode), lambda m=mode: self._show(m),
                              kind="secondary").pack(side="left", padx=(0, 6))
-        table = tk.Frame(p, bg=self.palette["bg"])
+        table = tk.Frame(results, bg=self.palette["bg"])
         table.pack(fill="both", expand=True)
         table.grid_rowconfigure(0, weight=1)
         table.grid_columnconfigure(0, weight=1)
@@ -98,8 +147,8 @@ class AntivirusPanel:
         horizontal.grid(row=1, column=0, sticky="ew")
         self.tree.bind("<<TreeviewSelect>>", lambda _event: self._selection_changed())
         self.tree.bind("<Double-1>", lambda _event: self._details())
-        actions = tk.Frame(p, bg=self.palette["bg"])
-        actions.pack(side="bottom", fill="x", pady=(10, 0), before=table)
+        actions = tk.Frame(outer, bg=self.palette["bg"])
+        actions.grid(row=3, column=0, sticky="ew", pady=(6, 0))
         self.quarantine_button = self.app._button(actions, self.t("quarantine"), self._quarantine, kind="secondary")
         self.quarantine_button.pack(side="left", padx=(0, 6))
         self.restore_button = self.app._button(actions, self.t("restore"), self._restore, kind="secondary")
@@ -159,10 +208,14 @@ class AntivirusPanel:
 
         threading.Thread(target=worker, daemon=kind not in {"scan", "quarantined", "restored"}).start()
 
+    def _engine_changed(self, _event=None) -> None:
+        self.app.antivirus_engine = self.engine_var.get()
+
     def _scan(self) -> None:
         path, signatures = self.app.antivirus_path, self.app.antivirus_signatures
+        engine = self.app.antivirus_engine
         self._run("scan", lambda: run_scan_process(
-            path, signature_path=signatures,
+            path, signature_path=signatures, engine=engine,
             cancelled=self.app.antivirus_cancel.is_set,
             progress=lambda data: self.app.antivirus_queue.put(("progress", data)),
         ), cancelable=True)
@@ -172,6 +225,21 @@ class AntivirusPanel:
             self.app.antivirus_cancel.set()
             self.status.configure(text=self.t("stopping"))
             self.cancel_button.configure(state="disabled")
+
+    def _guard_start(self) -> None:
+        from tkinter import messagebox
+        from .guard import launch_guard
+        if messagebox.askyesno("AntiOS Guard", self.t("guard_confirm")):
+            path = self.app.antivirus_path
+            self._run("guard-action", lambda: launch_guard(path))
+
+    def _guard_stop(self) -> None:
+        from .guard_state import read_guard_state
+        self._run("guard-action", lambda: read_guard_state(stop=True))
+
+    def _guard_history(self) -> None:
+        from .guard_state import read_guard_state
+        self._run("guard-history", lambda: read_guard_state(history=True))
 
     def _defender(self, action: str) -> None:
         from tkinter import messagebox
@@ -227,6 +295,14 @@ class AntivirusPanel:
     def _render_result(self) -> None:
         result = self.app.antivirus_result
         if result:
+            freshness = result.get("engine", {}).get("database_freshness")
+            metadata = result.get("engine", {})
+            engine_text = metadata.get("version", metadata.get("provider", ""))
+            if freshness:
+                engine_text += " · " + self.t("db_" + freshness)
+            if metadata.get("detail"):
+                engine_text += " · " + metadata["detail"]
+            self.provider_status.configure(text=engine_text)
             self.status.configure(text=self.t("result", verdict=self.t("stopped") if result["summary"].get("cancelled") else self.t(result["verdict"]),
                 scanned=result["summary"]["files_scanned"], threats=result["summary"]["threats"],
                 skipped=result["summary"]["skipped"], errors=result["summary"]["errors"]) +
@@ -274,18 +350,41 @@ class AntivirusPanel:
 
     def _set_busy(self) -> None:
         busy = self.app.antivirus_busy
+        self.engine_choice.configure(state="disabled" if busy else "readonly")
         for button in self.buttons:
             button.configure(state="disabled" if busy else "normal")
+        if getattr(sys, "frozen", False) and not (Path(sys.executable).parent / "AntiOS-Guard.exe").is_file():
+            self.guard_start_button.configure(state="disabled")
         self.cancel_button.configure(state="normal" if busy and self.app.antivirus_cancelable and not self.app.antivirus_cancel.is_set() else "disabled")
         self._selection_changed()
 
     def _poll(self) -> None:
+        if time.monotonic() - self.last_guard_probe >= 3 and not self.app.guard_probe_busy:
+            self.last_guard_probe = time.monotonic()
+            self.app.guard_probe_busy = True
+            def probe_guard():
+                from .guard_state import read_guard_state
+                try:
+                    value = read_guard_state()
+                except Exception as exc:
+                    value = {"state": "unavailable", "detail": str(exc)}
+                self.app.antivirus_queue.put(("guard-state", value))
+            threading.Thread(target=probe_guard, daemon=True).start()
         for _ in range(100):
             try:
                 kind, value = self.app.antivirus_queue.get_nowait()
             except queue.Empty:
                 break
-            if kind == "idle":
+            if kind == "guard-state":
+                self.app.guard_probe_busy = False
+                self.guard_status.configure(text=self.t("guard_status", state=self.t("guard_state_" + value.get("state", "unavailable")),
+                                                        count=value.get("detections", 0)))
+            elif kind == "guard-action":
+                self.last_guard_probe = 0
+            elif kind == "guard-history":
+                from tkinter import messagebox
+                messagebox.showinfo("AntiOS Guard", json.dumps(value, indent=2, ensure_ascii=False))
+            elif kind == "idle":
                 self.app.antivirus_busy = False
                 self._set_busy()
             elif kind == "error":

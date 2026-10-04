@@ -7,6 +7,7 @@ strand the parent in a partially written pipe message.
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -47,6 +48,7 @@ def worker_main(request_path: str, events_path: str) -> int:
 
         try:
             scan_files(request["path"], signature_path=request.get("signatures"),
+                       engine=request.get("engine", "amsi"),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint)
             emit("done", None)
             return 0
@@ -73,13 +75,17 @@ def _terminate(process: subprocess.Popen) -> None:
 
 
 def run_scan_process(path: Path, *, signature_path: Path | None = None,
+                     engine: str = "amsi",
+                     timeout: float | None = None,
                      cancelled: Callable[[], bool] = lambda: False,
                      progress: Callable[[dict], None] | None = None) -> dict:
     result = None
+    if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
+        raise ValueError("Scan process timeout must be finite and positive")
     done, failure = False, None
     with tempfile.TemporaryDirectory(prefix="antios-scan-") as folder:
         request, events = Path(folder) / "request.json", Path(folder) / "events.jsonl"
-        request.write_text(json.dumps({"path": str(Path(path).absolute()),
+        request.write_text(json.dumps({"path": str(Path(path).absolute()), "engine": engine,
                                       "signatures": str(signature_path.absolute()) if signature_path else None}),
                            encoding="utf-8")
         events.touch()
@@ -87,12 +93,16 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         forced = False
+        timed_out = False
+        deadline = time.monotonic() + timeout if timeout is not None else None
         pending = ""
         try:
             with events.open(encoding="utf-8") as stream:
                 while True:
-                    if cancelled() and process.poll() is None:
+                    expired = deadline is not None and time.monotonic() >= deadline
+                    if (cancelled() or expired) and process.poll() is None:
                         forced = True
+                        timed_out = expired
                         _terminate(process)
                     # Once it has exited, drain the final complete records.
                     exited = process.poll() is not None
@@ -129,6 +139,8 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
                                           "reviews": 0, "skipped": 0, "errors": 0, "limit_reached": False},
                               "findings": [], "issues": []}
                 result["summary"].update(cancelled=True, forced_stop=True)
+                if timed_out:
+                    result["summary"]["timed_out"] = True
                 result.update(coverage="limited", finished_at=utc_now(),
                               verdict="threats-found" if result["summary"]["threats"] else
                               "review" if result["summary"]["reviews"] else "incomplete")

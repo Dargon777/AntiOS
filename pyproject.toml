@@ -31,6 +31,7 @@ Changelog = "https://github.com/Dargon777/AntiOS/blob/master/CHANGELOG.md"
 
 [project.scripts]
 antios = "antios.cli:main"
+antios-guard = "antios.guard:main"
 
 [project.gui-scripts]
 antios-gui = "antios.dashboard:main"

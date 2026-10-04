@@ -63,3 +63,23 @@ def test_stop_before_first_checkpoint_is_incomplete(tmp_path):
 def test_worker_failure_is_not_reported_as_clean(tmp_path):
     with pytest.raises(RuntimeError):
         scan_process.run_scan_process(tmp_path / 'missing')
+
+
+def test_worker_receives_engine_selection(tmp_path, monkeypatch):
+    request, events = tmp_path / 'request', tmp_path / 'events'
+    request.write_text(json.dumps({'path': str(tmp_path), 'engine': 'clamav'}))
+    options = []
+    monkeypatch.setattr(scan_process, 'scan_files', lambda path, **kwargs: options.append(kwargs))
+    assert scan_process.worker_main(str(request), str(events)) == 0
+    assert options[0]['engine'] == 'clamav'
+
+
+def test_deadline_kills_a_blocked_worker_and_preserves_incomplete_state(tmp_path, monkeypatch):
+    script = tmp_path / 'blocked.py'
+    script.write_text('import time\ntime.sleep(60)\n')
+    monkeypatch.setattr(scan_process, 'worker_command', lambda request, events: [sys.executable, str(script)])
+    start = time.monotonic()
+    result = scan_process.run_scan_process(tmp_path, timeout=0.2)
+    assert time.monotonic() - start < 5
+    assert result['summary']['timed_out']
+    assert result['verdict'] == 'incomplete'

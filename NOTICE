@@ -11,3 +11,11 @@ originating from the historical upstream repository vektort13/AntiOS. The
 adoption of Apache-2.0 for AntiOS v2 does not retroactively relicense
 third-party historical material for which Dargon777 does not hold the
 necessary rights.
+
+The experimental native/ Windows module is separately licensed under the
+Microsoft Public License (MS-PL), including AntiOS modifications. Its minifilter
+foundation is derived from Microsoft Windows-driver-samples / AvScan,
+Copyright (c) 1989-2011 Microsoft Corporation. The full license, pinned upstream
+revision, attribution and changes are provided in native/windows/LICENSE.microsoft,
+native/windows/UPSTREAM_COMMIT and native/README.md. This exception does not
+relicense the Python AntiOS application.

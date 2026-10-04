@@ -303,12 +303,14 @@ class Dashboard:
         self._storage_cancel = threading.Event()
         self.antivirus_path = default_scan_path()
         self.antivirus_signatures: Path | None = None
+        self.antivirus_engine = "amsi"
         self.antivirus_result: dict[str, Any] | None = None
         self.antivirus_items: list[dict] = []
         self.antivirus_queue: queue.Queue = queue.Queue()
         self.antivirus_cancel = threading.Event()
         self.antivirus_busy = False
         self.antivirus_cancelable = False
+        self.guard_probe_busy = False
 
         self._configure_root()
         self._configure_ttk()
