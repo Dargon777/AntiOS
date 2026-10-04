@@ -73,8 +73,8 @@ class ScanCache:
     def _identity(path: Path, info: os.stat_result) -> tuple:
         return (
             os.path.normcase(os.path.abspath(path)),
-            int(info.st_dev),
-            int(info.st_ino),
+            f"d:{int(info.st_dev):x}",
+            f"i:{int(info.st_ino):x}",
             int(info.st_size),
             int(info.st_mtime_ns),
         )
