@@ -19,7 +19,7 @@ AntiOS answers one simple question first: **does anything on this Windows PC nee
 
 https://github.com/Dargon777/AntiOS/releases
 
-Setup requests Administrator consent, installs AntiOS to **`C:\Program Files\AntiOS`**, registers it in Windows Installed Apps, creates Start Menu entries and a desktop shortcut, and provides a normal uninstaller. Alpha 15 also ships the new AntiOS branding across the executable, Setup, taskbar and Resident Guard tray states. The ZIP remains available as a portable/developer fallback. Quarantine and restore still require explicit confirmation.
+Setup requests Administrator consent, installs AntiOS to **`C:\\Program Files\\AntiOS`**, and now prepares the managed ClamAV service and signature updater automatically. On a normal same-user UAC install it also enables Resident Guard for common user folders. The ZIP remains a portable/developer fallback.
 
 ## Antivirus
 
@@ -109,13 +109,15 @@ It creates **AntiOS** on the desktop, adds Start Menu shortcuts, registers the i
 
 The ZIP release is kept as a portable/developer fallback and still includes the PowerShell install helpers. See [docs/INSTALLER.md](docs/INSTALLER.md) for the installer layout and upgrade/uninstall behavior.
 
-Managed independent ClamAV backend (preview first):
+Protection is prepared automatically by Setup. Useful checks:
 
 ```powershell
-.\protection-engine.ps1 -ClamAVDirectory "C:\staging\clamav-1.5.x.win.x64"
-.\protection-engine.ps1 -ClamAVDirectory "C:\staging\clamav-1.5.x.win.x64" -Apply
 .\AntiOS.exe protection-status
+.\AntiOS.exe protection-repair
+.\AntiOS.exe protection-repair --yes --update-signatures
 ```
+
+The lower-level ClamAV scripts remain available for development and managed deployments.
 
 Uninstall:
 
@@ -163,6 +165,15 @@ Antivirus stack status:
 antios protection-status
 antios protection-status --json
 ```
+
+Check for an AntiOS update:
+
+```powershell
+antios update
+antios update --download-only
+```
+
+Automatic update installation requires a valid Authenticode-signed Setup. Until direct-download signing is enabled, AntiOS intentionally refuses `antios update --yes`.
 
 Generate a reversible metadata plan:
 
