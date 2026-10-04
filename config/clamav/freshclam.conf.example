@@ -2,3 +2,4 @@
 DatabaseDirectory C:\ProgramData\AntiOS-ClamAV\database
 DatabaseMirror database.clamav.net
 Checks 12
+NotifyClamd C:\\ProgramData\\AntiOS-ClamAV\\config\\clamd.conf
