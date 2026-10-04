@@ -6,6 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "antios"
 dynamic = ["version"]
 description = "On-demand antivirus scanning, encrypted quarantine and Windows health diagnostics"
+dependencies = [
+  "Pillow>=10.4; platform_system == \"Windows\"",
+  "pystray>=0.19.5; platform_system == \"Windows\"",
+]
 requires-python = ">=3.11"
 readme = "README.md"
 license = "Apache-2.0"
@@ -41,6 +45,9 @@ version = { attr = "antios.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["antios*"]
+
+[tool.setuptools.package-data]
+antios = ["assets/icons/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
