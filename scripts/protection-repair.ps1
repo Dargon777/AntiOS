@@ -141,7 +141,7 @@ if ($Apply) {
     $actions.Add('freshclam-task-reset')
 
     if ($UpdateSignatures) {
-        & $ManagedFresh "--config-file=$FreshConfig"
+        & $ManagedFresh "--config-file=$FreshConfig" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "FreshClam update failed with exit code $LASTEXITCODE" }
         $actions.Add('freshclam-update')
     }
