@@ -105,9 +105,22 @@ def query_service_process(service_name: str) -> ServiceProcess:
         ]
 
     api = ctypes.WinDLL("advapi32", use_last_error=True)
+    api.OpenSCManagerW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
     api.OpenSCManagerW.restype = wintypes.HANDLE
+    api.OpenServiceW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD]
     api.OpenServiceW.restype = wintypes.HANDLE
+    api.QueryServiceStatusEx.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    api.QueryServiceStatusEx.restype = wintypes.BOOL
+    api.QueryServiceConfigW.argtypes = [
+        wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    api.QueryServiceConfigW.restype = wintypes.BOOL
     api.CloseServiceHandle.argtypes = [wintypes.HANDLE]
+    api.CloseServiceHandle.restype = wintypes.BOOL
     manager = api.OpenSCManagerW(None, None, SC_MANAGER_CONNECT)
     if not manager:
         raise OSError(ctypes.get_last_error(), "OpenSCManagerW failed")
@@ -178,6 +191,11 @@ def verify_connected_socket(connection: socket.socket, expected_pid: int) -> boo
         return False
 
     api = ctypes.WinDLL("iphlpapi", use_last_error=True)
+    api.GetExtendedTcpTable.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(wintypes.ULONG), wintypes.BOOL,
+        wintypes.ULONG, ctypes.c_int, wintypes.ULONG,
+    ]
+    api.GetExtendedTcpTable.restype = wintypes.DWORD
     needed = wintypes.ULONG()
     status = api.GetExtendedTcpTable(None, ctypes.byref(needed), False, AF_INET,
                                      TCP_TABLE_OWNER_PID_CONNECTIONS, 0)
