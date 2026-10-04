@@ -195,7 +195,8 @@ jobs:
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
           $sourceDir = (Resolve-Path "./installer-stage").Path
           New-Item -ItemType Directory -Force ./installer-output | Out-Null
-          & $makensis "/DAPP_VERSION=$version" "/DNUMERIC_VERSION=$numericVersion" "/DSOURCE_DIR=$sourceDir" "./installer/AntiOS.nsi"
+          $outputFile = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) "installer-output\AntiOS-Setup.exe"))
+          & $makensis "/DAPP_VERSION=$version" "/DNUMERIC_VERSION=$numericVersion" "/DSOURCE_DIR=$sourceDir" "/DOUTPUT_FILE=$outputFile" "./installer/AntiOS.nsi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path -LiteralPath "./installer-output/AntiOS-Setup.exe")) {
             throw "AntiOS-Setup.exe was not produced"
@@ -239,7 +240,7 @@ jobs:
               throw "Installer smoke missing $required"
             }
           }
-          $desktop = [Environment]::GetFolderPath("Desktop")
+          $desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
           $desktopShortcut = Join-Path $desktop "AntiOS.lnk"
           if (-not (Test-Path -LiteralPath $desktopShortcut)) {
             throw "Installer did not create the desktop shortcut"
