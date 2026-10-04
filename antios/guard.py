@@ -372,6 +372,9 @@ def load_policy(path):
     engine_service = data.get('engine_service')
     if engine_service is not None and not isinstance(engine_service, str):
         raise ValueError('engine_service must be a service name string')
+    if engine_service is not None:
+        from .windows_clamd_peer import validate_service_name
+        validate_service_name(engine_service)
     return GuardPolicy(tuple(Path(p) for p in roots), auto_quarantine=automatic,
                        engine_service=engine_service)
 
