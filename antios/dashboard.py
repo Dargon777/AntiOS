@@ -177,10 +177,22 @@ def _open_settings(uri: str) -> None:
 
 
 def _configure_windows_identity() -> None:
-    """Give the running dashboard a stable Windows taskbar identity."""
+    """Give unpackaged builds a stable taskbar identity.
+
+    Packaged MSIX apps already receive their AppUserModelID from Windows and
+    must not be regrouped under a synthetic desktop identity.
+    """
     if os.name != "nt":
         return
     try:
+        length = ctypes.c_uint32(0)
+        result = ctypes.windll.kernel32.GetCurrentPackageFullName(
+            ctypes.byref(length),
+            None,
+        )
+        appmodel_error_no_package = 15700
+        if result != appmodel_error_no_package:
+            return
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
             ctypes.c_wchar_p("DargonITP.AntiOS")
         )
