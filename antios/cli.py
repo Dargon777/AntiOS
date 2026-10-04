@@ -26,6 +26,7 @@ from .i18n import LANGUAGE_NAMES, detect_language
 from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .quarantine import Quarantine, default_quarantine_path
+from .scan_cache import default_scan_cache_path
 from .windows_antivirus import defender_action
 from .report import render_doctor_human, render_operations_human, render_scan_human
 from .storage_cleanup import (
@@ -169,6 +170,10 @@ def build_parser() -> argparse.ArgumentParser:
     av.add_argument("--signatures", help="Optional local schema-1 SHA-256 signature database.")
     av.add_argument("--max-mb", type=int, default=DEFAULT_MAX_BYTES // (1024 * 1024))
     av.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
+    av.add_argument("--workers", type=int, default=4,
+                    help="ClamD scan concurrency, 1..8 (default: 4). AMSI remains sequential.")
+    av.add_argument("--no-cache", action="store_true",
+                    help="Do not reuse clean results for unchanged files.")
     av.add_argument("--json", action="store_true")
 
     quarantine_cmd = sub.add_parser("quarantine", help="Inspect, isolate or restore encrypted threats.")
@@ -344,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
                                 engine=args.engine,
                                 require_verified_peer=(args.engine == "clamav" and os.name == "nt"),
                                 max_bytes=args.max_mb * 1024 * 1024, max_files=args.max_files,
+                                workers=args.workers,
+                                cache_path=default_scan_cache_path(),
+                                use_cache=not args.no_cache,
                                 excluded_paths=(default_quarantine_path(),))
             if args.json:
                 _print_json(result)
