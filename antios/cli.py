@@ -190,6 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
     quarantine_sub = quarantine_cmd.add_subparsers(dest="quarantine_command", required=True)
     quarantine_list = quarantine_sub.add_parser("list")
     quarantine_list.add_argument("--json", action="store_true")
+    quarantine_verify = quarantine_sub.add_parser("verify", help="Verify encrypted quarantine integrity.")
+    quarantine_verify.add_argument("--json", action="store_true")
     quarantine_add = quarantine_sub.add_parser("add", help="Rescan a file, then preview or isolate a confirmed detection.")
     quarantine_add.add_argument("path")
     quarantine_add.add_argument("--engine", choices=("clamav", "amsi"), default="clamav")
@@ -394,6 +396,8 @@ def main(argv: list[str] | None = None) -> int:
             store = Quarantine()
             if args.quarantine_command == "list":
                 payload = {"items": store.list_items()}
+            elif args.quarantine_command == "verify":
+                payload = store.verify_all()
             elif args.quarantine_command == "restore":
                 payload = store.restore(args.id, destination=args.to, dry_run=not args.yes)
             else:
