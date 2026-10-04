@@ -6,7 +6,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 13
+> **Pre-release:** 2.0.0 alpha 14
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -15,11 +15,11 @@ AntiOS answers one simple question first: **does anything on this Windows PC nee
 
 ## Download
 
-**Recommended for most people:** download the latest Windows ZIP, extract it and double-click **`AntiOS-GUI.exe`**.
+**Recommended for most people:** download **`AntiOS-Setup.exe`** from the latest release and run it.
 
 https://github.com/Dargon777/AntiOS/releases
 
-Windows executables request Administrator consent at startup. Cancelling UAC cancels launch. Extract the entire archive: keep `_gui` and `_cli` beside the EXE files. Quarantine and restore still require explicit confirmation.
+Setup requests Administrator consent, installs AntiOS to **`C:\Program Files\AntiOS`**, registers it in Windows Installed Apps, creates Start Menu entries and a desktop shortcut, and provides a normal uninstaller. The ZIP remains available as a portable/developer fallback. Quarantine and restore still require explicit confirmation.
 
 ## Antivirus
 
@@ -93,43 +93,21 @@ Review an exported report before posting it publicly: it may contain local syste
 
 ## Install
 
-The Windows release contains:
+For normal Windows installation, run:
 
 ```text
-AntiOS-GUI.exe
-AntiOS.exe
-protection-engine.ps1
-guard-startup.ps1
-install.ps1
-uninstall.ps1
-README.md
-PRIVACY.md
-SUPPORT.md
-SECURITY.md
-CHANGELOG.md
-CODE_OF_CONDUCT.md
-LICENSE
-NOTICE
-BUILD_INFO.txt
+AntiOS-Setup.exe
 ```
 
-Install for the current Windows user and create a Start Menu shortcut:
+The installer uses a stable machine-wide location:
 
-```powershell
-.\install.ps1
+```text
+C:\Program Files\AntiOS
 ```
 
-Optional desktop shortcut:
+It creates **AntiOS** on the desktop, adds Start Menu shortcuts, registers the install location with Windows, and appears in **Settings → Apps → Installed apps** with a standard uninstaller. Running a newer AntiOS Setup upgrades the same installation directory.
 
-```powershell
-.\install.ps1 -DesktopShortcut
-```
-
-Optional CLI PATH entry:
-
-```powershell
-.\install.ps1 -AddToPath
-```
+The ZIP release is kept as a portable/developer fallback and still includes the PowerShell install helpers. See [docs/INSTALLER.md](docs/INSTALLER.md) for the installer layout and upgrade/uninstall behavior.
 
 Managed independent ClamAV backend (preview first):
 
@@ -220,7 +198,7 @@ antios restore antios-backup.json --yes
 
 ## Safety model
 
-Health and Storage Cleanup checks are read-only. Antivirus file scans are read-only; quarantine, restore and Defender actions require explicit confirmation. The antivirus does not change exclusions or disable any protection setting.
+Health checks and Storage Cleanup scans are read-only. Storage Cleanup deletion, antivirus quarantine/restore and Defender actions are explicit write operations that require confirmation. The antivirus does not change exclusions or disable any protection setting.
 
 The advanced CLI keeps its write surface intentionally narrow.
 
@@ -279,7 +257,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a13-py3-none-any.whl
+python -m pip install .\antios-2.0.0a14-py3-none-any.whl
 antios-gui
 ```
 
