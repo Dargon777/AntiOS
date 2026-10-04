@@ -338,8 +338,12 @@ def scan_files(
                 except (OSError, sqlite3.Error):
                     digest = None
                 if digest:
-                    account_cached(item, info, digest)
-                    return False, info
+                    # Metadata is only a lookup hint. Re-read and hash the file
+                    # through the same stable-snapshot path before trusting a hit.
+                    content, verified_info = read_regular(item, max_bytes)
+                    if hashlib.sha256(content).hexdigest() == digest:
+                        account_cached(item, verified_info, digest)
+                        return False, verified_info
             return True, info
         except OSError as exc:
             issue(item, str(exc), error=True)
