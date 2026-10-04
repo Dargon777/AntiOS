@@ -8,6 +8,18 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [2.0.0a13] - 2026-10-04
 
+### Added
+
+- Storage Cleanup now supports multi-select actions instead of read-only results.
+- Selected cleanup candidates can be deleted permanently or copied into a
+  verified backup set before the originals are removed.
+- Backup mode preserves relative paths, records a JSON manifest and verifies
+  every copied file with SHA-256 before deletion.
+- "Select extra duplicates" keeps one file from each duplicate group selected
+  out of the destructive set by default, while still allowing manual adjustment.
+- The cleanup page now has selected-size feedback, a progress bar, horizontal
+  table scrolling, polished summary cards and a dedicated action panel.
+
 ### Changed
 
 - Managed ClamAV is now the default antivirus engine for GUI scans, CLI
