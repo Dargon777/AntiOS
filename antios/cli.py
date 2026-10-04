@@ -114,6 +114,17 @@ def build_parser() -> argparse.ArgumentParser:
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
     version_cmd.add_argument("--json", action="store_true")
 
+    update_cmd = sub.add_parser(
+        "update",
+        help="Check for AntiOS updates or download/schedule a verified signed Setup.",
+    )
+    update_cmd.add_argument("--download-only", action="store_true",
+                            help="Download and verify the newest Setup without launching it.")
+    update_cmd.add_argument("--yes", action="store_true",
+                            help="Download, verify and schedule the signed Setup after AntiOS exits.")
+    update_cmd.add_argument("--directory", help="Optional directory for downloaded update files.")
+    update_cmd.add_argument("--json", action="store_true")
+
     config_cmd = sub.add_parser("config", help="Inspect or initialize AntiOS configuration.")
     config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
     config_show = config_sub.add_parser("show", help="Show effective configuration.")
@@ -306,6 +317,30 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(version_info())
             else:
                 print(render_version())
+            return 0
+
+        if args.command == "update":
+            if args.download_only and args.yes:
+                raise ValueError("--download-only and --yes cannot be used together")
+            from .updater import download_update, latest_alpha, schedule_install
+            if not args.download_only and not args.yes:
+                payload = latest_alpha()
+            else:
+                payload = download_update(args.directory, require_signature=True)
+                if args.yes and payload.get("downloaded"):
+                    payload["installer"] = schedule_install(
+                        payload["setup_path"], payload["sha256"]
+                    )
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"Current: {payload.get('current_version')}")
+                print(f"Latest: {payload.get('latest_version')}")
+                print(f"Update available: {payload.get('update_available')}")
+                if payload.get("downloaded"):
+                    print(f"Verified Setup: {payload.get('setup_path')}")
+                if payload.get("installer"):
+                    print("Update scheduled. AntiOS Setup will start after this process exits.")
             return 0
 
         if args.command == "protection-status":
