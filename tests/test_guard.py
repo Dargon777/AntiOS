@@ -439,3 +439,27 @@ def test_inventory_identity_matches_post_scan_stat(tmp_path):
     files, issues, limited = guard.inventory((tmp_path,))
     assert not issues and not limited
     assert files[target] == guard.file_identity(target.stat())
+
+
+
+def test_guard_policy_accepts_explicit_trusted_engine_service(tmp_path):
+    policy = tmp_path / 'policy.json'
+    policy.write_text(json.dumps({
+        'schema': 1,
+        'roots': [str(tmp_path)],
+        'engine_service': 'AntiOSClamD',
+    }))
+    loaded = guard.load_policy(policy)
+    assert loaded.engine_service == 'AntiOSClamD'
+
+
+@pytest.mark.parametrize('value', ['bad service', '../clamd', '', 123])
+def test_guard_policy_rejects_invalid_engine_service(tmp_path, value):
+    policy = tmp_path / 'policy.json'
+    policy.write_text(json.dumps({
+        'schema': 1,
+        'roots': [str(tmp_path)],
+        'engine_service': value,
+    }))
+    with pytest.raises(ValueError):
+        guard.load_policy(policy)
