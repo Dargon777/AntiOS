@@ -11,56 +11,81 @@ Windows Security Center registration, boot/memory protection or replacement for
 Defender. Do not disable the installed resident antivirus. ClamAV's Linux
 on-access component does not provide that capability on Windows.
 
-## Windows setup
+## Windows managed-engine setup
 
-1. Install a supported x64 release from [ClamAV](https://www.clamav.net/downloads).
-   Use its documented installation procedure. ClamAV is a separate installation,
-   not bundled with AntiOS, the PyInstaller ZIP or the Store MSIX.
-2. In an administrator-managed location create
-   `C:\ProgramData\AntiOS-ClamAV\database` and `C:\ProgramData\AntiOS-ClamAV\tmp`.
-   Permit writes only to administrators and the account running ClamAV. Keep
-   binaries and configuration protected too. Avoid Downloads as an install path.
-3. Copy [clamd.conf.example](../config/clamav/clamd.conf.example) and
-   [freshclam.conf.example](../config/clamav/freshclam.conf.example) into the
-   ClamAV installation as `clamd.conf` and `freshclam.conf`. Review paths against
-   the installed version's examples. Do not add path exclusions or `VirusEvent`
-   hooks; AntiOS expects read-only detection. Do not expose port 3310 to the LAN.
-4. From the ClamAV installation run the official updater:
+For the production path, AntiOS no longer treats an arbitrary process listening
+on TCP 3310 as a trusted resident engine. Use an official/reviewed x64 ClamAV
+package, then let the included setup script create an administrator-controlled
+runtime:
 
-   ```powershell
-   .\freshclam.exe --config-file=.\freshclam.conf
-   if ($LASTEXITCODE -ne 0) { throw "ClamAV database update failed" }
-   .\clamd.exe --config-file=.\clamd.conf
-   ```
+```powershell
+.\protection-engine.ps1 -ClamAVDirectory "C:\staging\clamav-1.5.x.win.x64"
+# review the preview, signer and destinations
+.\protection-engine.ps1 -ClamAVDirectory "C:\staging\clamav-1.5.x.win.x64" -Apply
+```
 
-   Leave this daemon running. In another terminal, keep automatic updates
-   running with `freshclam.exe --daemon --config-file=.\freshclam.conf`.
-   Arrange startup of these processes using the supported deployment mechanism
-   for your ClamAV distribution. AntiOS does not install a Windows service.
-   ClamD checks for database changes every ten minutes with this example config.
-5. In AntiOS Antivirus choose **clamav**, then select and scan a file or folder.
-   Or use:
+The script is preview-only unless `-Apply` is supplied. It does **not** disable
+Defender and does not install the experimental AntiOS kernel filter. It:
 
-   ```powershell
-   .\AntiOS.exe virus-scan "C:\Users\Me\Downloads" --engine clamav --json
-   .\AntiOS.exe quarantine add "C:\Users\Me\Downloads\sample.exe" --engine clamav
-   ```
+1. refuses to overwrite another machine-wide ClamAV installation or existing
+   `clamd` service;
+2. rejects reparse points in the source tree and, by default, requires valid
+   matching Authenticode signatures on `clamd.exe` and `freshclam.exe`;
+3. copies the reviewed runtime to `%ProgramFiles%\AntiOS\ClamAV` under a
+   protected ACL;
+4. stores configuration, signatures and temporary files under
+   `%ProgramData%\AntiOS-ClamAV` with SYSTEM/Administrators-only write access;
+5. bootstraps the official signature database with FreshClam;
+6. installs the ClamAV `clamd` own-process LocalSystem service, restricts its
+   service-control ACL and configures automatic startup;
+7. creates a SYSTEM scheduled task that checks for official signature updates
+   every two hours; FreshClam notifies ClamD after an update;
+8. writes the administrator-owned AntiOS engine-service binding used by both
+   on-demand scans and Resident Guard to verify the server PID behind the exact
+   loopback TCP connection.
 
-   Quarantine previews until `--yes` is supplied. Only confirmed threat findings
-   qualify; heuristic or encrypted-content warnings do not.
+Remove only this managed runtime with:
+
+```powershell
+.\protection-engine.ps1 -Uninstall       # preview
+.\protection-engine.ps1 -Uninstall -Apply
+```
+
+The remover does not touch AntiOS quarantine or unrelated ClamAV installs.
+
+If you manage ClamAV through enterprise tooling instead, configure an own-process
+LocalSystem service and pass its SCM name explicitly to Guard with
+`--engine-service`, set `ANTIOS_CLAMD_SERVICE`, or configure the documented
+AntiOS registry binding. Ordinary on-demand CLI scanning may still connect to an
+unverified loopback ClamD for diagnostics, but on Windows such a scan is reported
+as **incomplete** and cannot become a clean resident-protection verdict.
+
+Check the whole stack at any time:
+
+```powershell
+.\AntiOS.exe protection-status
+.\AntiOS.exe protection-status --json
+```
 
 ## Coverage and failure handling
 
 - Content goes only to `127.0.0.1:3310`, using ClamD INSTREAM. File names are never
   passed as protocol commands. No file content is uploaded by this client.
   FreshClam separately contacts the official signature service.
-- TCP is unauthenticated, even on loopback. A compromised local account can
-  interfere with the daemon. This transport is not a tamper-protection boundary.
+- ClamD TCP itself is unauthenticated. For Windows resident protection, AntiOS
+  queries the configured SCM service, requires a running own-process LocalSystem
+  service, connects only to 127.0.0.1, and matches the **server side of that exact
+  established TCP connection** to the service PID before sending commands or file
+  bytes. The SCM PID is checked again before accepting the reply. If no trusted
+  service binding exists, Windows coverage remains incomplete rather than clean.
+  This protects against ordinary-user port impersonation; it is not a boundary
+  against administrators or code injected into the trusted engine.
 - Reports record the ClamAV version, database version/date and freshness status.
   A database older than seven days, an unknown date (including custom-only test
   databases) or a date over one day in the future cannot produce exit code 0.
-  This check depends on the computer clock and daemon VERSION response; it does
-  not attest to the authenticity of the running process.
+  This check depends on the computer clock and daemon VERSION response. On the
+  managed Windows path, process authenticity is checked separately against SCM
+  ownership of the live connection.
 - Keep `OfficialDatabaseOnly`, archive scanning and limit/encryption alerts from
   the provided configuration. AntiOS cannot inspect the daemon's effective
   configuration over this protocol. Disabled parsers/exclusions can reduce
@@ -95,17 +120,10 @@ References: [protocol](https://docs.clamav.net/manual/Usage/ClamdProtocol.html),
 [configuration](https://docs.clamav.net/manual/Usage/Configuration.html),
 [scanning](https://docs.clamav.net/manual/Usage/Scanning.html).
 
-## Recorded local validation (2026-10-03)
+## Branch validation
 
-- Ubuntu 24.04, Python 3.12.14, ClamAV 1.5.3, Tk 9.0 under Xvfb.
-- Full suite: **184 passed, 2 skipped**. The skips are native Windows AMSI and DPAPI.
-- Real ClamD detected an inert custom signature in plain text and inside a ZIP;
-  the archive expansion limit produced a review finding and limited coverage.
-- GUI checks cover all seven locales, theme rebuild during a scan, engine
-  selection, cancellation and visible results/actions at 960 x 650. Long
-  settings scroll independently of the result table and scan/stop buttons.
-- Windows ClamD, official database downloads, installed MSIX and Windows frozen
-  packaging remain release acceptance gates. No detection-rate claim follows
-  from these functional tests.
-- Changes are local: the GitHub tree-creation request was rejected before a
-  branch or PR could be published. No new CI run was started.
+This production-core branch adds Windows SCM peer verification, managed engine
+lifecycle, signature-update scheduling, Guard policy binding and aggregate
+`protection-status`. GitHub CI remains the acceptance authority for the branch;
+installed-service, official-database and native-driver VM tests are still required
+before a public claim of primary real-time antivirus protection.
