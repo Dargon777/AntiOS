@@ -26,7 +26,7 @@ def system_executable(relative: str) -> Path:
     return candidate
 
 
-def hidden_process_kwargs() -> dict[str, Any]:
+def hidden_process_kwargs(*, extra_creationflags: int = 0) -> dict[str, Any]:
     """subprocess kwargs that suppress a console window on Windows.
 
     CREATE_NO_WINDOW prevents creation of a console for console-subsystem
@@ -35,7 +35,7 @@ def hidden_process_kwargs() -> dict[str, Any]:
     """
     if os.name != "nt":
         return {}
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | int(extra_creationflags)
     startupinfo = subprocess.STARTUPINFO()
     startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
     startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
