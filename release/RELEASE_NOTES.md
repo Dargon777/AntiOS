@@ -1,27 +1,24 @@
-# AntiOS v2.0.0 alpha 11
+# AntiOS v2.0.0 alpha 12
 
-AntiOS now includes an **Antivirus** page with on-demand file and folder scanning, encrypted quarantine and Microsoft Defender controls.
+Alpha 12 moves AntiOS from an on-demand antivirus experiment toward an independently operated protection stack.
 
-## Antivirus
+## Independent protection core
 
-- Windows AMSI content scanning and optional local SHA-256 signatures.
-- Explicit progress, cancellation, findings, skipped files and errors.
-- Manual current-user DPAPI quarantine and restore without overwriting existing files.
-- Defender quick/full scans and signature updates after confirmation.
-- JSON export and `virus-scan`, `quarantine` and `defender` CLI commands.
-- Seven-language UI; Settings and existing diagnostic/cleanup features are retained.
+- Managed ClamAV engine lifecycle for Windows: protected Program Files runtime, protected ProgramData databases/configuration, automatic SCM startup and SYSTEM FreshClam updates.
+- Windows ClamD requests can be bound to a specific own-process LocalSystem SCM service. AntiOS verifies the server side of the exact established loopback TCP connection before sending data and rechecks service identity before accepting a result.
+- Resident Guard requires verified engine identity on Windows. A bare process listening on 127.0.0.1:3310 cannot produce a fully clean resident verdict.
+- New `protection-status` command reports independent engine readiness, database freshness, Resident Guard state and native minifilter/service enforcement separately.
+- FreshClam notifies ClamD after signature updates so the running engine can reload databases.
 
-## Scope
+## Existing protection layers
 
-This is the first on-demand antivirus alpha. Persistent protection remains with an installed antivirus. AntiOS does not install a kernel driver, register as a primary antivirus or disable Defender. AMSI scans submitted buffers and does not reproduce Defender's full file/archive engine. The built-in local signature is only the EICAR test hash; no independent malware feed is included. Default scan limits are 32 MiB per file and 100,000 files. Incomplete coverage is never reported as clean.
+- On-demand ClamAV and AMSI scanning with bounded workers and explicit incomplete coverage.
+- Encrypted DPAPI quarantine and safe restore.
+- Resident selected-folder post-write Guard.
+- Experimental native x64 execute-open minifilter and LocalSystem broker remain available for signed VM acceptance testing.
 
-Scans do not change files. Quarantine, restoration and Defender actions require confirmation. Defender system scans follow its own remediation/cloud policy; results are viewed in Windows Security.
+## Safety and scope
 
-See `ANTIVIRUS.md` in the portable package or [the documentation](https://github.com/Dargon777/AntiOS/blob/master/docs/ANTIVIRUS.md) for CLI exit codes, limits and recovery instructions.
+AntiOS still does **not** disable Microsoft Defender, fake Windows Security Center registration or claim ELAM/PPL protection. The native minifilter remains experimental and is not included in the normal release package. Production primary-antivirus status still requires signed-driver deployment, Microsoft minifilter altitude, Windows VM/Driver Verifier acceptance, Windows Security integration and the applicable external Microsoft/certification gates.
 
-## Startup, scan cancellation and publisher
-
-- The antivirus is included in the main dashboard. Stop forcibly ends its file-scan worker and retains incomplete results, including on a blocked provider call.
-- Windows asks for Administrator consent at startup. Extract the whole ZIP; `_gui` and `_cli` must remain beside the executables.
-- DargonITP is embedded in executable version resources and shown in the app. This alpha may still be unsigned: see BUILD_INFO.txt. A trusted signing identity is required to replace Unknown Publisher; a metadata label alone cannot do that.
-- MSIX startup elevation requires separate Microsoft approval of `allowElevation`; packaging is not Store acceptance.
+Use `AntiOS.exe protection-status --json` for the truthful state of each layer.
