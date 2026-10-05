@@ -143,3 +143,18 @@ request was rejected. Stop Guard before replacing an existing installation.
 Native API references: [directory change reads](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw),
 [notification records](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-file_notify_information),
 [I/O cancellation lifetime](https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations).
+
+
+## Defense-in-depth defaults
+
+A normal same-user Setup selects Downloads, Desktop, Documents, the current user's
+Temp directory and the current user's Startup folder when those directories exist.
+Guard still scans every regular file admitted by those roots, but executable and
+script-like extensions use a 200 ms settle cap so common execution boundaries reach
+ClamAV earlier. Ordinary files keep the configured settle delay.
+
+This fast path does **not** turn Guard into pre-execution prevention. Every scan is
+revalidated against the file identity and a changing file is queued again. The
+separately signed native minifilter remains AntiOS's only pre-execution blocking
+path, and it must stay out of normal deployment until the documented Windows VM,
+signing, altitude, Driver Verifier and HVCI gates pass.

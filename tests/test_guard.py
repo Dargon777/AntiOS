@@ -469,3 +469,32 @@ def test_guard_policy_rejects_invalid_engine_service(tmp_path, value):
     }))
     with pytest.raises(ValueError):
         guard.load_policy(policy)
+
+
+def test_high_risk_extensions_use_fast_settle(tmp_path):
+    root = tmp_path / 'watched-fast-path'
+    root.mkdir()
+    instance = guard.Guard(
+        guard.GuardPolicy((root,), settle=1.0),
+        tmp_path / 'guard-fast-state',
+        scanner=scan,
+        probe=probe,
+        watcher_factory=PollNotifications,
+    )
+    assert instance._settle_delay(root / 'payload.exe') == pytest.approx(0.20)
+    assert instance._settle_delay(root / 'script.ps1') == pytest.approx(0.20)
+    assert instance._settle_delay(root / 'document.txt') == pytest.approx(1.0)
+
+
+def test_fast_path_never_claims_pre_execution_blocking(tmp_path):
+    root = tmp_path / 'watched-fast-claim'
+    root.mkdir()
+    instance = guard.Guard(
+        guard.GuardPolicy((root,), settle=1.0),
+        tmp_path / 'guard-fast-claim-state',
+        scanner=scan,
+        probe=probe,
+        watcher_factory=PollNotifications,
+    )
+    assert instance.status['fast_path_seconds'] == pytest.approx(0.20)
+    assert instance.status['pre_execution_blocking'] is False

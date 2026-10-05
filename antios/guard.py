@@ -23,6 +23,18 @@ from .scan_process import run_scan_process
 from .windows_process import hidden_process_kwargs
 
 
+# Files that commonly become an execution boundary should reach the scanner
+# sooner than ordinary documents. This is still post-write protection: the
+# signed native minifilter remains the only AntiOS pre-execution enforcement
+# path. Early scans are revalidated and rescanned when bytes keep changing.
+_FAST_SCAN_SUFFIXES = frozenset({
+    ".exe", ".dll", ".com", ".scr", ".sys", ".msi", ".msp",
+    ".ps1", ".psm1", ".psd1", ".bat", ".cmd", ".vbs", ".vbe",
+    ".js", ".jse", ".wsf", ".wsh", ".hta", ".jar", ".lnk", ".url",
+})
+_FAST_SETTLE_SECONDS = 0.20
+
+
 @dataclass(frozen=True)
 class GuardPolicy:
     roots: tuple[Path, ...]
@@ -140,7 +152,13 @@ class Guard:
                        'engine': {}, 'scanned': 0, 'detections': 0, 'quarantined': 0,
                        'errors': 0, 'pending': 0, 'unresolved': 0, 'inventory_issues': [],
                        'capacity_exceeded': False, 'notifications': 'starting',
-                       'notification_resyncs': 0}
+                       'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS}
+
+    def _settle_delay(self, path: Path) -> float:
+        """Prioritize executable/script-like writes without claiming execution blocking."""
+        if path.suffix.lower() in _FAST_SCAN_SUFFIXES:
+            return min(self.policy.settle, _FAST_SETTLE_SECONDS)
+        return self.policy.settle
 
     def _notify_status(self):
         if self.status_observer is None:
@@ -169,10 +187,10 @@ class Guard:
         for path in list(self.known):
             if matches(path):
                 del self.known[path]
-        ready_at = time.monotonic() + self.policy.settle
+        changed_at = time.monotonic()
         for path, (identity, _) in list(self.pending.items()):
             if matches(path):
-                self.pending[path] = (identity, ready_at)
+                self.pending[path] = (identity, changed_at + self._settle_delay(path))
         return True
 
     def run(self, stop=None):
@@ -249,7 +267,7 @@ class Guard:
                     for path, (identity, _) in list(self.pending.items()):
                         current = files.get(path)
                         if current is not None and current != identity:
-                            self.pending[path] = (current, now + self.policy.settle)
+                            self.pending[path] = (current, now + self._settle_delay(path))
                     # Continue after the last admission. Repeated writes/cache
                     # resets in the first entries must not starve the backlog.
                     entries = list(files.items())
@@ -266,7 +284,7 @@ class Guard:
                         if len(self.pending) >= self.policy.max_queue:
                             self.status['capacity_exceeded'] = True
                             break
-                        self.pending[path] = (identity, now + self.policy.settle)
+                        self.pending[path] = (identity, now + self._settle_delay(path))
                         self.queue_cursor = path
                     changed = False
                 ready = next(((path, item) for path, item in self.pending.items()

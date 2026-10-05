@@ -36,13 +36,20 @@ if (-not $interactive) {
     $result.deferred_reason = 'clamd-service-missing'
 } else {
     $profile = [Environment]::GetFolderPath('UserProfile')
-    $roots = @()
-    foreach ($name in @('Downloads', 'Desktop', 'Documents')) {
-        $path = Join-Path $profile $name
-        if (Test-Path -LiteralPath $path -PathType Container) {
-            $roots += (Resolve-Path -LiteralPath $path).Path
-        }
-    }
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    $roamingAppData = [Environment]::GetFolderPath('ApplicationData')
+    $candidates = @(
+        (Join-Path $profile 'Downloads'),
+        (Join-Path $profile 'Desktop'),
+        (Join-Path $profile 'Documents'),
+        (Join-Path $localAppData 'Temp'),
+        (Join-Path $roamingAppData 'Microsoft\Windows\Start Menu\Programs\Startup')
+    )
+    $roots = @($candidates | Where-Object {
+        $_ -and (Test-Path -LiteralPath $_ -PathType Container)
+    } | ForEach-Object {
+        (Resolve-Path -LiteralPath $_).Path
+    } | Select-Object -Unique)
     if ($roots.Count -eq 0 -and (Test-Path -LiteralPath $profile -PathType Container)) {
         $roots = @((Resolve-Path -LiteralPath $profile).Path)
     }
