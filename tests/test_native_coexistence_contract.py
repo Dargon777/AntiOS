@@ -113,7 +113,9 @@ def test_broker_clean_cache_is_fixed_bounded_and_clean_only():
 
 def test_legacy_file_id_cache_does_not_store_clean_verdicts():
     driver = Path("native/windows/filter/avscan.c").read_text(encoding="utf-8")
-    cleanup = driver[driver.index("FLT_PREOP_CALLBACK_STATUS\nAvPreCleanup"):driver.index("NTSTATUS\nAvKtmNotificationCallback")]
+    cleanup_start = driver.rindex("FLT_PREOP_CALLBACK_STATUS\nAvPreCleanup")
+    cleanup_end = driver.rindex("NTSTATUS\nAvKtmNotificationCallback")
+    cleanup = driver[cleanup_start:cleanup_end]
     assert "if (IS_FILE_INFECTED( streamContext ))" in cleanup
     assert "clean file in the legacy" not in cleanup
     load = driver[driver.index("NTSTATUS\nAvLoadFileStateFromCache"):driver.index("NTSTATUS\nAvSyncCache")]
