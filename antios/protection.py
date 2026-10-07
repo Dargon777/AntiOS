@@ -97,6 +97,68 @@ def _native_status() -> dict:
     return result
 
 
+def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
+    configured = bool(
+        native_running and
+        driver.get("driver_available") is True and
+        driver.get("exit_code") == 0 and
+        driver.get("coexistence_mode") == 1 and
+        driver.get("fail_open_on_incomplete") is True and
+        isinstance(driver.get("max_pending"), int) and
+        1 <= driver.get("max_pending") <= 4 and
+        isinstance(driver.get("pending"), int) and
+        0 <= driver.get("pending") <= driver.get("max_pending")
+    )
+    if not configured:
+        return {
+            "configured": False,
+            "observed": False,
+            "state": "inactive/not-validated",
+            "attention_reasons": [],
+        }
+
+    counters = {}
+    for key in (
+        "attempts", "incomplete", "busy_bypass", "section_conflicts",
+        "delivery_timeouts", "completion_timeouts", "cancelled_opens", "max_wait_ms",
+    ):
+        value = driver.get(key)
+        counters[key] = value if isinstance(value, int) and value >= 0 else None
+
+    attempts = counters["attempts"]
+    reasons = []
+    if counters["delivery_timeouts"]:
+        reasons.append("delivery-timeouts")
+    if counters["completion_timeouts"]:
+        reasons.append("completion-timeouts")
+    if counters["max_wait_ms"] is not None and counters["max_wait_ms"] > 15000:
+        reasons.append("latency-ceiling-exceeded")
+
+    if attempts is None:
+        state = "configured-unmeasured"
+        observed = False
+    elif attempts == 0:
+        state = "configured-unexercised"
+        observed = False
+    elif reasons:
+        state = "attention"
+        observed = True
+    elif any(counters[key] for key in ("incomplete", "busy_bypass", "section_conflicts")):
+        state = "operational-with-gaps"
+        observed = True
+    else:
+        state = "operational"
+        observed = True
+
+    return {
+        "configured": True,
+        "observed": observed,
+        "state": state,
+        "attention_reasons": reasons,
+        "telemetry": counters,
+    }
+
+
 def collect_protection_status(engine_service: str | None = None) -> dict:
     engine: dict
     try:
@@ -131,17 +193,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     service = native.get("service", {})
     driver = native.get("driver", {})
     native_running = service.get("service_state") == 4 and service.get("exit_code") == 0
-    native_coexistence = bool(
-        native_running and
-        driver.get("driver_available") is True and
-        driver.get("exit_code") == 0 and
-        driver.get("coexistence_mode") == 1 and
-        driver.get("fail_open_on_incomplete") is True and
-        isinstance(driver.get("max_pending"), int) and
-        1 <= driver.get("max_pending") <= 4 and
-        isinstance(driver.get("pending"), int) and
-        0 <= driver.get("pending") <= driver.get("max_pending")
-    )
+    native_health = _native_coexistence_health(native_running, driver)
+    native_coexistence = native_health["configured"]
     pre_execution = bool(
         native_running and
         driver.get("driver_available") is True and
@@ -166,6 +219,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "guard": guard,
         "managed_runtime": managed,
         "native": native,
+        "native_coexistence": native_health,
         "defender": defender,
         "coexistence": coexistence,
         "capabilities": {
@@ -173,6 +227,9 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
             "resident_post_write_detection": guard_running and engine_ready,
             "pre_execution_blocking": pre_execution and engine_ready,
             "native_coexistence_ready": native_coexistence,
+            "native_coexistence_observed_operational": (
+                native_health["state"] in {"operational", "operational-with-gaps"}
+            ),
             "defender_dependency": False,
             "defender_realtime_active": defender.get("realtime_active") is True,
             "layered_with_defender": coexistence["layered_with_defender"],
@@ -190,6 +247,8 @@ def render_protection_status(status: dict) -> str:
     native = status["native"]
     defender = status.get("defender", {})
     coexistence = status.get("coexistence", {})
+    native_health = status.get("native_coexistence", {})
+    telemetry = native_health.get("telemetry", {})
     return "\n".join([
         "AntiOS protection status",
         f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
@@ -200,8 +259,13 @@ def render_protection_status(status: dict) -> str:
         f"Managed runtime: {'healthy' if managed.get('healthy') else 'needs review'}",
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
-        f"Native coexistence: {'healthy' if caps.get('native_coexistence_ready') else 'inactive/not-validated'}",
+        f"Native coexistence: {native_health.get('state', 'inactive/not-validated')}",
         f"Native max wait: {native.get('driver', {}).get('max_wait_ms', 'unknown')} ms",
+        "Native gaps: "
+        f"busy={telemetry.get('busy_bypass', 'unknown')}, "
+        f"section-conflicts={telemetry.get('section_conflicts', 'unknown')}, "
+        f"delivery-timeouts={telemetry.get('delivery_timeouts', 'unknown')}, "
+        f"completion-timeouts={telemetry.get('completion_timeouts', 'unknown')}",
         f"Pre-execution enforcement: {'active' if caps['pre_execution_blocking'] else 'inactive'}",
         f"Microsoft Defender: {'real-time active' if defender.get('realtime_active') else defender.get('running_mode', 'unavailable')}",
         f"Coexistence mode: {coexistence.get('mode', 'unknown')}",
