@@ -902,7 +902,7 @@ class AntivirusPanel:
         layered = bool(state.get("defender_active_parallel"))
         amsi_ready = bool(amsi.get("registered") and amsi.get("module_exists"))
         if layered:
-            text = "Defender + AntiOS" + (" · AMSI" if amsi_ready else "")
+            text = "Defender + AntiOS" + (" · AMSI registered" if amsi_ready else "")
             color = self.palette["ok"]
         elif defender.get("available"):
             text = "Defender detected · review"
