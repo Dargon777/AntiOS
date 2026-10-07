@@ -4,15 +4,25 @@
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <bcrypt.h>
 #include <fltuser.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include "userscan.h"
 #include "engine_peer.h"
 #include "../inc/avlib.h"
 #include "../engine/engine.h"
 
 #define WORKERS AO_BROKER_WORKERS
+#define CLEAN_CACHE_ENTRIES 128u
+
+struct clean_cache_entry {
+    unsigned char digest[32];
+    ULONGLONG expires_ms;
+    SIZE_T size;
+};
+
 struct broker;
 struct worker {
     struct broker *broker;
@@ -29,9 +39,85 @@ struct broker {
     volatile LONG gap_logged;
     ao_log_fn log;
     wchar_t engine_service[81];
+
+    SRWLOCK cache_lock;
+    struct clean_cache_entry clean_cache[CLEAN_CACHE_ENTRIES];
+    ULONG cache_cursor;
+    ULONG clean_cache_ttl_ms;
+    BCRYPT_ALG_HANDLE sha256;
+    DWORD sha256_object_bytes;
 };
 struct message { FILTER_MESSAGE_HEADER header; AV_SCANNER_NOTIFICATION notification; };
 struct reply { FILTER_REPLY_HEADER header; ULONG thread_id; };
+
+static ULONG read_clean_cache_ttl(void) {
+    DWORD ttl = 30000, bytes = sizeof(ttl);
+    LONG error = RegGetValueW(
+        HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Services\\AntiOS-Filter\\Parameters",
+        L"CleanCacheTtlMs",
+        RRF_RT_REG_DWORD | RRF_ZEROONFAILURE,
+        NULL, &ttl, &bytes);
+    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return 30000;
+    if (error != ERROR_SUCCESS || bytes != sizeof(ttl) || ttl > 300000) return 0;
+    return ttl;
+}
+
+static int hash_snapshot(struct broker *broker, const unsigned char *data, SIZE_T size,
+                         unsigned char digest[32]) {
+    BCRYPT_HASH_HANDLE hash = NULL;
+    PUCHAR object = NULL;
+    NTSTATUS status;
+    if (!broker->sha256 || !broker->sha256_object_bytes || size > AO_MAX_FILE_BYTES) return 0;
+    object = HeapAlloc(GetProcessHeap(), 0, broker->sha256_object_bytes);
+    if (!object) return 0;
+    status = BCryptCreateHash(broker->sha256, &hash, object, broker->sha256_object_bytes,
+                              NULL, 0, 0);
+    if (status == 0)
+        status = BCryptHashData(hash, (PUCHAR)data, (ULONG)size, 0);
+    if (status == 0)
+        status = BCryptFinishHash(hash, digest, 32, 0);
+    if (hash) BCryptDestroyHash(hash);
+    SecureZeroMemory(object, broker->sha256_object_bytes);
+    HeapFree(GetProcessHeap(), 0, object);
+    return status == 0;
+}
+
+static int clean_cache_lookup(struct broker *broker, const unsigned char digest[32], SIZE_T size) {
+    ULONGLONG now;
+    unsigned i;
+    int found = 0;
+    if (!broker->clean_cache_ttl_ms) return 0;
+    now = GetTickCount64();
+    AcquireSRWLockExclusive(&broker->cache_lock);
+    for (i = 0; i < CLEAN_CACHE_ENTRIES; ++i) {
+        struct clean_cache_entry *entry = &broker->clean_cache[i];
+        if (entry->expires_ms && entry->expires_ms <= now) {
+            SecureZeroMemory(entry, sizeof(*entry));
+            continue;
+        }
+        if (entry->expires_ms && entry->size == size &&
+            memcmp(entry->digest, digest, sizeof(entry->digest)) == 0) {
+            found = 1;
+            break;
+        }
+    }
+    ReleaseSRWLockExclusive(&broker->cache_lock);
+    return found;
+}
+
+static void clean_cache_store(struct broker *broker, const unsigned char digest[32], SIZE_T size) {
+    struct clean_cache_entry *entry;
+    ULONG slot;
+    if (!broker->clean_cache_ttl_ms) return;
+    AcquireSRWLockExclusive(&broker->cache_lock);
+    slot = broker->cache_cursor++ % CLEAN_CACHE_ENTRIES;
+    entry = &broker->clean_cache[slot];
+    CopyMemory(entry->digest, digest, sizeof(entry->digest));
+    entry->size = size;
+    entry->expires_ms = GetTickCount64() + broker->clean_cache_ttl_ms;
+    ReleaseSRWLockExclusive(&broker->cache_lock);
+}
 
 static void fail(struct broker *broker, HRESULT result) {
     InterlockedCompareExchange(&broker->failure, (LONG)result, 0);
@@ -91,8 +177,10 @@ static void scan_section(struct worker *worker) {
     AO_SECTION_REPLY section = {0};
     struct ao_outcome outcome = {AO_UNKNOWN, 0, "", "section unavailable"};
     unsigned char *snapshot = NULL, *view = NULL;
+    unsigned char digest[32] = {0};
     DWORD returned = 0;
     size_t offset, size = 0;
+    int digest_valid = 0, cache_hit = 0;
     HRESULT result;
     ULONGLONG deadline = GetTickCount64() + AO_SCAN_TIMEOUT_MS;
     command.Command = AvCmdCreateSectionForDataScan;
@@ -118,17 +206,32 @@ static void scan_section(struct worker *worker) {
         offset += amount;
     }
     if (!cancelled(worker) && GetTickCount64() < deadline) {
-        unsigned remaining = (unsigned)(deadline - GetTickCount64());
-        if (remaining && remaining <= AO_SCAN_TIMEOUT_MS)
-            outcome = ao_engine_scan(broker->engine_service, snapshot, size, remaining, cancelled, worker);
+        digest_valid = hash_snapshot(broker, snapshot, size, digest);
+        if (digest_valid && clean_cache_lookup(broker, digest, size)) {
+            outcome.result = AO_CLEAR;
+            outcome.database_current = 1;
+            strcpy_s(outcome.detail, sizeof(outcome.detail), "bounded SHA-256 clean cache");
+            cache_hit = 1;
+        } else {
+            unsigned remaining = (unsigned)(deadline - GetTickCount64());
+            if (remaining && remaining <= AO_SCAN_TIMEOUT_MS)
+                outcome = ao_engine_scan(broker->engine_service, snapshot, size, remaining, cancelled, worker);
+        }
     }
 cleanup:
     if (snapshot) HeapFree(GetProcessHeap(), 0, snapshot);
     if (view) UnmapViewOfFile(view);
     if (section.SectionHandle && section.SectionHandle != INVALID_HANDLE_VALUE) CloseHandle(section.SectionHandle);
 finish:
-    if (cancelled(worker)) outcome.result = AO_UNKNOWN;
+    if (cancelled(worker)) {
+        outcome.result = AO_UNKNOWN;
+        cache_hit = 0;
+    }
+    if (outcome.result == AO_CLEAR && outcome.database_current && digest_valid && !cache_hit) {
+        clean_cache_store(broker, digest, size);
+    }
     command.Command = AvCmdCloseSectionForDataScan;
+    command.ResultFlags = cache_hit ? AO_SCAN_FLAG_CLEAN_CACHE_HIT : 0;
     command.ScanResult = outcome.result == AO_THREAT ? AvScanResultInfected :
                         outcome.result == AO_CLEAR ? AvScanResultClean : AvScanResultUndetermined;
     /* Also complete failed section requests; kernel may already have cancelled them. */
@@ -207,8 +310,26 @@ DWORD ao_broker_run(HANDLE stop, HANDLE ready, ao_log_fn log) {
     HRESULT result;
     unsigned i;
     DWORD config_error = ao_engine_service_name(broker.engine_service);
+    DWORD property_bytes = 0;
+    NTSTATUS crypto_status;
     if (config_error) return config_error;
     broker.stop = stop; broker.log = log;
+    InitializeSRWLock(&broker.cache_lock);
+    broker.clean_cache_ttl_ms = read_clean_cache_ttl();
+    crypto_status = BCryptOpenAlgorithmProvider(&broker.sha256, BCRYPT_SHA256_ALGORITHM, NULL, 0);
+    if (crypto_status == 0) {
+        crypto_status = BCryptGetProperty(
+            broker.sha256, BCRYPT_OBJECT_LENGTH,
+            (PUCHAR)&broker.sha256_object_bytes, sizeof(broker.sha256_object_bytes),
+            &property_bytes, 0);
+    }
+    if (crypto_status != 0 || property_bytes != sizeof(broker.sha256_object_bytes) ||
+        broker.sha256_object_bytes == 0 || broker.sha256_object_bytes > 65536) {
+        if (broker.sha256) BCryptCloseAlgorithmProvider(broker.sha256, 0);
+        broker.sha256 = NULL;
+        broker.sha256_object_bytes = 0;
+        broker.clean_cache_ttl_ms = 0;
+    }
     for (i = 0; i < WORKERS; ++i) {
         broker.workers[i].broker = &broker;
         InitializeCriticalSection(&broker.workers[i].lock);
@@ -238,6 +359,8 @@ done:
     if (broker.abort_thread) { WaitForSingleObject(broker.abort_thread, INFINITE); CloseHandle(broker.abort_thread); }
     if (broker.scan_port && broker.scan_port != INVALID_HANDLE_VALUE) CloseHandle(broker.scan_port);
     if (broker.abort_port && broker.abort_port != INVALID_HANDLE_VALUE) CloseHandle(broker.abort_port);
+    if (broker.sha256) BCryptCloseAlgorithmProvider(broker.sha256, 0);
+    SecureZeroMemory(broker.clean_cache, sizeof(broker.clean_cache));
     for (i = 0; i < WORKERS; ++i) DeleteCriticalSection(&broker.workers[i].lock);
     return (DWORD)broker.failure;
 }
