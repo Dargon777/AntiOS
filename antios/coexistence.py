@@ -129,6 +129,7 @@ def _amsi_provider_status() -> dict:
         return {
             "available": True,
             "registered": True,
+            "architecture": "x64",
             "clsid": AMSI_PROVIDER_CLSID,
             "module": expanded,
             "module_exists": Path(expanded).is_file(),
@@ -137,6 +138,7 @@ def _amsi_provider_status() -> dict:
         return {
             "available": True,
             "registered": False,
+            "architecture": "x64",
             "clsid": AMSI_PROVIDER_CLSID,
             "detail": str(exc)[:300],
         }
