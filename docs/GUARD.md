@@ -135,6 +135,11 @@ normal antivirus scanning.
 The complete rule IDs, scores, memory/time bounds and known visibility limits are
 documented in [BEHAVIOR.md](BEHAVIOR.md).
 
+After a completed scan, Guard fuses the scanner verdict, fresh path-specific
+behavior evidence, file origin and cached native pre-execution state into an
+explainable [RiskContext](RISK.md). Only confirmed scanner threats are eligible
+for unattended quarantine.
+
 ## Verification scope
 
 Tests cover new/existing/changed files, repeated writes, database-generation
