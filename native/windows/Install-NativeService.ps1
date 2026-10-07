@@ -20,13 +20,18 @@ $binary = Join-Path $destination 'AntiOS-Service.exe'
 if (Get-Service -Name AntiOSNative -ErrorAction SilentlyContinue) { throw 'Service already exists. Stop and remove the old lab install explicitly before replacing it.' }
 if (Test-Path -LiteralPath $destination) { throw 'Destination already exists; refusing to overwrite or follow an existing directory/reparse point.' }
 if (-not (Get-Service -Name AntiOS-Filter -ErrorAction SilentlyContinue)) { throw 'Install the reviewed/signed driver package first.' }
+$driverParameters = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\AntiOS-Filter\\Parameters'
+$coexistence = Get-ItemPropertyValue -Path $driverParameters -Name CoexistenceMode -ErrorAction Stop
+$maxPending = Get-ItemPropertyValue -Path $driverParameters -Name MaxPendingScans -ErrorAction Stop
+if ([int]$coexistence -ne 1) { throw 'AntiOS native service requires CoexistenceMode=1.' }
+if ([int]$maxPending -lt 1 -or [int]$maxPending -gt 16) { throw 'MaxPendingScans must remain between 1 and 16.' }
 if ($EngineServiceName -in @('AntiOSNative','AntiOS-Filter')) { throw 'Select the actual ClamD service.' }
 $engine = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'"
 if (-not $engine -or $engine.ServiceType -ne 'Own Process' -or $engine.StartName -ne 'LocalSystem') {
     throw 'ClamD must run directly as an own-process LocalSystem service; wrappers/child processes are unsupported.'
 }
 if (-not $Apply) {
-    Write-Output "Ready to install $binary as LocalSystem, manual start, dependent on AntiOS-Filter and $EngineServiceName. Rerun with -Apply in the lab VM."
+    Write-Output "Ready to install $binary as LocalSystem, manual start, dependent on AntiOS-Filter and $EngineServiceName. CoexistenceMode=$coexistence; MaxPendingScans=$maxPending. Rerun with -Apply in the lab VM."
     return
 }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
