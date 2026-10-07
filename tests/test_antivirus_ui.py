@@ -137,6 +137,7 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         root.update()
         assert panel.export_button.winfo_ismapped()
         assert panel.tree.winfo_ismapped()
+        assert panel.incident_button.winfo_ismapped()
         assert panel.tree.winfo_height() >= 60
 
         # Store/GUI-only packages must not offer a Guard companion they do not ship.
@@ -157,6 +158,8 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
             assert panel.status["text"]
             assert panel.export_button.winfo_ismapped()
             assert panel.tree.winfo_ismapped()
+            assert panel.incident_button.winfo_ismapped()
+            assert panel.incident_button["text"] == MESSAGES[language]["incident_viewer_button"]
             assert not hasattr(panel, "engine_choice")
 
         panel._scan()
