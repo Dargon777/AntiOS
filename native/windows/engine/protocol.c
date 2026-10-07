@@ -57,7 +57,7 @@ uint64_t ao_database_generation(const char *version) {
         unsigned digit;
         if (*cursor < '0' || *cursor > '9') return 0;
         digit = (unsigned)(*cursor - '0');
-        if (value > (UINT64_MAX - digit) / 10) return 0;
+        if (value > ((uint64_t)INT64_MAX - digit) / 10) return 0;
         value = value * 10 + digit;
     }
     return value;
