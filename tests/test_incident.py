@@ -218,3 +218,21 @@ def test_mass_file_behavior_attaches_recent_files_to_incident():
     assert snapshot["score"] == 95
     assert sum(node["kind"] == "file" for node in snapshot["nodes"]) >= 10
     assert any(edge["relation"] == "correlated-write" for edge in snapshot["edges"])
+
+
+
+def test_repeated_updates_for_one_incident_are_coalesced():
+    incidents, clock = graph()
+    path = r"C:\Users\A\Downloads\payload.exe"
+    incidents.observe_file_change(path)
+    incidents.observe_process(ProcessEvent(
+        pid=200, ppid=100, image="payload.exe", path=path,
+        parent_image="explorer.exe",
+    ))
+    incidents.drain_updates()
+    for _index in range(20):
+        clock.advance(0.01)
+        incidents.observe_file_change(path)
+    updates = incidents.drain_updates()
+    assert len(updates) == 1
+    assert updates[0]["incident"]["edge_count"] >= 2
