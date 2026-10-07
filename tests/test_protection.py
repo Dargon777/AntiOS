@@ -319,3 +319,51 @@ def test_native_pre_execution_helper_is_tri_state():
         "service": {"service_state": 4, "exit_code": 0},
         "driver": {"driver_available": True, "exit_code": 0, "enforcement": 0},
     }) is False
+
+
+
+def test_incident_graph_is_reported_as_correlation_not_enforcement(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(protection, "read_guard_state", lambda: {
+        "running": True,
+        "state": "attention",
+        "behavior": {
+            "state": "attention",
+            "mode": "detect-only",
+            "collector": "toolhelp-snapshot",
+            "highest_score": 85,
+            "recent_findings": 1,
+        },
+        "risk": {
+            "mode": "fusion",
+            "last": {
+                "classification": "high",
+                "score": 85,
+                "origin": "downloads",
+                "native_pre_execution": "inactive",
+                "automatic_enforcement_eligible": False,
+            },
+        },
+        "incidents": {
+            "state": "attention",
+            "mode": "correlation-graph",
+            "active_incidents": 1,
+            "total_created": 1,
+            "highest_score": 85,
+            "latest": {
+                "id": "INC-000001",
+                "score": 85,
+                "classification": "high",
+                "node_count": 5,
+                "edge_count": 4,
+            },
+        },
+    })
+    monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    status = protection.collect_protection_status("clamd")
+    assert status["capabilities"]["incident_graph"] is True
+    assert status["capabilities"]["pre_execution_blocking"] is False
+    assert status["incidents"]["latest"]["id"] == "INC-000001"
+    rendered = protection.render_protection_status(status)
+    assert "Incident graph: attention (active=1, score=85, latest=INC-000001, nodes=5, edges=4)" in rendered
