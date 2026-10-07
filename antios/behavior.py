@@ -211,6 +211,22 @@ class BehaviorEngine:
             findings.extend(self.observe_file_change(path, at=at))
         return findings
 
+    def findings_for_subject(self, subject: str, *, max_age: float | None = None) -> list[dict]:
+        """Return recent findings that refer to one exact path/process subject."""
+        now = self.clock()
+        self._prune(now)
+        wanted = _normalized_path(subject)
+        if not wanted:
+            return []
+        age = self.event_window if max_age is None else float(max_age)
+        if not 0 <= age <= 300:
+            raise ValueError("max_age must be between 0 and 300 seconds")
+        return [
+            finding.to_dict()
+            for finding in self.findings
+            if now - finding.at <= age and _normalized_path(finding.subject) == wanted
+        ]
+
     def status(self) -> dict:
         now = self.clock()
         self._prune(now)
