@@ -138,7 +138,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         driver.get("coexistence_mode") == 1 and
         driver.get("fail_open_on_incomplete") is True and
         isinstance(driver.get("max_pending"), int) and
-        1 <= driver.get("max_pending") <= 16 and
+        1 <= driver.get("max_pending") <= 4 and
         isinstance(driver.get("pending"), int) and
         0 <= driver.get("pending") <= driver.get("max_pending")
     )
