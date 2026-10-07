@@ -114,7 +114,8 @@ static int status_json(void) {
     }
     printf("{\"installed\":true,\"service_state\":%lu,\"pid\":%lu,\"configured_protection_known\":%s,"
            "\"configured_protection\":%lu,\"actual_protection_known\":%s,\"actual_protection\":%lu,"
-           "\"primary_antivirus\":false,\"engine_readiness\":\"not_measured\"}\n",
+           "\"primary_antivirus\":false,\"role\":\"independent-companion\","
+           "\"defender_configuration_changed\":false,\"engine_readiness\":\"not_measured\"}\n",
            state.dwCurrentState, state.dwProcessId, config_known ? "true" : "false", configured.dwLaunchProtected,
            actual_known ? "true" : "false", actual.ProtectionLevel);
     CloseServiceHandle(service); CloseServiceHandle(manager);
@@ -139,10 +140,23 @@ static int driver_status_json(void) {
         printf("{\"driver_available\":false,\"error\":%lu}\n", (DWORD)result);
         return 2;
     }
-    printf("{\"driver_available\":true,\"enforcement\":%lu,\"pending\":%ld,"
-           "\"attempts\":%lld,\"incomplete\":%lld,\"detections\":%lld,\"blocked\":%lld}\n",
-           state.Enforcement, state.PendingScans, (long long)state.Attempts, (long long)state.Incomplete,
-           (long long)state.Detections, (long long)state.Blocked);
+    {
+        unsigned long long total_ms = (unsigned long long)(state.TotalWait100ns / 10000);
+        unsigned long long max_ms = (unsigned long long)(state.MaxWait100ns / 10000);
+        unsigned long long average_ms = state.Attempts ? total_ms / (unsigned long long)state.Attempts : 0;
+        printf("{\"driver_available\":true,\"protocol\":%lu,\"enforcement\":%lu,"
+               "\"coexistence_mode\":%lu,\"fail_open_on_incomplete\":true,"
+               "\"local_scan_timeout_ms\":%lu,\"max_pending\":%lu,\"pending\":%ld,\"peak_pending\":%ld,"
+               "\"attempts\":%lld,\"incomplete\":%lld,\"detections\":%lld,\"blocked\":%lld,"
+               "\"busy_bypass\":%lld,\"delivery_timeouts\":%lld,\"completion_timeouts\":%lld,"
+               "\"cancelled_opens\":%lld,\"total_wait_ms\":%llu,\"average_wait_ms\":%llu,\"max_wait_ms\":%llu}\n",
+               state.ProtocolVersion, state.Enforcement, state.CoexistenceMode,
+               state.LocalScanTimeoutMs, state.MaxPendingScans, state.PendingScans, state.PeakPendingScans,
+               (long long)state.Attempts, (long long)state.Incomplete, (long long)state.Detections,
+               (long long)state.Blocked, (long long)state.BusyBypass, (long long)state.DeliveryTimeouts,
+               (long long)state.CompletionTimeouts, (long long)state.CancelledOpens,
+               total_ms, average_ms, max_ms);
+    }
     return 0;
 }
 /* Diagnostics only: fixed loopback engine, no service installation or file changes. */
