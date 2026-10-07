@@ -391,14 +391,17 @@ class IncidentViewer:
         ))
 
         start = _number(incident.get("started_at"))
-        for row in build_incident_tree(incident):
-            self.rows[row["id"]] = row
-            parent = row["parent"] if row["parent"] in self.rows else ""
+        graph_to_ui: dict[str, str] = {}
+        for index, row in enumerate(build_incident_tree(incident)):
+            ui_id = f"node-{index}"
+            graph_to_ui[row["id"]] = ui_id
+            self.rows[ui_id] = row
+            parent = graph_to_ui.get(row["parent"], "")
             relation = self._relation(row["relation"])
             kind = self._kind(row["kind"])
             offset = max(0.0, row["at"] - start) if start else 0.0
             self.chain.insert(
-                parent, "end", iid=row["id"],
+                parent, "end", iid=ui_id,
                 text=row["label"],
                 values=(relation, kind, f"+{offset:.2f}s"),
                 open=row["depth"] < 3,
