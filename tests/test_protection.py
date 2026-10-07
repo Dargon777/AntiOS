@@ -235,3 +235,27 @@ def test_native_coexistence_rejects_unknown_database_generation():
     health = protection._native_coexistence_health(True, driver)
     assert health["configured"] is False
     assert health["state"] == "inactive/not-validated"
+
+
+
+def test_behavior_monitoring_is_reported_without_claiming_blocking(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(protection, "read_guard_state", lambda: {
+        "running": True,
+        "state": "attention",
+        "behavior": {
+            "state": "attention",
+            "mode": "detect-only",
+            "collector": "toolhelp-snapshot",
+            "highest_score": 85,
+            "recent_findings": 1,
+        },
+    })
+    monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    status = protection.collect_protection_status("clamd")
+    assert status["capabilities"]["behavior_monitoring"] is True
+    assert status["capabilities"]["behavior_process_visibility"] is True
+    assert status["capabilities"]["pre_execution_blocking"] is False
+    rendered = protection.render_protection_status(status)
+    assert "Behavior monitor: attention (toolhelp-snapshot, score=85, findings=1)" in rendered
