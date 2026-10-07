@@ -34,7 +34,7 @@ antivirus, a certified driver, or a ready-to-install Defender replacement.
   the filter after rule removal to clear a previous positive in this prototype.
 - `--status` reports SCM state and configured/actual Windows process protection
   separately. `--driver-status` reads loaded policy and counters; it does not infer
-  protection from a registry setting. Protocol v2 also reports CoexistenceMode,
+  protection from a registry setting. Protocol v3 also reports CoexistenceMode,
   bounded four-worker scan admission, peak pending work, overload bypasses, delivery/completion
   timeouts, cancellations and total/average/max kernel wait latency. `--scan-file PATH`
   is a bounded diagnostic.
@@ -225,3 +225,34 @@ The coexistence VM run additionally rejects AntiOS-related Microsoft Defender
 path/process exclusions and any AntiOS antivirus entry in Windows Security
 Center. This prevents a passing result from being manufactured by weakening the
 other protection layer.
+
+
+## Bounded clean-verdict cache
+
+Native protocol v3 adds two conservative clean-only cache layers to reduce repeat
+ClamD work without turning a stale path into a permanent allow-list:
+
+1. The minifilter keeps a clean verdict in the current stream context for
+   `CleanCacheTtlMs` (30 seconds by default, hard-bounded to 0–300000 ms).
+   `IRP_MJ_WRITE` and other modifying operations immediately move the stream
+   back to `AvFileModified` and clear the clean deadline.
+2. The LocalSystem broker keeps a fixed 128-entry SHA-256 cache over the exact
+   immutable snapshot supplied by Filter Manager. This survives stream-context
+   recreation and avoids resending identical bytes to ClamD during the same
+   bounded TTL.
+
+Only a current-database `AO_CLEAR` result is cached. `AO_UNKNOWN`,
+`AO_REVIEW`, detections, cancelled scans, malformed engine replies and stale
+database results are never cached as clean. If CNG hashing is unavailable the
+broker simply disables its content cache and continues normal ClamD scanning.
+
+The old per-volume file-ID state table is deliberately **not** trusted as a
+cross-handle clean verdict because it carries no cache lifetime/database
+generation. A cached `AvFileNotInfected` loaded from that table is converted
+back to `AvFileModified` and rescanned.
+
+The cache is a performance optimization, not a new trust boundary. A signature
+database update can make a cached clean result stale for at most the configured
+TTL (30 seconds by default), after which the file returns to the normal scan
+path. `--driver-status` exposes `clean_cache_ttl_ms`, `cache_hits`,
+`cache_expired` and `cache_invalidations`.
