@@ -11,6 +11,9 @@ disable, hide from or replace Defender to provide this second layer.
 
 AntiOS coexistence mode follows these rules:
 
+- AntiOS does not disable, stop or reconfigure Microsoft Defender.
+- AntiOS does not write fake Windows Security Center antivirus registration.
+- AntiOS does not add Defender exclusions.
 - Microsoft Defender preferences are not changed.
 - AntiOS does not write fake Windows Security Center registration.
 - AntiOS does not register itself as the primary antivirus in this mode.
