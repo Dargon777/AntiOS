@@ -126,10 +126,13 @@ try {
 
     $before = Driver-Status
     $report.driverBefore = $before
-    if ([int]$before.protocol -lt 2) { throw 'Native protocol v2+ is required.' }
+    if ([int]$before.protocol -lt 3) { throw 'Native protocol v3+ is required.' }
     if ([int]$before.coexistence_mode -ne 1) { throw 'Driver CoexistenceMode must be enabled.' }
     if ([int]$before.max_pending -lt 1 -or [int]$before.max_pending -gt 4) {
         throw 'Driver MaxPendingScans exceeds the four-worker native broker capacity.'
+    }
+    if ([long]$before.clean_cache_ttl_ms -le 0 -or [long]$before.clean_cache_ttl_ms -gt 300000) {
+        throw 'Clean cache must be enabled with a bounded TTL for this coexistence acceptance run.'
     }
     if ([int]$before.pending -ne 0) { throw 'Driver had pending scans before the stress test.' }
 
@@ -179,6 +182,44 @@ try {
     if ($attemptDelta -lt $ParallelOpens) { throw 'Not every distinct execute-open reached native scan admission.' }
     if ($blockDelta -ne 0) { throw 'Clean coexistence fixtures were unexpectedly blocked.' }
     if ([long]$after.max_wait_ms -gt 15000) { throw 'Driver-observed wait exceeded the coexistence latency ceiling.' }
+
+    # Reopen the exact same bytes. The kernel stream cache or bounded broker
+    # SHA-256 cache must avoid another ClamD scan while the TTL is valid.
+    $repeatCount = [Math]::Min(8, $ParallelOpens)
+    $cacheBefore = Driver-Status
+    $repeatPaths = [string[]]@(1..$repeatCount | ForEach-Object { $paths[0] })
+    $repeatResults = [AntiOSCoexistenceIo]::ExecuteOpenMany($repeatPaths)
+    if (@($repeatResults | Where-Object { -not $_.Opened }).Count) {
+        throw 'Cached clean execute-open unexpectedly failed.'
+    }
+    $cacheAfter = Driver-Status
+    $cacheHitDelta = [long]$cacheAfter.cache_hits - [long]$cacheBefore.cache_hits
+    $cacheAttemptDelta = [long]$cacheAfter.attempts - [long]$cacheBefore.attempts
+    $report.cleanCache = [ordered]@{
+        repeatOpens = $repeatCount
+        hitDelta = $cacheHitDelta
+        attemptDelta = $cacheAttemptDelta
+    }
+    if ($cacheHitDelta -lt $repeatCount) { throw 'Repeated unchanged executable opens did not hit the clean cache.' }
+    if ($cacheAttemptDelta -ne 0) { throw 'Repeated unchanged executable opens unexpectedly reached native scan admission.' }
+
+    # A write must invalidate the stream cache. Appending one inert byte keeps this
+    # a harmless fixture while ensuring the next execute-open is rescanned.
+    $invalidationBefore = Driver-Status
+    $append = [IO.File]::Open($paths[0], [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+    try { $append.WriteByte(0) } finally { $append.Dispose() }
+    Start-Sleep -Milliseconds 50
+    $afterWrite = Driver-Status
+    $invalidationDelta = [long]$afterWrite.cache_invalidations - [long]$invalidationBefore.cache_invalidations
+    $rescanBefore = [long]$afterWrite.attempts
+    $rescanResult = [AntiOSCoexistenceIo]::ExecuteOpenMany([string[]]@($paths[0]))
+    if (-not $rescanResult[0].Opened) { throw 'Modified clean fixture was unexpectedly blocked.' }
+    $rescanAfter = Driver-Status
+    $rescanDelta = [long]$rescanAfter.attempts - $rescanBefore
+    $report.cleanCache.invalidationDelta = $invalidationDelta
+    $report.cleanCache.rescanAttemptDelta = $rescanDelta
+    if ($invalidationDelta -lt 1) { throw 'A modifying write did not invalidate the clean stream cache.' }
+    if ($rescanDelta -lt 1) { throw 'Modified content did not return to the native scan path.' }
 
     $mpAfter = Get-MpComputerStatus
     $report.defenderAfter = [ordered]@{
