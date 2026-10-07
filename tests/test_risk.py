@@ -1,7 +1,7 @@
 from antios.risk import classify_origin, evaluate_risk
 
 
-def scan(*, verdict="no-threats-found", coverage="complete", findings=None, fresh=True):
+def scan(*, verdict="no-threats-found", coverage="clamav-and-signatures", findings=None, fresh=True):
     return {
         "verdict": verdict,
         "coverage": coverage,
@@ -90,3 +90,13 @@ def test_origin_classifier_is_conservative():
     assert classify_origin(r"C:\Program Files\Vendor\tool.exe") == ("program-files", 0)
     assert classify_origin(r"C:\Users\A\Downloads\tool.exe") == ("downloads", 5)
     assert classify_origin(r"C:\Users\A\AppData\Local\Temp\x.exe") == ("user-temp", 10)
+
+
+
+def test_real_antios_coverage_values_define_complete_scan():
+    clamav = evaluate_risk(r"C:\Data\a.exe", scan(coverage="clamav-and-signatures"), now=1)
+    amsi = evaluate_risk(r"C:\Data\a.exe", scan(coverage="provider-and-signatures"), now=1)
+    limited = evaluate_risk(r"C:\Data\a.exe", scan(coverage="limited", verdict="incomplete"), now=1)
+    assert clamav.scanner_complete is True
+    assert amsi.scanner_complete is True
+    assert limited.scanner_complete is False
