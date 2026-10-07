@@ -13,6 +13,7 @@ from antios.behavior import BehaviorEngine, ProcessEvent
 from antios.clamav import ScanOutcome
 from antios.guard_notifications import ChangeBatch, PollNotifications
 from antios.guard_state import GuardState, read_guard_state
+from antios.incident import IncidentGraph
 
 
 class Engine:
@@ -703,6 +704,66 @@ def test_process_correlation_stays_live_during_scan(tmp_path):
         context = instance.status["risk"]["last"]
         assert context["behavior_score"] == 75
         assert "changed-then-executed" in context["behavior_rules"]
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+
+def test_guard_builds_incident_graph_from_write_execute_and_scan(tmp_path):
+    root = tmp_path / "watched-incident"
+    root.mkdir()
+    target = root / "payload.exe"
+    target.write_bytes(b"ordinary")
+
+    behavior = BehaviorEngine()
+    incidents = IncidentGraph()
+    behavior.observe_file_change(str(target))
+    incidents.observe_file_change(str(target))
+    process = ProcessEvent(
+        pid=400, ppid=100, image="payload.exe", path=str(target),
+        parent_image="explorer.exe",
+    )
+    findings = behavior.observe_process(process)
+    incidents.observe_process(
+        process, behavior_findings=(finding.to_dict() for finding in findings)
+    )
+
+    state = tmp_path / "incident-state"
+    policy = guard.GuardPolicy((root,), interval=0.1, settle=0.05)
+    instance = guard.Guard(
+        policy, state, scanner=scan, probe=probe,
+        watcher_factory=PollNotifications,
+        behavior_engine=behavior,
+        incident_graph=incidents,
+        process_sampler=type("SilentSampler", (), {"poll": lambda self: []})(),
+        native_probe=lambda: True,
+    )
+    stop, failures = threading.Event(), []
+    def run_guard():
+        try:
+            instance.run(stop)
+        except Exception as exc:
+            failures.append(exc)
+    thread = threading.Thread(target=run_guard, daemon=True)
+    thread.start()
+    try:
+        until(lambda: instance.status.get("risk", {}).get("evaluations", 0) >= 1)
+        until(lambda: instance.status.get("incidents", {}).get("latest") is not None)
+        latest = instance.status["incidents"]["latest"]
+        relations = {edge["relation"] for edge in latest["edges"]}
+        assert "executed-as" in relations
+        assert "evaluated-as" in relations
+        assert latest["node_count"] >= 4
+        assert latest["classification"] in {"high", "critical-behavior"}
+        history = read_guard_state(state, history=True)
+        incident_events = [
+            event for event in history["events"]
+            if event["kind"] == "incident-update"
+        ]
+        assert incident_events
+        assert incident_events[0]["data"]["incident"]["id"] == latest["id"]
     finally:
         stop.set()
         thread.join(3)
