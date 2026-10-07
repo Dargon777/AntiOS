@@ -143,3 +143,21 @@ building an unbounded kernel wait queue. The installer rejects a
 The disposable-VM coexistence harness verifies Microsoft Defender real-time
 protection both before and after the stress run. A run cannot pass merely because
 Defender was active at startup and became inactive during testing.
+
+
+## Runtime health semantics
+
+AntiOS no longer equates a correct native configuration with a proven healthy
+runtime. The aggregate protection status distinguishes:
+
+- `inactive/not-validated` — required native coexistence pieces are absent or unsafe;
+- `configured-unmeasured` — configuration is valid but telemetry is unavailable;
+- `configured-unexercised` — the loaded stack has not observed a scan attempt yet;
+- `operational` — scans have been observed without recorded gaps;
+- `operational-with-gaps` — bounded fail-open events or section conflicts occurred,
+  but no delivery/completion timeout or latency-ceiling violation was recorded;
+- `attention` — a delivery/completion timeout or excessive recorded wait requires
+  review.
+
+These counters are lifetime telemetry for the loaded driver, not a malware
+verdict and not a certification result.
