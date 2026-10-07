@@ -161,3 +161,15 @@ runtime. The aggregate protection status distinguishes:
 
 These counters are lifetime telemetry for the loaded driver, not a malware
 verdict and not a certification result.
+
+
+## VM proof against fake coexistence
+
+The native coexistence VM harness also verifies that the tested machine is not
+quietly weakening Defender to make the result look successful. It reads Defender
+preferences and fails if an AntiOS-related path/process exclusion is present. It
+also reads the Windows Security Center antivirus inventory and fails if AntiOS is
+registered there as a primary antivirus product.
+
+These checks are read-only. The harness never adds/removes exclusions and never
+changes Security Center registration.
