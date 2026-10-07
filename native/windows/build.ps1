@@ -58,7 +58,7 @@ try {
             "$PSScriptRoot\engine\clamd.c",'/Fo:amsi-clamd.obj')
         Invoke-Checked -Program 'link.exe' -Arguments @('/nologo','/dll','/out:AntiOS-AmsiProvider.dll',
             'amsi-provider.obj','amsi-engine-peer.obj','amsi-protocol.obj','amsi-clamd.obj',
-            'ws2_32.lib','iphlpapi.lib','advapi32.lib','ole32.lib','/DYNAMICBASE','/NXCOMPAT','/guard:cf')
+            'ws2_32.lib','iphlpapi.lib','advapi32.lib','ole32.lib','/EXPORT:DllGetClassObject','/EXPORT:DllCanUnloadNow','/DYNAMICBASE','/NXCOMPAT','/guard:cf')
     }
     if ($Target -in @('Driver','All')) {
         $wdk = Join-Path $Packages "Microsoft.Windows.WDK.x64.$version\c"
