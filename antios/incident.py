@@ -22,6 +22,20 @@ def _name(value: str) -> str:
     return ntpath.basename(value or "").lower()
 
 
+def _classification_for_score(score: int, *, confirmed: bool = False) -> str:
+    if confirmed:
+        return "confirmed-threat"
+    if score >= 90:
+        return "critical-behavior"
+    if score >= 75:
+        return "high"
+    if score >= 60:
+        return "elevated"
+    if score >= 40:
+        return "observe"
+    return "low"
+
+
 @dataclass(frozen=True)
 class IncidentNode:
     id: str
@@ -277,16 +291,85 @@ class IncidentGraph:
             ))
             self._edge(incident, child_id, signal_id, "raised-signal", now)
             incident.score = max(incident.score, min(95, max(0, score)))
-            if incident.score >= 90:
-                incident.classification = "critical-behavior"
-            elif incident.score >= 75:
-                incident.classification = "high"
-            elif incident.score >= 60:
-                incident.classification = "elevated"
+            incident.classification = _classification_for_score(
+                incident.score, confirmed=incident.confirmed_threat
+            )
 
         self.recent_processes.append((now, event))
         self._queue_update(incident, "process-correlation")
         return [self.snapshot(incident.id)]
+
+    def observe_behavior_findings(self, findings: Iterable[dict], *, at: float = 0.0) -> list[dict]:
+        now = self._now(at)
+        self._expire(now)
+        updates: list[dict] = []
+        for finding in [item for item in findings if isinstance(item, dict)][:16]:
+            score = finding.get("score", 0)
+            score = int(score) if isinstance(score, int) else 0
+            if score < 60:
+                continue
+            rule = str(finding.get("rule") or "behavior")
+            subject = str(finding.get("subject") or "")
+            normalized = _path(subject) if subject and subject != "filesystem" else ""
+            incident = self.incidents.get(self.path_index.get(normalized, "")) if normalized else None
+
+            process = next((
+                event for seen_at, event in reversed(self.recent_processes)
+                if now - seen_at <= self.ttl and normalized and
+                _path(event.path) == normalized
+            ), None)
+            if incident is None and process is not None and process.pid in self.pid_index:
+                incident = self.incidents.get(self.pid_index[process.pid])
+            if incident is None:
+                incident = self._new(now)
+
+            anchor_id = None
+            if process is not None:
+                anchor_id = f"process:{process.pid}"
+                self._node(incident, IncidentNode(
+                    anchor_id, "process", process.path or process.image, now,
+                    {"pid": process.pid, "ppid": process.ppid,
+                     "image": process.image, "path": process.path},
+                ))
+                self.pid_index[process.pid] = incident.id
+                if normalized:
+                    self.path_index[normalized] = incident.id
+
+            signal_id = f"behavior:{incident.id}:{rule}:{int(now * 1000)}"
+            self._node(incident, IncidentNode(
+                signal_id, "behavior", rule, now,
+                {"rule": rule, "score": score,
+                 "severity": finding.get("severity"),
+                 "summary": finding.get("summary"),
+                 "subject": subject},
+            ))
+            if anchor_id:
+                self._edge(incident, anchor_id, signal_id, "raised-signal", now)
+
+            if rule in {"mass-file-changes", "interpreter-with-mass-file-changes"}:
+                recent = [
+                    (changed_at, path) for changed_at, path in self.recent_files
+                    if now - changed_at <= 10.0
+                ][-32:]
+                for changed_at, changed_path in recent:
+                    file_id = f"file:{changed_path}"
+                    self._node(incident, IncidentNode(
+                        file_id, "file", changed_path, changed_at,
+                        {"path": changed_path, "changed_at": changed_at},
+                    ))
+                    self.path_index[changed_path] = incident.id
+                    self._edge(
+                        incident, anchor_id or signal_id, file_id,
+                        "correlated-write", now
+                    )
+
+            incident.score = max(incident.score, min(95, max(0, score)))
+            incident.classification = _classification_for_score(
+                incident.score, confirmed=incident.confirmed_threat
+            )
+            self._queue_update(incident, "behavior-correlation")
+            updates.append(self.snapshot(incident.id))
+        return updates
 
     def observe_risk(self, context: dict, *, at: float = 0.0) -> list[dict]:
         now = self._now(at)
@@ -330,8 +413,10 @@ class IncidentGraph:
         ))
         self._edge(incident, file_id, verdict_id, "evaluated-as", now)
         incident.score = max(incident.score, min(100, max(0, score)))
-        incident.classification = str(context.get("classification") or incident.classification)
         incident.confirmed_threat = incident.confirmed_threat or confirmed
+        incident.classification = _classification_for_score(
+            incident.score, confirmed=incident.confirmed_threat
+        )
         incident.automatic_enforcement_eligible = (
             incident.automatic_enforcement_eligible or
             context.get("automatic_enforcement_eligible") is True
