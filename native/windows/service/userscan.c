@@ -12,7 +12,7 @@
 #include "../inc/avlib.h"
 #include "../engine/engine.h"
 
-#define WORKERS 4
+#define WORKERS AO_BROKER_WORKERS
 struct broker;
 struct worker {
     struct broker *broker;
