@@ -169,6 +169,11 @@ The full latest graph is bounded and available in Guard status/journal. The
 Antivirus page shows a compact incident summary below Behavior and RiskContext.
 `protection-status` exposes the same capability as `incident_graph`.
 
+The **Incidents** button in the Resident Guard card opens the structured
+[Incident Viewer](INCIDENT_VIEWER.md). It reads deduplicated `incident-update`
+snapshots from the same bounded SQLite journal, displays recent incidents in a
+list and renders the selected graph as a causal tree with per-node evidence.
+
 ## Relationship to enforcement
 
 Incident Graph never:
