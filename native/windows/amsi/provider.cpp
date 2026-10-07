@@ -77,7 +77,7 @@ public:
         ULONG returned = 0;
         unsigned char *buffer = nullptr;
         wchar_t service_name[81];
-        struct ao_outcome outcome = {AO_UNKNOWN, 0, "", "not scanned"};
+        struct ao_outcome outcome = {AO_UNKNOWN, 0, 0, "", "not scanned"};
 
         if (!stream || !result) return E_INVALIDARG;
         *result = AMSI_RESULT_NOT_DETECTED;
