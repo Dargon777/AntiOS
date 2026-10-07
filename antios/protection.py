@@ -292,6 +292,8 @@ def render_protection_status(status: dict) -> str:
     coexistence = status.get("coexistence", {})
     native_health = status.get("native_coexistence", {})
     telemetry = native_health.get("telemetry", {})
+    risk = status.get("risk", {}) if isinstance(status.get("risk"), dict) else {}
+    last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
     return "\n".join([
         "AntiOS protection status",
         f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
