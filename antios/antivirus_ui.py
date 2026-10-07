@@ -880,6 +880,17 @@ class AntivirusPanel:
             if behavior_state in {"normal", "attention", "alert"}
             else "behavior_unavailable"
         )
+        risk = value.get("risk") if isinstance(value.get("risk"), dict) else {}
+        last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
+        risk_class = str(last_risk.get("classification") or "unavailable")
+        risk_label = self.t(
+            "risk_" + risk_class
+            if risk_class in {
+                "low", "observe", "elevated", "high",
+                "critical-behavior", "confirmed-threat"
+            }
+            else "risk_unavailable"
+        )
         self.guard_status.configure(
             text=self.t(
                 "guard_status",
@@ -890,6 +901,10 @@ class AntivirusPanel:
                 state=behavior_label,
                 score=behavior.get("highest_score", 0),
                 count=behavior.get("recent_findings", 0),
+            ) + "\n" + self.t(
+                "risk_status",
+                state=risk_label,
+                score=last_risk.get("score", 0),
             )
         )
 
