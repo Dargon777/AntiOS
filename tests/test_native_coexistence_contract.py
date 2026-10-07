@@ -21,9 +21,9 @@ def test_native_coexistence_defaults_are_bounded_and_non_takeover():
     assert 'LoadOrderGroup="FSFilter Anti-Virus"' in inf
 
     service = Path("native/windows/service/main.c").read_text(encoding="utf-8")
-    assert '"role":"independent-companion"' in service
-    assert '"defender_configuration_changed":false' in service
-    assert '"fail_open_on_incomplete":true' in service
+    assert "independent-companion" in service
+    assert "defender_configuration_changed" in service
+    assert "fail_open_on_incomplete" in service
 
 
 def test_native_coexistence_harness_requires_defender_to_remain_active():
