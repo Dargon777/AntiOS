@@ -181,6 +181,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             remember_folder=bool(cleanup.get("remember_folder", True)),
             last_path=str(cleanup.get("last_path", "")),
         ),
+        protection=ProtectionConfig(
+            resident_enabled=bool(protection.get("resident_enabled", True)),
+        ),
+        updates=UpdateConfig(
+            auto_update=bool(updates.get("auto_update", True)),
+        ),
     )
 
 
