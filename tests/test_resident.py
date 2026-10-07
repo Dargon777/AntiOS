@@ -43,6 +43,9 @@ def test_configure_resident_guard_uses_persistent_task(monkeypatch, tmp_path):
     assert "-Apply" in args
     assert "-EngineServiceName" in args
     assert "clamd" in args
+    assert "-RootsJson" in args
+    payload = args[args.index("-RootsJson") + 1]
+    assert str(root) in payload
 
 
 def test_ensure_resident_guard_repairs_stopped_state(monkeypatch):
