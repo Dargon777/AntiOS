@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 
 from .clamav import ClamAVScanner
+from .coexistence import collect_coexistence_status
 from .guard_state import read_guard_state
 from .windows_antivirus import coexistence_profile, defender_status
 from .windows_process import hidden_process_kwargs, system_executable
@@ -205,6 +206,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     native = _native_status()
     defender = defender_status()
     coexistence = coexistence_profile(defender)
+    amsi_probe = collect_coexistence_status()
+    amsi = amsi_probe.get("antios_amsi", {}) if isinstance(amsi_probe, dict) else {}
     peer_ok = (not engine.get("peer_verification_required") or
                engine.get("peer_verified") is True)
     engine_ready = bool(
@@ -236,6 +239,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     antios_resident = bool(engine_ready and (guard_running or pre_execution))
     defender_realtime = defender.get("realtime_active") is True
     layered_active = bool(defender_realtime and antios_resident)
+    amsi_registered = bool(amsi.get("registered") and amsi.get("module_exists"))
     coexistence = dict(coexistence)
     coexistence["layered_with_defender"] = layered_active
     if layered_active:
@@ -263,6 +267,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "native_coexistence": native_health,
         "defender": defender,
         "coexistence": coexistence,
+        "amsi": amsi,
         "risk": risk,
         "incidents": incidents,
         "capabilities": {
@@ -280,6 +285,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
             "defender_dependency": False,
             "defender_realtime_active": defender_realtime,
             "layered_with_defender": layered_active,
+            "amsi_provider_registered": amsi_registered,
+            "amsi_provider_engine_ready": amsi_registered and engine_ready,
         },
         "production_primary_antivirus": False,
         "remaining_gates": blockers,
@@ -295,6 +302,7 @@ def render_protection_status(status: dict) -> str:
     defender = status.get("defender", {})
     coexistence = status.get("coexistence", {})
     native_health = status.get("native_coexistence", {})
+    amsi = status.get("amsi", {}) if isinstance(status.get("amsi"), dict) else {}
     telemetry = native_health.get("telemetry", {})
     risk = status.get("risk", {}) if isinstance(status.get("risk"), dict) else {}
     last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
@@ -345,6 +353,7 @@ def render_protection_status(status: dict) -> str:
         f"Pre-execution enforcement: {'active' if caps['pre_execution_blocking'] else 'inactive'}",
         f"Microsoft Defender: {'real-time active' if defender.get('realtime_active') else defender.get('running_mode', 'unavailable')}",
         f"Coexistence mode: {coexistence.get('mode', 'unknown')}",
+        f"AntiOS AMSI provider: {'registered' if amsi.get('registered') and amsi.get('module_exists') else 'not registered'}",
         "AntiOS role: independent companion; Defender settings unchanged",
         "Primary Windows antivirus registration: not claimed",
         "Remaining gates: " + ", ".join(status["remaining_gates"]),
