@@ -32,6 +32,23 @@ jobs:
               exit 1
             }
           }
+      - name: Validate AntiVirus altitude generator boundary
+        shell: pwsh
+        run: |
+          $valid = Join-Path $env:RUNNER_TEMP 'antios-altitude-valid'
+          .\native\windows\New-DriverInf.ps1 -AssignedAltitude 329998 -OutputDirectory $valid
+          if (-not (Test-Path (Join-Path $valid 'AntiOS-Filter.inf'))) {
+            throw 'Valid AntiVirus altitude did not generate an INF.'
+          }
+          $rejected = $false
+          try {
+            .\native\windows\New-DriverInf.ps1 -AssignedAltitude 329999 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'antios-altitude-invalid')
+          } catch {
+            $rejected = $true
+          }
+          if (-not $rejected) {
+            throw 'Out-of-range AntiVirus altitude 329999 was accepted.'
+          }
       - name: Compile unsigned x64 service and filter with pinned WDK
         shell: pwsh
         run: ./native/windows/build.ps1 -Restore
