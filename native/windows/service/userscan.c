@@ -16,10 +16,13 @@
 
 #define WORKERS AO_BROKER_WORKERS
 #define CLEAN_CACHE_ENTRIES 128u
+#define GENERATION_POLL_MS 2000u
+#define GENERATION_PROBE_TIMEOUT_MS 1000u
 
 struct clean_cache_entry {
     unsigned char digest[32];
     ULONGLONG expires_ms;
+    ULONGLONG database_generation;
     SIZE_T size;
 };
 
@@ -33,7 +36,7 @@ struct worker {
     volatile LONG aborted;
 };
 struct broker {
-    HANDLE stop, scan_port, abort_port, abort_thread;
+    HANDLE stop, scan_port, abort_port, abort_thread, generation_thread;
     struct worker workers[WORKERS];
     volatile LONG failure;
     volatile LONG gap_logged;
@@ -44,6 +47,7 @@ struct broker {
     struct clean_cache_entry clean_cache[CLEAN_CACHE_ENTRIES];
     ULONG cache_cursor;
     ULONG clean_cache_ttl_ms;
+    volatile LONGLONG database_generation;
     BCRYPT_ALG_HANDLE sha256;
     DWORD sha256_object_bytes;
 };
@@ -83,11 +87,12 @@ static int hash_snapshot(struct broker *broker, const unsigned char *data, SIZE_
     return status == 0;
 }
 
-static int clean_cache_lookup(struct broker *broker, const unsigned char digest[32], SIZE_T size) {
+static int clean_cache_lookup(struct broker *broker, const unsigned char digest[32], SIZE_T size,
+                              ULONGLONG database_generation) {
     ULONGLONG now;
     unsigned i;
     int found = 0;
-    if (!broker->clean_cache_ttl_ms) return 0;
+    if (!broker->clean_cache_ttl_ms || !database_generation) return 0;
     now = GetTickCount64();
     AcquireSRWLockExclusive(&broker->cache_lock);
     for (i = 0; i < CLEAN_CACHE_ENTRIES; ++i) {
@@ -96,8 +101,8 @@ static int clean_cache_lookup(struct broker *broker, const unsigned char digest[
             SecureZeroMemory(entry, sizeof(*entry));
             continue;
         }
-        if (entry->expires_ms && entry->size == size &&
-            memcmp(entry->digest, digest, sizeof(entry->digest)) == 0) {
+        if (entry->expires_ms && entry->database_generation == database_generation &&
+            entry->size == size && memcmp(entry->digest, digest, sizeof(entry->digest)) == 0) {
             found = 1;
             break;
         }
@@ -106,17 +111,76 @@ static int clean_cache_lookup(struct broker *broker, const unsigned char digest[
     return found;
 }
 
-static void clean_cache_store(struct broker *broker, const unsigned char digest[32], SIZE_T size) {
+static void clean_cache_store(struct broker *broker, const unsigned char digest[32], SIZE_T size,
+                              ULONGLONG database_generation) {
     struct clean_cache_entry *entry;
     ULONG slot;
-    if (!broker->clean_cache_ttl_ms) return;
+    if (!broker->clean_cache_ttl_ms || !database_generation) return;
     AcquireSRWLockExclusive(&broker->cache_lock);
     slot = broker->cache_cursor++ % CLEAN_CACHE_ENTRIES;
     entry = &broker->clean_cache[slot];
     CopyMemory(entry->digest, digest, sizeof(entry->digest));
     entry->size = size;
+    entry->database_generation = database_generation;
     entry->expires_ms = GetTickCount64() + broker->clean_cache_ttl_ms;
     ReleaseSRWLockExclusive(&broker->cache_lock);
+}
+
+static int broker_cancelled(void *context) {
+    struct broker *broker = context;
+    return WaitForSingleObject(broker->stop, 0) == WAIT_OBJECT_0;
+}
+
+static HRESULT send_database_generation(struct broker *broker, ULONGLONG generation) {
+    COMMAND_MESSAGE command = {0};
+    DWORD returned = 0;
+    command.Command = AvCmdSetDatabaseGeneration;
+    command.DatabaseGeneration = generation;
+    return FilterSendMessage(
+        broker->scan_port, &command, sizeof(command), NULL, 0, &returned);
+}
+
+static void clear_clean_cache(struct broker *broker) {
+    AcquireSRWLockExclusive(&broker->cache_lock);
+    SecureZeroMemory(broker->clean_cache, sizeof(broker->clean_cache));
+    broker->cache_cursor = 0;
+    ReleaseSRWLockExclusive(&broker->cache_lock);
+}
+
+static HRESULT watcher_publish_generation(struct broker *broker, ULONGLONG generation) {
+    LONGLONG old = InterlockedExchange64(
+        &broker->database_generation, (LONGLONG)generation);
+    if ((ULONGLONG)old == generation) return S_OK;
+    clear_clean_cache(broker);
+    return send_database_generation(broker, generation);
+}
+
+static HRESULT scan_initialize_generation(struct broker *broker, ULONGLONG generation) {
+    LONGLONG old;
+    if (!generation) return S_OK;
+    old = InterlockedCompareExchange64(
+        &broker->database_generation, (LONGLONG)generation, 0);
+    if (old != 0) return S_OK;
+    clear_clean_cache(broker);
+    return send_database_generation(broker, generation);
+}
+
+static DWORD WINAPI generation_worker(void *context) {
+    struct broker *broker = context;
+    while (WaitForSingleObject(broker->stop, 0) != WAIT_OBJECT_0) {
+        int database_current = 0;
+        uint64_t generation = ao_engine_generation(
+            broker->engine_service, GENERATION_PROBE_TIMEOUT_MS,
+            broker_cancelled, broker, &database_current);
+        HRESULT result = watcher_publish_generation(
+            broker, database_current ? generation : 0);
+        if (FAILED(result)) {
+            fail(broker, result);
+            break;
+        }
+        if (WaitForSingleObject(broker->stop, GENERATION_POLL_MS) == WAIT_OBJECT_0) break;
+    }
+    return 0;
 }
 
 static void fail(struct broker *broker, HRESULT result) {
@@ -207,15 +271,20 @@ static void scan_section(struct worker *worker) {
     }
     if (!cancelled(worker) && GetTickCount64() < deadline) {
         digest_valid = hash_snapshot(broker, snapshot, size, digest);
-        if (digest_valid && clean_cache_lookup(broker, digest, size)) {
+        {
+            ULONGLONG generation = (ULONGLONG)InterlockedCompareExchange64(
+                &broker->database_generation, 0, 0);
+            if (digest_valid && clean_cache_lookup(broker, digest, size, generation)) {
             outcome.result = AO_CLEAR;
             outcome.database_current = 1;
             strcpy_s(outcome.detail, sizeof(outcome.detail), "bounded SHA-256 clean cache");
-            cache_hit = 1;
-        } else {
-            unsigned remaining = (unsigned)(deadline - GetTickCount64());
-            if (remaining && remaining <= AO_SCAN_TIMEOUT_MS)
-                outcome = ao_engine_scan(broker->engine_service, snapshot, size, remaining, cancelled, worker);
+                cache_hit = 1;
+                outcome.database_generation = generation;
+            } else {
+                unsigned remaining = (unsigned)(deadline - GetTickCount64());
+                if (remaining && remaining <= AO_SCAN_TIMEOUT_MS)
+                    outcome = ao_engine_scan(broker->engine_service, snapshot, size, remaining, cancelled, worker);
+            }
         }
     }
 cleanup:
@@ -227,13 +296,25 @@ finish:
         outcome.result = AO_UNKNOWN;
         cache_hit = 0;
     }
-    if (outcome.result == AO_CLEAR && outcome.database_current && digest_valid && !cache_hit) {
-        clean_cache_store(broker, digest, size);
+    if (outcome.database_current && outcome.database_generation) {
+        HRESULT generation_result = scan_initialize_generation(
+            broker, outcome.database_generation);
+        if (FAILED(generation_result)) {
+            fail(broker, generation_result);
+            outcome.result = AO_UNKNOWN;
+            cache_hit = 0;
+        }
+    }
+    if (outcome.result == AO_CLEAR && outcome.database_current && digest_valid && !cache_hit &&
+        outcome.database_generation == (ULONGLONG)InterlockedCompareExchange64(
+            &broker->database_generation, 0, 0)) {
+        clean_cache_store(broker, digest, size, outcome.database_generation);
     }
     command.Command = AvCmdCloseSectionForDataScan;
     command.ResultFlags = cache_hit ? AO_SCAN_FLAG_CLEAN_CACHE_HIT : 0;
     command.ScanResult = outcome.result == AO_THREAT ? AvScanResultInfected :
                         outcome.result == AO_CLEAR ? AvScanResultClean : AvScanResultUndetermined;
+    command.DatabaseGeneration = outcome.result == AO_CLEAR ? outcome.database_generation : 0;
     /* Also complete failed section requests; kernel may already have cancelled them. */
     FilterSendMessage(broker->scan_port, &command, sizeof(command), NULL, 0, &returned);
     if (outcome.result == AO_THREAT) {
@@ -339,6 +420,18 @@ DWORD ao_broker_run(HANDLE stop, HANDLE ready, ao_log_fn log) {
     connection.Type = AvConnectForAbort;
     result = FilterConnectCommunicationPort(AV_ABORT_PORT_NAME, 0, &connection, sizeof(connection), NULL, &broker.abort_port);
     if (FAILED(result)) { fail(&broker, result); goto done; }
+
+    {
+        int current = 0;
+        uint64_t generation = ao_engine_generation(
+            broker.engine_service, GENERATION_PROBE_TIMEOUT_MS,
+            broker_cancelled, &broker, &current);
+        result = watcher_publish_generation(&broker, current ? generation : 0);
+        if (FAILED(result)) { fail(&broker, result); goto done; }
+    }
+    broker.generation_thread = CreateThread(NULL, 0, generation_worker, &broker, 0, NULL);
+    if (!broker.generation_thread) { fail(&broker, HRESULT_FROM_WIN32(GetLastError())); goto done; }
+
     broker.abort_thread = CreateThread(NULL, 0, abort_worker, &broker, 0, NULL);
     if (!broker.abort_thread) { fail(&broker, HRESULT_FROM_WIN32(GetLastError())); goto done; }
     for (i = 0; i < WORKERS; ++i) {
@@ -357,6 +450,7 @@ done:
         }
     }
     if (broker.abort_thread) { WaitForSingleObject(broker.abort_thread, INFINITE); CloseHandle(broker.abort_thread); }
+    if (broker.generation_thread) { WaitForSingleObject(broker.generation_thread, INFINITE); CloseHandle(broker.generation_thread); }
     if (broker.scan_port && broker.scan_port != INVALID_HANDLE_VALUE) CloseHandle(broker.scan_port);
     if (broker.abort_port && broker.abort_port != INVALID_HANDLE_VALUE) CloseHandle(broker.abort_port);
     if (broker.sha256) BCryptCloseAlgorithmProvider(broker.sha256, 0);
