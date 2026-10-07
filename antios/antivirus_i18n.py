@@ -548,3 +548,25 @@ for _locale, _texts in {
         "behavior_alert": _texts[3],
         "behavior_unavailable": _texts[4],
     })
+
+
+# Explainable fused risk summary shown below Resident Guard.
+for _locale, _texts in {
+    "en": ("Risk context: {state} · score {score}", "low", "observe", "elevated", "high", "critical behavior", "confirmed threat", "unavailable"),
+    "ru": ("Контекст риска: {state} · оценка {score}", "низкий", "наблюдение", "повышенный", "высокий", "критичное поведение", "подтверждённая угроза", "недоступно"),
+    "es": ("Contexto de riesgo: {state} · puntuación {score}", "bajo", "observar", "elevado", "alto", "comportamiento crítico", "amenaza confirmada", "no disponible"),
+    "zh-CN": ("风险上下文：{state} · 评分 {score}", "低", "观察", "升高", "高", "严重行为", "已确认威胁", "不可用"),
+    "fi": ("Riskikonteksti: {state} · pisteet {score}", "matala", "seuranta", "kohonnut", "korkea", "kriittinen käyttäytyminen", "vahvistettu uhka", "ei käytettävissä"),
+    "pl": ("Kontekst ryzyka: {state} · wynik {score}", "niski", "obserwacja", "podwyższony", "wysoki", "krytyczne zachowanie", "potwierdzone zagrożenie", "niedostępne"),
+    "mn": ("Эрсдэлийн контекст: {state} · оноо {score}", "бага", "ажиглах", "нэмэгдсэн", "өндөр", "ноцтой үйлдэл", "батлагдсан аюул", "боломжгүй"),
+}.items():
+    MESSAGES[_locale].update({
+        "risk_status": _texts[0],
+        "risk_low": _texts[1],
+        "risk_observe": _texts[2],
+        "risk_elevated": _texts[3],
+        "risk_high": _texts[4],
+        "risk_critical-behavior": _texts[5],
+        "risk_confirmed-threat": _texts[6],
+        "risk_unavailable": _texts[7],
+    })
