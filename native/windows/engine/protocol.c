@@ -43,3 +43,22 @@ int ao_database_current(const char *version, time_t now) {
     age = difftime(now, published);
     return age >= -86400 && age <= 7 * 86400;
 }
+
+
+uint64_t ao_database_generation(const char *version) {
+    const char *first, *last, *cursor;
+    uint64_t value = 0;
+    if (!version || strncmp(version, "ClamAV ", 7)) return 0;
+    first = strchr(version + 7, '/');
+    if (!first) return 0;
+    last = strchr(first + 1, '/');
+    if (!last || last == first + 1 || (size_t)(last - first - 1) > 15) return 0;
+    for (cursor = first + 1; cursor < last; ++cursor) {
+        unsigned digit;
+        if (*cursor < '0' || *cursor > '9') return 0;
+        digit = (unsigned)(*cursor - '0');
+        if (value > (UINT64_MAX - digit) / 10) return 0;
+        value = value * 10 + digit;
+    }
+    return value;
+}
