@@ -13,6 +13,7 @@ themselves supply prevention, tamper protection or Windows antivirus registratio
 | Pre-execution prevention | Experimental execute-open minifilter + native ClamD broker; VM acceptance now requires FILE_EXECUTE, CreateProcess and SEC_IMAGE mapping coverage | Signed deployment, concurrency/Driver Verifier/HVCI acceptance and Microsoft-assigned altitude |
 | Windows service | Native SCM service diagnostics plus Python/Guard binding to a verified own-process LocalSystem ClamD peer | Signed Windows installation, stop/recovery, native service PPL path and full upgrade lifecycle |
 | Boot protection / protected service | ELAM/PPL not implemented; SCM service is not protected | ELAM eligibility, page-hash signing, protected dependencies/engine and Windows integration |
+| Defender coexistence | Read-only Defender status detection, explicit independent-companion role, no Defender setting changes, bounded Guard retries, native protocol-v2 queue/timeout/latency telemetry, and a WdFilter+AntiOS concurrent execute-open stress harness | Signed Windows VM runs with Defender active, large downloads, concurrent scans, remediation races, HVCI/Driver Verifier and published performance measurements |
 | Primary antivirus registration | Not implemented | Applicable Microsoft partner onboarding and documented integration |
 | Publisher/driver identity | Unresolved | Required account verification, trusted signing and driver signing approvals |
 | Independent effectiveness certification | Not performed | External laboratory certification and ongoing maintenance |

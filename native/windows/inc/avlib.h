@@ -52,7 +52,8 @@ typedef enum _AVSCAN_COMMAND {
     AvIsFileModified,
     AvCmdCreateSectionForDataScan,
     AvCmdCloseSectionForDataScan,
-    AvCmdGetStatus
+    AvCmdGetStatus,
+    AvCmdSetDatabaseGeneration
 
 } AVSCAN_COMMAND;
 
@@ -109,6 +110,9 @@ typedef struct _COMMAND_MESSAGE {
 
     ULONG  ScanThreadId;
 
+    // Result metadata from the trusted broker. Must be zero for non-close commands.
+    ULONG  ResultFlags;
+
     union {
 
         //
@@ -125,6 +129,10 @@ typedef struct _COMMAND_MESSAGE {
         //
         AVSCAN_RESULT ScanResult;
     };
+
+    // Signature database generation used for this verdict, or the new global
+    // generation for AvCmdSetDatabaseGeneration. Zero means unknown.
+    ULONGLONG DatabaseGeneration;
 
 } COMMAND_MESSAGE, *PCOMMAND_MESSAGE;
 
@@ -189,15 +197,33 @@ typedef struct _AV_CONNECTION_CONTEXT {
 typedef struct _AO_DRIVER_STATUS {
     ULONG ProtocolVersion;
     ULONG Enforcement;
+    ULONG CoexistenceMode;
+    ULONG LocalScanTimeoutMs;
+    ULONG CleanCacheTtlMs;
+    ULONG MaxPendingScans;
     LONG PendingScans;
-    ULONG Reserved;
+    LONG PeakPendingScans;
+    ULONG SectionConflicts;
     LONGLONG Attempts;
     LONGLONG Incomplete;
     LONGLONG Detections;
     LONGLONG Blocked;
+    LONGLONG BusyBypass;
+    LONGLONG DeliveryTimeouts;
+    LONGLONG CompletionTimeouts;
+    LONGLONG CancelledOpens;
+    LONGLONG CleanCacheHits;
+    LONGLONG CleanCacheExpired;
+    LONGLONG CleanCacheInvalidations;
+    LONGLONG DatabaseGeneration;
+    LONGLONG DatabaseGenerationChanges;
+    LONGLONG TotalWait100ns;
+    LONGLONG MaxWait100ns;
 } AO_DRIVER_STATUS;
 
-#define AO_PROTOCOL_VERSION 1u
+#define AO_PROTOCOL_VERSION 4u
+#define AO_BROKER_WORKERS 4u
+#define AO_SCAN_FLAG_CLEAN_CACHE_HIT 0x00000001u
 #define AO_MAX_SECTION_BYTES (32u * 1024u * 1024u)
 typedef struct _AO_SECTION_REPLY {
     HANDLE SectionHandle;
@@ -207,10 +233,10 @@ typedef struct _AO_SECTION_REPLY {
 /* Wire format is deliberately x64-only; mismatched packing must fail the build. */
 C_ASSERT(sizeof(void *) == 8);
 C_ASSERT(sizeof(AV_CONNECTION_CONTEXT) == 8);
-C_ASSERT(sizeof(COMMAND_MESSAGE) == 32);
+C_ASSERT(sizeof(COMMAND_MESSAGE) == 40);
 C_ASSERT(sizeof(AV_SCANNER_NOTIFICATION) == 24);
 C_ASSERT(sizeof(AO_SECTION_REPLY) == 16);
-C_ASSERT(sizeof(AO_DRIVER_STATUS) == 48);
+C_ASSERT(sizeof(AO_DRIVER_STATUS) == 160);
 
 #if defined(_MSC_VER)
 #if (_MSC_VER >= 1200)

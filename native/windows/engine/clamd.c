@@ -120,7 +120,7 @@ static int receive_reply(ao_socket s, char reply[AO_REPLY_LIMIT], size_t *size, 
 
 static struct ao_outcome scan_impl(const unsigned char *data, size_t size, unsigned short port,
                               unsigned timeout_ms, ao_cancel_fn cancelled, void *context, ao_peer_fn verifier, void *peer_context) {
-    struct ao_outcome outcome = {AO_UNKNOWN, 0, "", "engine unavailable, cancelled or timed out"};
+    struct ao_outcome outcome = {AO_UNKNOWN, 0, 0, "", "engine unavailable, cancelled or timed out"};
     struct request request = {0};
     ao_socket s = AO_BAD_SOCKET;
     char reply[AO_REPLY_LIMIT];
@@ -139,6 +139,8 @@ static struct ao_outcome scan_impl(const unsigned char *data, size_t size, unsig
         !receive_reply(s, reply, &reply_size, &request)) goto done;
     if (reply_size < 8 || reply_size > 507 || memcmp(reply, "ClamAV ", 7)) goto done;
     outcome.database_current = ao_database_current(reply, time(NULL));
+    outcome.database_generation = outcome.database_current ? ao_database_generation(reply) : 0;
+    if (outcome.database_current && !outcome.database_generation) outcome.database_current = 0;
     ao_close(s); s = connect_local(port, &request);
     if (s == AO_BAD_SOCKET || !send_all(s, "zINSTREAM", 10, &request)) goto done;
     for (offset = 0; offset < size;) {
@@ -172,6 +174,44 @@ done:
     return outcome;
 }
 
+uint64_t ao_clam_generation_verified(unsigned short port, unsigned timeout_ms,
+    ao_cancel_fn cancelled, void *context, ao_peer_fn verifier, void *peer_context, int *database_current) {
+    struct request request = {0};
+    ao_socket s = AO_BAD_SOCKET;
+    char reply[AO_REPLY_LIMIT];
+    size_t reply_size = 0;
+    uint64_t generation = 0;
+#ifdef _WIN32
+    WSADATA startup;
+    if (WSAStartup(MAKEWORD(2, 2), &startup)) return 0;
+#endif
+    if (database_current) *database_current = 0;
+    if (!verifier || !port || !timeout_ms || timeout_ms > 30000) goto done;
+    request.verifier = verifier;
+    request.peer_context = peer_context;
+    request.deadline = ao_clock() + timeout_ms;
+    request.cancelled = cancelled;
+    request.context = context;
+    s = connect_local(port, &request);
+    if (s == AO_BAD_SOCKET || !send_all(s, "zVERSION", 9, &request) ||
+        !receive_reply(s, reply, &reply_size, &request)) goto done;
+    if (reply_size < 8 || reply_size > 507 || memcmp(reply, "ClamAV ", 7)) goto done;
+    if (ao_database_current(reply, time(NULL))) {
+        generation = ao_database_generation(reply);
+        if (generation && database_current) *database_current = 1;
+    }
+done:
+    if (request.peer_rejected || !active(&request)) {
+        generation = 0;
+        if (database_current) *database_current = 0;
+    }
+    if (s != AO_BAD_SOCKET) ao_close(s);
+#ifdef _WIN32
+    WSACleanup();
+#endif
+    return generation;
+}
+
 /* Deliberately unauthenticated diagnostic/test entry point; the broker never uses it. */
 struct ao_outcome ao_clam_scan(const unsigned char *data, size_t size, unsigned short port,
                               unsigned timeout_ms, ao_cancel_fn cancelled, void *context) {
@@ -179,7 +219,7 @@ struct ao_outcome ao_clam_scan(const unsigned char *data, size_t size, unsigned 
 }
 struct ao_outcome ao_clam_scan_verified(const unsigned char *data, size_t size, unsigned short port,
     unsigned timeout_ms, ao_cancel_fn cancelled, void *context, ao_peer_fn verifier, void *peer_context) {
-    struct ao_outcome rejected = {AO_UNKNOWN, 0, "", "engine peer verifier required"};
+    struct ao_outcome rejected = {AO_UNKNOWN, 0, 0, "", "engine peer verifier required"};
     if (!verifier) return rejected;
     return scan_impl(data, size, port, timeout_ms, cancelled, context, verifier, peer_context);
 }

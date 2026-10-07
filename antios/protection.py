@@ -7,7 +7,9 @@ from pathlib import Path
 import subprocess
 
 from .clamav import ClamAVScanner
+from .coexistence import amsi_provider_status
 from .guard_state import read_guard_state
+from .windows_antivirus import coexistence_profile, defender_status
 from .windows_process import hidden_process_kwargs, system_executable
 
 
@@ -96,6 +98,94 @@ def _native_status() -> dict:
     return result
 
 
+def native_pre_execution_active(native: dict | None = None) -> bool | None:
+    """Return truthful native pre-exec state, or None when it cannot be determined."""
+    state = _native_status() if native is None else native
+    if not isinstance(state, dict) or state.get("available") is False:
+        return None
+    service = state.get("service") if isinstance(state.get("service"), dict) else {}
+    driver = state.get("driver") if isinstance(state.get("driver"), dict) else {}
+    if "error" in service or "error" in driver:
+        return None
+    return bool(
+        service.get("service_state") == 4 and
+        service.get("exit_code") == 0 and
+        driver.get("driver_available") is True and
+        driver.get("exit_code") == 0 and
+        driver.get("enforcement") == 1
+    )
+
+
+def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
+    configured = bool(
+        native_running and
+        driver.get("driver_available") is True and
+        driver.get("exit_code") == 0 and
+        isinstance(driver.get("protocol"), int) and
+        driver.get("protocol") >= 4 and
+        driver.get("coexistence_mode") == 1 and
+        driver.get("fail_open_on_incomplete") is True and
+        isinstance(driver.get("max_pending"), int) and
+        1 <= driver.get("max_pending") <= 4 and
+        isinstance(driver.get("pending"), int) and
+        0 <= driver.get("pending") <= driver.get("max_pending") and
+        isinstance(driver.get("clean_cache_ttl_ms"), int) and
+        0 <= driver.get("clean_cache_ttl_ms") <= 300000 and
+        isinstance(driver.get("database_generation"), int) and
+        driver.get("database_generation") > 0
+    )
+    if not configured:
+        return {
+            "configured": False,
+            "observed": False,
+            "state": "inactive/not-validated",
+            "attention_reasons": [],
+        }
+
+    counters = {}
+    for key in (
+        "attempts", "incomplete", "busy_bypass", "section_conflicts",
+        "delivery_timeouts", "completion_timeouts", "cancelled_opens", "max_wait_ms",
+        "cache_hits", "cache_expired", "cache_invalidations",
+        "database_generation", "database_generation_changes",
+    ):
+        value = driver.get(key)
+        counters[key] = value if isinstance(value, int) and value >= 0 else None
+
+    attempts = counters["attempts"]
+    reasons = []
+    if counters["delivery_timeouts"]:
+        reasons.append("delivery-timeouts")
+    if counters["completion_timeouts"]:
+        reasons.append("completion-timeouts")
+    if counters["max_wait_ms"] is not None and counters["max_wait_ms"] > 15000:
+        reasons.append("latency-ceiling-exceeded")
+
+    if attempts is None:
+        state = "configured-unmeasured"
+        observed = False
+    elif attempts == 0:
+        state = "configured-unexercised"
+        observed = False
+    elif reasons:
+        state = "attention"
+        observed = True
+    elif any(counters[key] for key in ("incomplete", "busy_bypass", "section_conflicts")):
+        state = "operational-with-gaps"
+        observed = True
+    else:
+        state = "operational"
+        observed = True
+
+    return {
+        "configured": True,
+        "observed": observed,
+        "state": state,
+        "attention_reasons": reasons,
+        "telemetry": counters,
+    }
+
+
 def collect_protection_status(engine_service: str | None = None) -> dict:
     engine: dict
     try:
@@ -114,6 +204,9 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     guard = read_guard_state()
     managed = _managed_runtime_status()
     native = _native_status()
+    defender = defender_status()
+    coexistence = coexistence_profile(defender)
+    amsi = amsi_provider_status()
     peer_ok = (not engine.get("peer_verification_required") or
                engine.get("peer_verified") is True)
     engine_ready = bool(
@@ -125,15 +218,33 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         guard.get("running") and
         guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
     )
+    behavior = guard.get("behavior", {}) if isinstance(guard.get("behavior"), dict) else {}
+    risk = guard.get("risk", {}) if isinstance(guard.get("risk"), dict) else {}
+    last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
+    incidents = guard.get("incidents", {}) if isinstance(guard.get("incidents"), dict) else {}
+    latest_incident = incidents.get("latest") if isinstance(incidents.get("latest"), dict) else {}
+    behavior_monitoring = bool(
+        guard_running and behavior.get("mode") == "detect-only"
+    )
+    behavior_process_visibility = bool(
+        behavior_monitoring and behavior.get("collector") in {"toolhelp-snapshot", "injected"}
+    )
     service = native.get("service", {})
     driver = native.get("driver", {})
     native_running = service.get("service_state") == 4 and service.get("exit_code") == 0
-    pre_execution = bool(
-        native_running and
-        driver.get("driver_available") is True and
-        driver.get("enforcement") == 1 and
-        driver.get("exit_code") == 0
-    )
+    native_health = _native_coexistence_health(native_running, driver)
+    native_coexistence = native_health["configured"]
+    pre_execution = native_pre_execution_active(native) is True
+    antios_resident = bool(engine_ready and (guard_running or pre_execution))
+    defender_realtime = defender.get("realtime_active") is True
+    layered_active = bool(defender_realtime and antios_resident)
+    amsi_registered = bool(amsi.get("registered") and amsi.get("module_exists"))
+    coexistence = dict(coexistence)
+    coexistence["layered_with_defender"] = layered_active
+    if layered_active:
+        coexistence["mode"] = "layered"
+    elif defender_realtime:
+        coexistence["mode"] = "defender-active-antios-incomplete"
 
     blockers = []
     if not engine_ready:
@@ -152,11 +263,29 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "guard": guard,
         "managed_runtime": managed,
         "native": native,
+        "native_coexistence": native_health,
+        "defender": defender,
+        "coexistence": coexistence,
+        "amsi": amsi,
+        "risk": risk,
+        "incidents": incidents,
         "capabilities": {
             "standalone_detection_engine": engine_ready,
             "resident_post_write_detection": guard_running and engine_ready,
+            "behavior_monitoring": behavior_monitoring,
+            "behavior_process_visibility": behavior_process_visibility,
+            "risk_fusion": guard_running and risk.get("mode") == "fusion",
+            "incident_graph": guard_running and incidents.get("mode") == "correlation-graph",
             "pre_execution_blocking": pre_execution and engine_ready,
+            "native_coexistence_ready": native_coexistence,
+            "native_coexistence_observed_operational": (
+                native_health["state"] in {"operational", "operational-with-gaps"}
+            ),
             "defender_dependency": False,
+            "defender_realtime_active": defender_realtime,
+            "layered_with_defender": layered_active,
+            "amsi_provider_registered": amsi_registered,
+            "amsi_provider_engine_ready": amsi_registered and engine_ready,
         },
         "production_primary_antivirus": False,
         "remaining_gates": blockers,
@@ -169,6 +298,15 @@ def render_protection_status(status: dict) -> str:
     guard = status["guard"]
     managed = status.get("managed_runtime", {})
     native = status["native"]
+    defender = status.get("defender", {})
+    coexistence = status.get("coexistence", {})
+    native_health = status.get("native_coexistence", {})
+    amsi = status.get("amsi", {}) if isinstance(status.get("amsi"), dict) else {}
+    telemetry = native_health.get("telemetry", {})
+    risk = status.get("risk", {}) if isinstance(status.get("risk"), dict) else {}
+    last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
+    incidents = status.get("incidents", {}) if isinstance(status.get("incidents"), dict) else {}
+    latest_incident = incidents.get("latest") if isinstance(incidents.get("latest"), dict) else {}
     return "\n".join([
         "AntiOS protection status",
         f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
@@ -176,10 +314,46 @@ def render_protection_status(status: dict) -> str:
         f"Database: {engine.get('database_freshness', 'unknown')}",
         f"Engine identity: {engine.get('peer_identity', 'unknown')}",
         f"Resident Guard: {guard.get('state', 'not-running')}",
+        "Behavior monitor: "
+        f"{guard.get('behavior', {}).get('state', 'unavailable')} "
+        f"({guard.get('behavior', {}).get('collector', 'unavailable')}, "
+        f"score={guard.get('behavior', {}).get('highest_score', 0)}, "
+        f"findings={guard.get('behavior', {}).get('recent_findings', 0)})",
+        "Risk fusion: "
+        f"{last_risk.get('classification', 'unavailable')} "
+        f"(score={last_risk.get('score', 0)}, "
+        f"origin={last_risk.get('origin', 'unknown')}, "
+        f"native={last_risk.get('native_pre_execution', risk.get('native_pre_execution', 'unknown'))}, "
+        f"auto-enforce={last_risk.get('automatic_enforcement_eligible', False)})",
+        "Incident graph: "
+        f"{incidents.get('state', 'unavailable')} "
+        f"(active={incidents.get('active_incidents', 0)}, "
+        f"score={incidents.get('highest_score', 0)}, "
+        f"latest={latest_incident.get('id', 'none')}, "
+        f"nodes={latest_incident.get('node_count', 0)}, "
+        f"edges={latest_incident.get('edge_count', 0)})",
         f"Managed runtime: {'healthy' if managed.get('healthy') else 'needs review'}",
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
+        f"Native coexistence: {native_health.get('state', 'inactive/not-validated')}",
+        f"Native max wait: {native.get('driver', {}).get('max_wait_ms', 'unknown')} ms",
+        "Native clean cache: "
+        f"ttl={native.get('driver', {}).get('clean_cache_ttl_ms', 'unknown')} ms, "
+        f"hits={telemetry.get('cache_hits', 'unknown')}, "
+        f"expired={telemetry.get('cache_expired', 'unknown')}, "
+        f"invalidations={telemetry.get('cache_invalidations', 'unknown')}, "
+        f"db-gen={telemetry.get('database_generation', 'unknown')}, "
+        f"db-changes={telemetry.get('database_generation_changes', 'unknown')}",
+        "Native gaps: "
+        f"busy={telemetry.get('busy_bypass', 'unknown')}, "
+        f"section-conflicts={telemetry.get('section_conflicts', 'unknown')}, "
+        f"delivery-timeouts={telemetry.get('delivery_timeouts', 'unknown')}, "
+        f"completion-timeouts={telemetry.get('completion_timeouts', 'unknown')}",
         f"Pre-execution enforcement: {'active' if caps['pre_execution_blocking'] else 'inactive'}",
+        f"Microsoft Defender: {'real-time active' if defender.get('realtime_active') else defender.get('running_mode', 'unavailable')}",
+        f"Coexistence mode: {coexistence.get('mode', 'unknown')}",
+        f"AntiOS AMSI provider: {'registered' if amsi.get('registered') and amsi.get('module_exists') else 'not registered'}",
+        "AntiOS role: independent companion; Defender settings unchanged",
         "Primary Windows antivirus registration: not claimed",
         "Remaining gates: " + ", ".join(status["remaining_gates"]),
     ])

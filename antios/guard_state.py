@@ -116,3 +116,75 @@ def read_guard_state(folder=None, *, history=False, stop=False):
                                 for at, kind, payload in db.execute(
                                     "SELECT at, kind, payload FROM events ORDER BY id DESC LIMIT 100")]
         return status
+
+
+
+def read_incident_history(folder=None, *, limit=50):
+    """Return newest bounded Incident Graph snapshots, deduplicated by incident id."""
+    if not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError("incident history limit must be between 1 and 100")
+
+    path = Path(folder or default_guard_path()) / "guard.sqlite3"
+    if not path.exists():
+        return []
+    checked_path(path)
+    uri = path.absolute().as_uri() + "?mode=ro"
+
+    newest: dict[str, dict] = {}
+    with closing(sqlite3.connect(uri, uri=True, timeout=2)) as db:
+        row = db.execute("SELECT payload FROM state WHERE id=1").fetchone()
+        if row:
+            try:
+                status = json.loads(row[0])
+            except (TypeError, ValueError):
+                status = {}
+            incidents = status.get("incidents") if isinstance(status, dict) else {}
+            latest = incidents.get("latest") if isinstance(incidents, dict) else None
+            if isinstance(latest, dict):
+                incident_id = latest.get("id")
+                if isinstance(incident_id, str) and incident_id:
+                    current = dict(latest)
+                    heartbeat = status.get("heartbeat")
+                    if isinstance(heartbeat, (int, float)) and math.isfinite(heartbeat):
+                        current["_journal_at"] = float(heartbeat)
+                    newest[incident_id] = current
+
+        # Read more rows than the requested incident count because one incident
+        # can have multiple coalesced snapshots across its lifetime.
+        rows = db.execute(
+            "SELECT at, payload FROM events WHERE kind='incident-update' "
+            "ORDER BY id DESC LIMIT ?",
+            (min(1000, limit * 12),),
+        )
+        for journal_at, payload in rows:
+            try:
+                value = json.loads(payload)
+            except (TypeError, ValueError):
+                continue
+            incident = value.get("incident") if isinstance(value, dict) else None
+            if not isinstance(incident, dict):
+                continue
+            incident_id = incident.get("id")
+            if not isinstance(incident_id, str) or not incident_id:
+                continue
+            if incident_id not in newest:
+                snapshot = dict(incident)
+                snapshot["_journal_at"] = float(journal_at)
+                newest[incident_id] = snapshot
+            else:
+                # The current status may contain a newer graph snapshot, while
+                # the journal carries the precise wall-clock time of its most
+                # recent persisted update.
+                newest[incident_id]["_journal_at"] = float(journal_at)
+            if len(newest) >= limit:
+                break
+
+    values = list(newest.values())
+    values.sort(
+        key=lambda item: (
+            float(item.get("_journal_at", 0) or 0),
+            str(item.get("id", "")),
+        ),
+        reverse=True,
+    )
+    return values[:limit]

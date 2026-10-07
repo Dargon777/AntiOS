@@ -18,6 +18,7 @@ from test_clamav_integration import real_clamd  # noqa: F401 -- shared real-engi
 
 class Outcome(ctypes.Structure):
     _fields_ = [('result', ctypes.c_int), ('database_current', ctypes.c_int),
+                ('database_generation', ctypes.c_uint64),
                 ('name', ctypes.c_char * 201), ('detail', ctypes.c_char * 160)]
 
 
@@ -45,11 +46,17 @@ def native(tmp_path_factory):
     module.ao_parse_reply.restype = ctypes.c_int
     module.ao_database_current.argtypes = [ctypes.c_char_p, ctypes.c_long]
     module.ao_database_current.restype = ctypes.c_int
+    module.ao_database_generation.argtypes = [ctypes.c_char_p]
+    module.ao_database_generation.restype = ctypes.c_uint64
     module.ao_clam_scan.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_ushort, ctypes.c_uint,
                                    CANCEL, ctypes.c_void_p]
     module.ao_clam_scan.restype = Outcome
     module.ao_clam_scan_verified.argtypes = module.ao_clam_scan.argtypes + [PEER, ctypes.c_void_p]
     module.ao_clam_scan_verified.restype = Outcome
+    module.ao_clam_generation_verified.argtypes = [
+        ctypes.c_ushort, ctypes.c_uint, CANCEL, ctypes.c_void_p,
+        PEER, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+    module.ao_clam_generation_verified.restype = ctypes.c_uint64
     return module
 
 
@@ -70,10 +77,10 @@ def test_verdict_boundary(native, reply, verdict):
     assert native.ao_parse_reply(reply, len(reply), name) == verdict
 
 
-def current_version(days=0):
+def current_version(days=0, generation=27900):
     # Engine timestamp uses the local daemon timezone, just as ClamD VERSION does.
     moment = dt.datetime.now() - dt.timedelta(days=days)
-    return f'ClamAV 1.5.3/27900/{moment.strftime("%a %b %d %H:%M:%S %Y")}'.encode('ascii')
+    return f'ClamAV 1.5.3/{generation}/{moment.strftime("%a %b %d %H:%M:%S %Y")}'.encode('ascii')
 
 
 @pytest.mark.parametrize('version, expected', [
@@ -85,6 +92,17 @@ def current_version(days=0):
 ])
 def test_database_dates(native, version, expected):
     assert native.ao_database_current(version(), int(time.time())) == expected
+
+
+@pytest.mark.parametrize('version, expected', [
+    (lambda: current_version(generation=27901), 27901),
+    (lambda: current_version(generation=1), 1),
+    (lambda: b'ClamAV 1.5.3/0/Tue Oct 07 12:00:00 2026', 0),
+    (lambda: b'ClamAV 1.5.3/not-a-number/Tue Oct 07 12:00:00 2026', 0),
+    (lambda: b'OtherAV 1.0/27901/Tue Oct 07 12:00:00 2026', 0),
+])
+def test_database_generation_parser(native, version, expected):
+    assert native.ao_database_generation(version()) == expected
 
 
 class Daemon:
@@ -165,6 +183,7 @@ def test_chunked_content_and_fragmented_reply(native):
     with Daemon(fragment=True) as server:
         result = scan(native, server.port, data)
         assert result.result == 2 and result.database_current
+        assert result.database_generation == 27900
         assert server.data == data
         assert server.commands == [b'zVERSION\0', b'zINSTREAM\0']
 
@@ -253,3 +272,26 @@ def test_verified_peer_callback_required(native):
     assert result.result == 0
     assert b'verifier required' in result.detail
     assert not server.commands and not server.data
+
+
+
+def test_verified_generation_probe(native):
+    checked = []
+    def verify(fd, context):
+        connection = socket.socket(fileno=fd)
+        try:
+            assert connection.getpeername()[0] == '127.0.0.1'
+        finally:
+            connection.detach()
+        checked.append(fd)
+        return 1
+
+    current = ctypes.c_int()
+    with Daemon(version=current_version(generation=28123) + b'\0') as server:
+        generation = native.ao_clam_generation_verified(
+            server.port, 800, CANCEL(), None, PEER(verify), None, ctypes.byref(current))
+        assert generation == 28123
+        assert current.value == 1
+        assert server.commands == [b'zVERSION\0']
+        assert not server.data
+        assert len(checked) == 1

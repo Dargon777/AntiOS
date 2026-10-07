@@ -170,3 +170,18 @@ contains only the inert EICAR test hash; it is not an independent malware feed.
 ClamAV archive/file-format analysis is controlled by the managed ClamD
 configuration. AntiOS does not claim boot-sector, memory or kernel scanning from
 the Python scanner.
+
+
+## Defender coexistence
+
+AntiOS can run as an independent companion while Microsoft Defender remains
+active. `protection-status` reads Defender state without modifying preferences,
+then reports whether the current machine is actually in layered mode.
+
+Resident Guard treats Windows sharing/lock violations as bounded transient
+conflicts: it retries up to three times, while preserving file-identity
+revalidation. Persistent conflicts remain visible as coverage errors. AntiOS
+never adds Defender exclusions, never disables Defender and never fakes Windows
+Security Center registration to obtain this behavior.
+
+See [COEXISTENCE.md](COEXISTENCE.md) for the contract and failure model.

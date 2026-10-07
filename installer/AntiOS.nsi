@@ -5,10 +5,10 @@ Unicode true
 !include "FileFunc.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "2.0.0a19"
+  !define APP_VERSION "2.0.0a21"
 !endif
 !ifndef NUMERIC_VERSION
-  !define NUMERIC_VERSION "2.0.19.0"
+  !define NUMERIC_VERSION "2.0.21.0"
 !endif
 !ifndef SOURCE_DIR
   !define SOURCE_DIR "..\installer-stage"
@@ -149,6 +149,21 @@ Section "AntiOS" SecMain
         StrCpy $2 9001
       ${EndIf}
       WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionFirstRunExitCode" $2
+      ; AMSI coexistence is optional and secondary. Registration succeeds only
+      ; for a valid Authenticode-signed provider and never changes Defender/WSC.
+      IfFileExists "$INSTDIR\AntiOS-AmsiProvider.dll" 0 amsi_done
+      IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 amsi_done
+      DetailPrint "Configuring AntiOS AMSI coexistence provider..."
+      nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -ProviderDll "$INSTDIR\AntiOS-AmsiProvider.dll" -Apply'
+      Pop $3
+      ${If} $3 == "error"
+        StrCpy $3 9001
+      ${EndIf}
+      WriteRegDWORD HKLM "${INSTALL_KEY}" "AmsiProviderExitCode" $3
+      ${If} $3 != 0
+        DetailPrint "AntiOS AMSI provider was not registered; Defender and Windows security policy remain unchanged."
+      ${EndIf}
+amsi_done:
     ${Else}
       IfSilent bootstrap_done bootstrap_notice
 bootstrap_notice:
@@ -163,6 +178,9 @@ SectionEnd
 
 Section "Uninstall"
   SetRegView 64
+  IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 +3
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -Uninstall -Apply'
+    Pop $0
   IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +3
     nsExec::Exec '"$INSTDIR\AntiOS-Guard.exe" stop'
     Pop $0

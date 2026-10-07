@@ -1,3 +1,4 @@
+import errno
 import json
 from pathlib import Path
 import queue
@@ -8,9 +9,11 @@ import pytest
 
 from antios import guard
 from antios.antivirus import scan_files
+from antios.behavior import BehaviorEngine, ProcessEvent
 from antios.clamav import ScanOutcome
 from antios.guard_notifications import ChangeBatch, PollNotifications
 from antios.guard_state import GuardState, read_guard_state
+from antios.incident import IncidentGraph
 
 
 class Engine:
@@ -44,6 +47,16 @@ def launch(tmp_path, **options):
     policy = guard.GuardPolicy((root,), interval=0.1, settle=0.05,
                                 auto_quarantine=options.pop('auto_quarantine', False),
                                 max_queue=options.pop('max_queue', 256))
+
+    # Most tests below exercise Guard scheduling/scanning state, not external
+    # Windows collectors. Keep those unit tests deterministic; dedicated
+    # integration tests opt into injected process/native probes explicitly.
+    options.setdefault(
+        'process_sampler',
+        type("SilentSampler", (), {"poll": lambda self: []})(),
+    )
+    options.setdefault('native_probe', lambda: None)
+
     instance = guard.Guard(policy, state, scanner=options.pop('scanner', scan), probe=options.pop('probe', probe),
                            watcher_factory=options.pop('watcher_factory', PollNotifications), **options)
     stop, failures = threading.Event(), []
@@ -428,8 +441,15 @@ def test_repeated_root_rescans_do_not_starve_files_beyond_queue_capacity(tmp_pat
         visited.add(path)
         watcher.events.put(ChangeBatch(reset_roots=(root,)))
         return result
-    root, state, instance, stop, thread, failures = launch(tmp_path, scanner=busy_scan, max_queue=2,
-                                                        watcher_factory=lambda roots: watcher)
+    # This is a queue-fairness test, not an integration test for external
+    # Windows process/native probes. Keep its timing deterministic on shared CI.
+    silent_sampler = type("SilentSampler", (), {"poll": lambda self: []})()
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path, scanner=busy_scan, max_queue=2,
+        watcher_factory=lambda roots: watcher,
+        process_sampler=silent_sampler,
+        native_probe=lambda: None,
+    )
     try:
         until(lambda: len(visited) == 6)
         assert len(instance.pending) <= 2
@@ -498,3 +518,280 @@ def test_fast_path_never_claims_pre_execution_blocking(tmp_path):
     )
     assert instance.status['fast_path_seconds'] == pytest.approx(0.20)
     assert instance.status['pre_execution_blocking'] is False
+
+
+def test_transient_scan_conflict_is_deferred_then_recovers(tmp_path):
+    calls = []
+    def sometimes_busy(path, **options):
+        calls.append(path)
+        if len(calls) == 1:
+            raise OSError(errno.EBUSY, 'temporarily held by another scanner')
+        return scan(path, **options)
+
+    root, state, instance, stop, thread, failures = launch(tmp_path, scanner=sometimes_busy)
+    try:
+        (root / 'sample.exe').write_bytes(b'ordinary')
+        until(lambda: instance.status['transient_deferrals'] >= 1)
+        until(lambda: instance.status['scanned'] >= 1)
+        assert instance.status['errors'] == 0
+        assert not instance.failures
+        assert len(calls) >= 2
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_transient_scan_conflict_is_bounded(tmp_path):
+    def always_busy(path, **options):
+        raise OSError(errno.EBUSY, 'still held')
+
+    root, state, instance, stop, thread, failures = launch(tmp_path, scanner=always_busy)
+    try:
+        target = root / 'locked.exe'
+        target.write_bytes(b'ordinary')
+        until(lambda: instance.status['errors'] >= 1, seconds=10)
+        assert instance.status['transient_deferrals'] == guard._MAX_TRANSIENT_SCAN_RETRIES
+        assert target in instance.failures
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+
+def test_guard_journals_behavior_findings_from_process_sampler(tmp_path):
+    class Sampler:
+        def __init__(self):
+            self.sent = False
+        def poll(self):
+            if self.sent:
+                return []
+            self.sent = True
+            return [ProcessEvent(
+                pid=200, ppid=100, image='powershell.exe',
+                path=r'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+                parent_image='WINWORD.EXE',
+            )]
+
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path, process_sampler=Sampler())
+    try:
+        until(lambda: instance.status.get('behavior', {}).get('highest_score', 0) >= 85)
+        until(lambda: any(
+            event['kind'] == 'behavior-alert'
+            for event in read_guard_state(state, history=True).get('events', [])
+        ))
+        status = read_guard_state(state, history=True)
+        assert status['behavior']['mode'] == 'detect-only'
+        assert status['behavior']['collector'] == 'injected'
+        alerts = [event for event in status['events'] if event['kind'] == 'behavior-alert']
+        assert alerts[0]['data']['rule'] == 'document-spawns-interpreter'
+        assert alerts[0]['data']['severity'] == 'high'
+        assert instance.status['quarantined'] == 0
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+
+def test_guard_fuses_scan_behavior_origin_and_native_state(tmp_path):
+    root = tmp_path / "watched-risk"
+    root.mkdir()
+    target = root / "payload.exe"
+    target.write_bytes(b"ordinary")
+
+    behavior = BehaviorEngine()
+    behavior.observe_file_change(str(target))
+    behavior.observe_process(ProcessEvent(
+        pid=20, ppid=10, image="payload.exe", path=str(target),
+        parent_image="explorer.exe",
+    ))
+
+    state = tmp_path / "risk-state"
+    policy = guard.GuardPolicy((root,), interval=0.1, settle=0.05)
+    instance = guard.Guard(
+        policy, state, scanner=scan, probe=probe,
+        watcher_factory=PollNotifications,
+        behavior_engine=behavior,
+        process_sampler=type("SilentSampler", (), {"poll": lambda self: []})(),
+        native_probe=lambda: True,
+    )
+    stop, failures = threading.Event(), []
+    # Keep exceptions visible instead of losing them in a raw thread.
+    def run_guard():
+        try:
+            instance.run(stop)
+        except Exception as exc:
+            failures.append(exc)
+    thread = threading.Thread(target=run_guard, daemon=True)
+    thread.start()
+    try:
+        until(lambda: instance.status.get("risk", {}).get("evaluations", 0) >= 1)
+        context = instance.status["risk"]["last"]
+        assert context["behavior_score"] == 75
+        assert "changed-then-executed" in context["behavior_rules"]
+        assert context["native_pre_execution"] == "active"
+        assert context["automatic_enforcement_eligible"] is False
+        assert context["classification"] in {"high", "critical-behavior"}
+        until(lambda: any(
+            event["kind"] == "risk-context"
+            for event in read_guard_state(state, history=True).get("events", [])
+        ))
+        history = read_guard_state(state, history=True)
+        assert any(event["kind"] == "risk-context" for event in history["events"])
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_guard_confirmed_threat_risk_allows_existing_auto_quarantine_only(tmp_path):
+    isolated = []
+    class Vault:
+        def add(self, finding, *, dry_run):
+            isolated.append(finding)
+            Path(finding["path"]).unlink()
+            return {"id": "risk-test"}
+
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path,
+        auto_quarantine=True,
+        quarantine_factory=Vault,
+        native_probe=lambda: False,
+    )
+    try:
+        target = root / "confirmed.exe"
+        target.write_bytes(b"inert-marker")
+        until(lambda: instance.status["quarantined"] == 1)
+        context = instance.status["risk"]["last"]
+        assert context["confirmed_threat"] is True
+        assert context["score"] == 100
+        assert context["automatic_enforcement_eligible"] is True
+        assert len(isolated) == 1
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+
+def test_process_correlation_stays_live_during_scan(tmp_path):
+    root = tmp_path / "watched-live"
+    root.mkdir()
+    target = root / "payload.exe"
+    target.write_bytes(b"ordinary")
+
+    behavior = BehaviorEngine()
+    behavior.observe_file_change(str(target))
+
+    class Sampler:
+        def __init__(self):
+            self.calls = 0
+        def poll(self):
+            self.calls += 1
+            if self.calls == 2:
+                return [ProcessEvent(
+                    pid=202, ppid=101, image="payload.exe",
+                    path=str(target), parent_image="explorer.exe",
+                )]
+            return []
+
+    sampler = Sampler()
+    def slow_scan(path, **options):
+        deadline = time.monotonic() + 0.7
+        while time.monotonic() < deadline:
+            assert options["cancelled"]() is False
+            time.sleep(0.05)
+        return scan(path, **options)
+
+    state = tmp_path / "live-state"
+    policy = guard.GuardPolicy((root,), interval=0.1, settle=0.05)
+    instance = guard.Guard(
+        policy, state, scanner=slow_scan, probe=probe,
+        watcher_factory=PollNotifications,
+        behavior_engine=behavior, process_sampler=sampler,
+        native_probe=lambda: None,
+    )
+    stop, failures = threading.Event(), []
+    def run_guard():
+        try:
+            instance.run(stop)
+        except Exception as exc:
+            failures.append(exc)
+    thread = threading.Thread(target=run_guard, daemon=True)
+    thread.start()
+    try:
+        until(lambda: instance.status.get("risk", {}).get("evaluations", 0) >= 1)
+        assert sampler.calls >= 2
+        context = instance.status["risk"]["last"]
+        assert context["behavior_score"] == 75
+        assert "changed-then-executed" in context["behavior_rules"]
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+
+def test_guard_builds_incident_graph_from_write_execute_and_scan(tmp_path):
+    root = tmp_path / "watched-incident"
+    root.mkdir()
+    target = root / "payload.exe"
+    target.write_bytes(b"ordinary")
+
+    behavior = BehaviorEngine()
+    incidents = IncidentGraph()
+    behavior.observe_file_change(str(target))
+    incidents.observe_file_change(str(target))
+    process = ProcessEvent(
+        pid=400, ppid=100, image="payload.exe", path=str(target),
+        parent_image="explorer.exe",
+    )
+    findings = behavior.observe_process(process)
+    incidents.observe_process(
+        process, behavior_findings=(finding.to_dict() for finding in findings)
+    )
+
+    state = tmp_path / "incident-state"
+    policy = guard.GuardPolicy((root,), interval=0.1, settle=0.05)
+    instance = guard.Guard(
+        policy, state, scanner=scan, probe=probe,
+        watcher_factory=PollNotifications,
+        behavior_engine=behavior,
+        incident_graph=incidents,
+        process_sampler=type("SilentSampler", (), {"poll": lambda self: []})(),
+        native_probe=lambda: True,
+    )
+    stop, failures = threading.Event(), []
+    def run_guard():
+        try:
+            instance.run(stop)
+        except Exception as exc:
+            failures.append(exc)
+    thread = threading.Thread(target=run_guard, daemon=True)
+    thread.start()
+    try:
+        until(lambda: instance.status.get("risk", {}).get("evaluations", 0) >= 1)
+        until(lambda: instance.status.get("incidents", {}).get("latest") is not None)
+        latest = instance.status["incidents"]["latest"]
+        relations = {edge["relation"] for edge in latest["edges"]}
+        assert "executed-as" in relations
+        assert "evaluated-as" in relations
+        assert latest["node_count"] >= 4
+        assert latest["classification"] in {"high", "critical-behavior"}
+        until(lambda: any(
+            event["kind"] == "incident-update"
+            for event in read_guard_state(state, history=True).get("events", [])
+        ))
+        history = read_guard_state(state, history=True)
+        incident_events = [
+            event for event in history["events"]
+            if event["kind"] == "incident-update"
+        ]
+        assert incident_events[0]["data"]["incident"]["id"] == latest["id"]
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures

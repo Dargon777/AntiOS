@@ -10,18 +10,18 @@ def test_latest_alpha_selects_highest_non_draft(monkeypatch):
         {"tag_name": "v2.0.0-alpha.14", "draft": False, "assets": []},
         {"tag_name": "v2.0.0-alpha.99", "draft": True, "assets": []},
         {
-            "tag_name": "v2.0.0-alpha.20",
+            "tag_name": "v2.0.0-alpha.22",
             "draft": False,
             "published_at": "2026-10-04T00:00:00Z",
             "html_url": "https://example.invalid/release",
             "assets": [
-                {"name": "AntiOS-Setup.exe", "browser_download_url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.20/AntiOS-Setup.exe", "size": 5, "digest": None},
+                {"name": "AntiOS-Setup.exe", "browser_download_url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.22/AntiOS-Setup.exe", "size": 5, "digest": None},
             ],
         },
     ])
     result = updater.latest_alpha()
-    assert result["latest_alpha"] == 20
-    assert result["latest_version"] == "2.0.0a20"
+    assert result["latest_alpha"] == 22
+    assert result["latest_version"] == "2.0.0a22"
     assert result["update_available"] is True
 
 

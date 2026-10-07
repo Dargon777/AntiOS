@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from collections import OrderedDict
 from dataclasses import dataclass
+import errno
 import json
 import os
 from pathlib import Path
@@ -15,10 +16,14 @@ import time
 import uuid
 
 from .antivirus import checked_path, fingerprint, is_link
+from .behavior import BehaviorEngine
 from .clamav import ClamAVScanner
+from .coexistence import defender_protected_roots
+from .incident import IncidentGraph
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
 from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
+from .risk import evaluate_risk
 from .scan_process import run_scan_process
 from .windows_process import hidden_process_kwargs
 
@@ -33,6 +38,16 @@ _FAST_SCAN_SUFFIXES = frozenset({
     ".js", ".jse", ".wsf", ".wsh", ".hta", ".jar", ".lnk", ".url",
 })
 _FAST_SETTLE_SECONDS = 0.20
+_MAX_TRANSIENT_SCAN_RETRIES = 3
+
+
+def _transient_scan_conflict(exc: BaseException) -> bool:
+    """Return True for short-lived file ownership conflicts common with parallel AVs."""
+    if not isinstance(exc, OSError):
+        return False
+    if getattr(exc, "winerror", None) in {32, 33}:  # sharing / lock violation
+        return True
+    return getattr(exc, "errno", None) in {errno.EAGAIN, errno.EBUSY, getattr(errno, "ETXTBSY", -1)}
 
 
 @dataclass(frozen=True)
@@ -121,14 +136,19 @@ def probe_engine(service_name=None):
 class Guard:
     def __init__(self, policy, state_dir=None, *, scanner=None,
                  probe=None, quarantine_factory=Quarantine, watcher_factory=None,
-                 status_observer=None):
+                 status_observer=None, behavior_engine=None, process_sampler=None,
+                 native_probe=None, incident_graph=None):
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
-        self.excluded = (self.state_dir, default_quarantine_path().absolute())
+        self.excluded = (
+            self.state_dir,
+            default_quarantine_path().absolute(),
+            *defender_protected_roots(),
+        )
         for excluded in self.excluded:
             if any(root == excluded or excluded in root.parents for root in self.roots):
-                raise ValueError('A watched root cannot be inside Guard state or quarantine storage')
+                raise ValueError('A watched root cannot be inside protected Guard, quarantine or Defender storage')
         if scanner is None:
             self.scanner = lambda path, **kwargs: run_scan_process(
                 path, engine_service=policy.engine_service,
@@ -139,10 +159,41 @@ class Guard:
         self.quarantine_factory = quarantine_factory
         self.watcher_factory = watcher_factory or (DirectoryNotifications if os.name == 'nt' else PollNotifications)
         self.status_observer = status_observer
+        self.behavior = behavior_engine or BehaviorEngine()
+        if process_sampler is not None:
+            self.process_sampler = process_sampler
+            behavior_collector = 'injected'
+        elif os.name == 'nt':
+            try:
+                from .windows_behavior import WindowsProcessSampler
+                self.process_sampler = WindowsProcessSampler()
+                behavior_collector = 'toolhelp-snapshot'
+            except OSError:
+                self.process_sampler = None
+                behavior_collector = 'file-correlation-only'
+        else:
+            self.process_sampler = None
+            behavior_collector = 'file-correlation-only'
+        self._behavior_events = []
+        self._behavior_collector = behavior_collector
+        self.incidents = incident_graph or IncidentGraph()
+        if native_probe is not None:
+            self.native_probe = native_probe
+        elif os.name == 'nt':
+            def _default_native_probe():
+                from .protection import native_pre_execution_active
+                return native_pre_execution_active()
+            self.native_probe = _default_native_probe
+        else:
+            self.native_probe = lambda: None
+        self._native_checked_at = float('-inf')
+        self._native_pre_execution = None
+        self._native_probe_errors = 0
         self._last_observed_state = None
         self.pending = OrderedDict()
         self.queue_cursor = None
         self.known, self.failures, self.threats = {}, {}, {}
+        self.transient_retries = {}
         self.status = {'schema': 1, 'kind': 'antivirus-guard', 'run_id': uuid.uuid4().hex,
                        'state': 'starting', 'running': True, 'pid': os.getpid(),
                        'started_at': time.time(), 'heartbeat': time.time(),
@@ -152,7 +203,70 @@ class Guard:
                        'engine': {}, 'scanned': 0, 'detections': 0, 'quarantined': 0,
                        'errors': 0, 'pending': 0, 'unresolved': 0, 'inventory_issues': [],
                        'capacity_exceeded': False, 'notifications': 'starting',
-                       'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS}
+                       'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS,
+                       'transient_deferrals': 0,
+                       'behavior': dict(self.behavior.status(), collector=behavior_collector,
+                                        collector_errors=0),
+                       'risk': {'mode': 'fusion', 'evaluations': 0, 'highest_score': 0,
+                                'last': None, 'native_pre_execution': 'unknown',
+                                'native_probe_errors': 0},
+                       'incidents': self.incidents.status()}
+
+    def _queue_behavior_findings(self, findings):
+        for finding in findings:
+            self._behavior_events.append(finding.to_dict())
+        if len(self._behavior_events) > 100:
+            del self._behavior_events[:-100]
+        previous = self.status.get('behavior', {})
+        self.status['behavior'] = dict(
+            self.behavior.status(),
+            collector=self._behavior_collector,
+            collector_errors=previous.get('collector_errors', 0),
+        )
+
+    def _publish_incidents(self, store: GuardState):
+        self.status['incidents'] = self.incidents.status()
+        for update in self.incidents.drain_updates():
+            store.event('incident-update', update)
+
+    def _native_state(self, now: float) -> bool | None:
+        if now - self._native_checked_at < 15:
+            return self._native_pre_execution
+        self._native_checked_at = now
+        try:
+            value = self.native_probe()
+            if value not in {True, False, None}:
+                raise ValueError('native pre-execution probe returned invalid state')
+            self._native_pre_execution = value
+        except (OSError, RuntimeError, ValueError):
+            self._native_probe_errors += 1
+            self._native_pre_execution = None
+        return self._native_pre_execution
+
+    def _record_risk(self, path: Path, result: dict, store: GuardState):
+        evidence = self.behavior.findings_for_subject(str(path), max_age=60)
+        native = self._native_state(time.monotonic())
+        context = evaluate_risk(
+            str(path), result, behavior_findings=evidence,
+            native_pre_execution=native,
+        ).to_dict()
+        risk = self.status.get('risk', {})
+        risk.update(
+            mode='fusion',
+            evaluations=int(risk.get('evaluations', 0)) + 1,
+            highest_score=max(int(risk.get('highest_score', 0)), context['score']),
+            last=context,
+            native_pre_execution=context['native_pre_execution'],
+            native_probe_errors=self._native_probe_errors,
+        )
+        self.status['risk'] = risk
+        self.incidents.observe_risk(context)
+        self._publish_incidents(store)
+        # Keep the bounded journal useful: clean/low contexts stay in status,
+        # while decisions needing review or confirmed remediation are persisted.
+        if context['score'] >= 40 or context['confirmed_threat'] or not context['scanner_complete']:
+            store.event('risk-context', context)
+        return context
 
     def _settle_delay(self, path: Path) -> float:
         """Prioritize executable/script-like writes without claiming execution blocking."""
@@ -182,6 +296,16 @@ class Guard:
                     and not any(path == root or root in path.parents for root in self.excluded)}
         if not affected:
             return False
+        if batch.paths:
+            behavior_findings = self.behavior.observe_many_file_changes(
+                str(path) for path in batch.paths
+            )
+            self._queue_behavior_findings(behavior_findings)
+            for path in batch.paths:
+                self.incidents.observe_file_change(str(path))
+            self.incidents.observe_behavior_findings(
+                finding.to_dict() for finding in behavior_findings
+            )
         def matches(path):
             return path in affected or not affected.isdisjoint(path.parents)
         for path in list(self.known):
@@ -203,16 +327,49 @@ class Guard:
             raise
         watcher = None
         last_heartbeat, last_probe, last_inventory = 0.0, float('-inf'), float('-inf')
+        last_process_poll = float('-inf')
         version, changed, notification_error = None, True, False
         next_notification_retry = 0.0
 
         def cancelled():
-            nonlocal last_heartbeat
+            nonlocal last_heartbeat, last_process_poll
             now = time.monotonic()
+
+            # run_scan_process invokes this callback while its worker is busy,
+            # so process correlation stays live even during a long file scan.
+            if self.process_sampler is not None and now - last_process_poll >= 0.5:
+                last_process_poll = now
+                try:
+                    for event in self.process_sampler.poll():
+                        behavior_findings = self.behavior.observe_process(event)
+                        self._queue_behavior_findings(behavior_findings)
+                        self.incidents.observe_process(
+                            event,
+                            behavior_findings=(finding.to_dict() for finding in behavior_findings),
+                        )
+                except OSError as exc:
+                    previous_behavior = self.status.get('behavior', {})
+                    self._behavior_collector = 'file-correlation-only'
+                    self.process_sampler = None
+                    self.status['behavior'] = dict(
+                        self.behavior.status(),
+                        collector=self._behavior_collector,
+                        collector_errors=previous_behavior.get('collector_errors', 0) + 1,
+                        collector_detail=str(exc)[:500],
+                    )
+                    store.event('behavior-collector-error', {'error': str(exc)[:500]})
+
             if now - last_heartbeat >= 0.5:
                 last_heartbeat = now
+                previous_behavior = self.status.get('behavior', {})
+                self.status['behavior'] = dict(
+                    self.behavior.status(),
+                    collector=self._behavior_collector,
+                    collector_errors=previous_behavior.get('collector_errors', 0),
+                )
                 self.status.update(heartbeat=time.time(), pending=len(self.pending),
                                    unresolved=len(self.failures), active_threats=len(self.threats))
+                self._publish_incidents(store)
                 store.publish(self.status)
                 if store.stopped(self.status['run_id']):
                     stop.set()
@@ -224,6 +381,10 @@ class Guard:
         try:
             while not cancelled():
                 now = time.monotonic()
+
+                while self._behavior_events:
+                    store.event('behavior-alert', self._behavior_events.pop(0))
+
                 if watcher is None and now >= next_notification_retry:
                     next_notification_retry = now + 30
                     try:
@@ -299,6 +460,7 @@ class Guard:
                         result = self.scanner(path, engine='clamav', timeout=45, cancelled=cancelled)
                         if cancelled():
                             break
+                        self.transient_retries.pop(path, None)
                         self.status['scanned'] += result['summary']['files_scanned']
                         if not result['engine'].get('available') or result['engine'].get('failed_during_scan'):
                             self.status['engine'] = dict(result['engine'], available=False)
@@ -309,16 +471,18 @@ class Guard:
                         else:
                             self.failures.pop(path, None)
                         findings = result['findings']
+                        risk_context = self._record_risk(path, result, store)
                         if findings or incomplete:
                             store.event('scan', {'path': str(path), 'verdict': result['verdict'],
                                 'coverage': result['coverage'], 'findings': findings,
-                                'issues': result['issues'], 'engine': result['engine']})
+                                'issues': result['issues'], 'engine': result['engine'],
+                                'risk': risk_context})
                         for finding in findings:
                             if finding['kind'] != 'threat':
                                 continue
                             self.threats[path] = finding['name']
                             self.status['detections'] += 1
-                            if self.policy.auto_quarantine:
+                            if self.policy.auto_quarantine and risk_context['automatic_enforcement_eligible']:
                                 item = self.quarantine_factory().add(finding, dry_run=False)
                                 store.event('quarantined', {'path': str(path), 'id': item['id'], 'name': finding['name']})
                                 self.status['quarantined'] += 1
@@ -336,19 +500,51 @@ class Guard:
                                 self.known.pop(next(iter(self.known)))
                             self.known[path] = (identity, time.monotonic(), 30 if incomplete else self.policy.rescan)
                     except (OSError, RuntimeError, ValueError) as exc:
-                        self.status['errors'] += 1
-                        self.failures[path] = str(exc)[:500]
-                        if len(self.known) >= self.policy.max_files and path not in self.known:
-                            self.known.pop(next(iter(self.known)))
-                        self.known[path] = (identity, time.monotonic(), 30)
-                        store.event('scan-error', {'path': str(path), 'error': str(exc)[:500]})
+                        if isinstance(exc, FileNotFoundError):
+                            # Another protection/remediation layer may have removed or
+                            # quarantined the file between discovery and our scan.
+                            self.transient_retries.pop(path, None)
+                            self.failures.pop(path, None)
+                            self.known.pop(path, None)
+                            store.event('scan-vanished', {'path': str(path)})
+                        elif _transient_scan_conflict(exc):
+                            retries = self.transient_retries.get(path, 0) + 1
+                            if retries <= _MAX_TRANSIENT_SCAN_RETRIES:
+                                self.transient_retries[path] = retries
+                                self.status['transient_deferrals'] += 1
+                                delay = min(2.0, max(0.25, self._settle_delay(path) * (retries + 1)))
+                                self.pending[path] = (identity, time.monotonic() + delay)
+                                store.event('scan-deferred', {
+                                    'path': str(path), 'retry': retries,
+                                    'reason': str(exc)[:500], 'delay_seconds': delay,
+                                })
+                            else:
+                                self.transient_retries.pop(path, None)
+                                self.status['errors'] += 1
+                                self.failures[path] = str(exc)[:500]
+                                self.known[path] = (identity, time.monotonic(), 30)
+                                store.event('scan-error', {'path': str(path), 'error': str(exc)[:500]})
+                        else:
+                            self.transient_retries.pop(path, None)
+                            self.status['errors'] += 1
+                            self.failures[path] = str(exc)[:500]
+                            if len(self.known) >= self.policy.max_files and path not in self.known:
+                                self.known.pop(next(iter(self.known)))
+                            self.known[path] = (identity, time.monotonic(), 30)
+                            store.event('scan-error', {'path': str(path), 'error': str(exc)[:500]})
                     self.status.pop('current_path', None)
                 if len(self.failures) > self.policy.max_files or len(self.threats) > self.policy.max_files:
                     raise RuntimeError('Guard incident capacity exceeded; review history and reduce watched scope')
                 degraded = (notification_error or self.failures or self.status['inventory_issues'] or
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
                             self.status['engine'].get('database_freshness') != 'current')
-                self.status['state'] = 'degraded' if degraded else 'attention' if self.threats else 'monitoring'
+                behavior_attention = self.status.get('behavior', {}).get('state') in {'attention', 'alert'}
+                incident_attention = self.status.get('incidents', {}).get('state') in {'attention', 'alert'}
+                self.status['state'] = (
+                    'degraded' if degraded else
+                    'attention' if self.threats or behavior_attention or incident_attention else
+                    'monitoring'
+                )
                 self._notify_status()
                 if watcher is not None:
                     try:

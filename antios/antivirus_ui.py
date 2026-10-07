@@ -7,6 +7,7 @@ collapsed advanced section instead of competing with the main actions.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import sys
 import threading
@@ -38,6 +39,9 @@ class AntivirusPanel:
         self.mode = "findings"
         self.after_id = None
         self.last_guard_probe = 0.0
+        self.last_protection_probe = 0.0
+        self.protection_probe_busy = False
+        self.layered_active = False
         self.guard_state = "not-running"
         self.advanced_visible = False
         self.labels: list[Any] = []
@@ -157,7 +161,7 @@ class AntivirusPanel:
         )
         self.protection_detail.pack(fill="x")
 
-        engine_chip = tk.Label(
+        self.engine_chip = tk.Label(
             self.hero,
             text=self.t("managed_engine"),
             bg=self.palette["surface_alt"],
@@ -166,7 +170,7 @@ class AntivirusPanel:
             padx=12,
             pady=7,
         )
-        engine_chip.grid(row=0, column=2, sticky="ne", padx=18, pady=18)
+        self.engine_chip.grid(row=0, column=2, sticky="ne", padx=18, pady=18)
 
         # Primary work cards.
         primary = tk.Frame(outer, bg=self.palette["bg"])
@@ -286,11 +290,15 @@ class AntivirusPanel:
             guard_actions, self.t("guard_start"), self._guard_toggle, kind="primary"
         )
         self.guard_start_button.pack(side="left")
-        self.guard_history_button = self.app._button(
-            guard_actions, self.t("guard_history"), self._guard_history, kind="secondary"
+        self.incident_button = self.app._button(
+            guard_actions, self.t("incident_viewer_button"), self._incident_history,
+            kind="secondary"
         )
-        self.guard_history_button.pack(side="left", padx=(7, 0))
-        self.buttons.extend((self.guard_start_button, self.guard_history_button))
+        self.incident_button.pack(side="left", padx=(7, 0))
+        # Backward-compatible alias for integrations that referenced the old
+        # Guard history button directly.
+        self.guard_history_button = self.incident_button
+        self.buttons.extend((self.guard_start_button, self.incident_button))
 
         self.guard_status = tk.Label(
             guard_body,
@@ -611,10 +619,15 @@ class AntivirusPanel:
 
         self._run("guard-action", lambda: read_guard_state(stop=True))
 
-    def _guard_history(self) -> None:
-        from .guard_state import read_guard_state
+    def _incident_history(self) -> None:
+        from .guard_state import read_incident_history
 
-        self._run("guard-history", lambda: read_guard_state(history=True))
+        self._run("incident-history", lambda: read_incident_history(limit=50))
+
+    def _guard_history(self) -> None:
+        # Compatibility alias: the old raw JSON popup is now the structured
+        # Incident Viewer.
+        self._incident_history()
 
     def _defender(self, action: str) -> None:
         from tkinter import messagebox
@@ -846,7 +859,7 @@ class AntivirusPanel:
         if healthy:
             color = self.palette["ok"]
             title = self.t("protection_active")
-            detail = self.t("protection_active_detail")
+            detail = self.t("protection_layered_detail") if self.layered_active else self.t("protection_active_detail")
             short = self.t("guard_active_short")
         elif state == "starting":
             color = self.palette["info"]
@@ -869,11 +882,53 @@ class AntivirusPanel:
         self.protection_title.configure(text=title)
         self.protection_detail.configure(text=detail)
         self.guard_state_label.configure(text=short, fg=color)
+        behavior = value.get("behavior") if isinstance(value.get("behavior"), dict) else {}
+        behavior_state = str(behavior.get("state") or "unavailable")
+        behavior_label = self.t(
+            "behavior_" + behavior_state
+            if behavior_state in {"normal", "attention", "alert"}
+            else "behavior_unavailable"
+        )
+        risk = value.get("risk") if isinstance(value.get("risk"), dict) else {}
+        last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
+        risk_class = str(last_risk.get("classification") or "unavailable")
+        risk_label = self.t(
+            "risk_" + risk_class
+            if risk_class in {
+                "low", "observe", "elevated", "high",
+                "critical-behavior", "confirmed-threat"
+            }
+            else "risk_unavailable"
+        )
+        incidents = value.get("incidents") if isinstance(value.get("incidents"), dict) else {}
+        latest_incident = incidents.get("latest") if isinstance(incidents.get("latest"), dict) else {}
+        incident_state = str(incidents.get("state") or "unavailable")
+        incident_label = self.t(
+            "incident_" + incident_state
+            if incident_state in {"normal", "attention", "alert"}
+            else "incident_unavailable"
+        )
         self.guard_status.configure(
             text=self.t(
                 "guard_status",
                 state=self.t("guard_state_" + state),
                 count=value.get("detections", 0),
+            ) + "\n" + self.t(
+                "behavior_status",
+                state=behavior_label,
+                score=behavior.get("highest_score", 0),
+                count=behavior.get("recent_findings", 0),
+            ) + "\n" + self.t(
+                "risk_status",
+                state=risk_label,
+                score=last_risk.get("score", 0),
+            ) + "\n" + self.t(
+                "incident_status",
+                state=incident_label,
+                count=incidents.get("active_incidents", 0),
+                score=incidents.get("highest_score", 0),
+                nodes=latest_incident.get("node_count", 0),
+                edges=latest_incident.get("edge_count", 0),
             )
         )
 
@@ -881,6 +936,29 @@ class AntivirusPanel:
         self.guard_start_button.configure(
             text=self.t("guard_stop") if running else self.t("guard_start")
         )
+
+    def _sync_protection_ui(self, value: dict) -> None:
+        caps = value.get("capabilities") if isinstance(value, dict) else {}
+        if not isinstance(caps, dict):
+            caps = {}
+        layered = bool(
+            caps.get("standalone_detection_engine") and
+            caps.get("layered_with_defender") and
+            (
+                caps.get("resident_post_write_detection") or
+                caps.get("pre_execution_blocking")
+            )
+        )
+        self.layered_active = layered
+        self.engine_chip.configure(
+            text=self.t("layered_engine") if layered else self.t("managed_engine"),
+            fg=self.palette["ok"] if layered else self.palette["muted"],
+        )
+        if self.guard_state in _HEALTHY_GUARD_STATES:
+            self.protection_detail.configure(
+                text=self.t("protection_layered_detail") if layered
+                else self.t("protection_active_detail")
+            )
 
     def _set_busy(self) -> None:
         busy = self.app.antivirus_busy
@@ -911,6 +989,25 @@ class AntivirusPanel:
 
     def _poll(self) -> None:
         if (
+            os.name == "nt"
+            and time.monotonic() - self.last_protection_probe >= 20
+            and not self.protection_probe_busy
+        ):
+            self.last_protection_probe = time.monotonic()
+            self.protection_probe_busy = True
+
+            def probe_protection() -> None:
+                from .protection import collect_protection_status
+
+                try:
+                    value = collect_protection_status()
+                except Exception as exc:
+                    value = {"error": str(exc)}
+                self.app.antivirus_queue.put(("protection-state", value))
+
+            threading.Thread(target=probe_protection, daemon=True).start()
+
+        if (
             time.monotonic() - self.last_guard_probe >= 3
             and not self.app.guard_probe_busy
         ):
@@ -938,15 +1035,15 @@ class AntivirusPanel:
                 self.app.guard_probe_busy = False
                 self._sync_guard_ui(value)
                 self._set_busy()
+            elif kind == "protection-state":
+                self.protection_probe_busy = False
+                self._sync_protection_ui(value)
             elif kind == "guard-action":
                 self.last_guard_probe = 0
-            elif kind == "guard-history":
-                from tkinter import messagebox
+            elif kind == "incident-history":
+                from .incident_viewer import IncidentViewer
 
-                messagebox.showinfo(
-                    "AntiOS Guard",
-                    json.dumps(value, indent=2, ensure_ascii=False),
-                )
+                IncidentViewer(self.app, self.palette, value, self.t)
             elif kind == "idle":
                 self.app.antivirus_busy = False
                 self._set_busy()

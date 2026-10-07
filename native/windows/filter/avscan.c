@@ -200,6 +200,12 @@ AvIsStreamAlternate (
     _Inout_ PFLT_CALLBACK_DATA Data
     );
 
+static BOOLEAN
+AvFileNeedsScan (
+    _Inout_ PAV_STREAM_CONTEXT StreamContext,
+    _In_ BOOLEAN IsInTxWriter
+    );
+
 NTSTATUS
 AvScan (
     _Inout_  PFLT_CALLBACK_DATA    Data,
@@ -712,7 +718,10 @@ Return Value:
 
     Globals.ScanIdCounter = 0;
     Globals.LocalScanTimeout = 5000;
+    Globals.CleanCacheTtlMs = 30000;
     Globals.Enforcement = 0;
+    Globals.CoexistenceMode = 1;
+    Globals.MaxPendingScans = 4;
     Globals.NetworkScanTimeout = 5000;
 
 #if DBG
@@ -1068,6 +1077,17 @@ Return Value:
                 //
 
                 InterlockedExchange( &StreamContext->State, oldTxState );
+                if (oldTxState == AvFileNotInfected) {
+                    InterlockedExchange64(
+                        &StreamContext->CleanDatabaseGeneration,
+                        InterlockedCompareExchange64(&StreamContext->TxCleanDatabaseGeneration, 0, 0));
+                    InterlockedExchange64(
+                        &StreamContext->CleanValidUntil100ns,
+                        InterlockedCompareExchange64(&StreamContext->TxCleanValidUntil100ns, 0, 0));
+                } else {
+                    InterlockedExchange64(&StreamContext->CleanDatabaseGeneration, 0);
+                    InterlockedExchange64(&StreamContext->CleanValidUntil100ns, 0);
+                }
                 break;
             case AvFileScanning:
 
@@ -1228,7 +1248,8 @@ Return Value:
                                           &query );
 
     if (entry != NULL) {
-        *State = entry->InfectedState;
+        *State = entry->InfectedState == AvFileNotInfected ?
+                 AvFileModified : entry->InfectedState;
         *VolumeRevision = entry->VolumeRevision;
         *CacheRevision = entry->CacheRevision;
         *FileRevision = entry->FileRevision;
@@ -1469,6 +1490,60 @@ Cleanup:
     return alternate;
 }
 
+static BOOLEAN
+AvFileNeedsScan (
+    _Inout_ PAV_STREAM_CONTEXT StreamContext,
+    _In_ BOOLEAN IsInTxWriter
+    )
+{
+    volatile LONG *state = IsInTxWriter ? &StreamContext->TxState : &StreamContext->State;
+    volatile LONGLONG *validUntil = IsInTxWriter ?
+        &StreamContext->TxCleanValidUntil100ns : &StreamContext->CleanValidUntil100ns;
+    volatile LONGLONG *cleanGeneration = IsInTxWriter ?
+        &StreamContext->TxCleanDatabaseGeneration : &StreamContext->CleanDatabaseGeneration;
+    LONG observed = InterlockedCompareExchange(state, 0, 0);
+
+    if (observed == AvFileModified) {
+        return TRUE;
+    }
+    if (observed != AvFileNotInfected) {
+        return FALSE;
+    }
+
+    {
+        LONGLONG activeGeneration = InterlockedCompareExchange64(&Globals.DatabaseGeneration, 0, 0);
+        LONGLONG verdictGeneration = InterlockedCompareExchange64(cleanGeneration, 0, 0);
+
+        if (activeGeneration == 0 || verdictGeneration != activeGeneration) {
+            if (InterlockedCompareExchange(state, AvFileModified, AvFileNotInfected) == AvFileNotInfected) {
+                InterlockedExchange64(validUntil, 0);
+                InterlockedExchange64(cleanGeneration, 0);
+                InterlockedIncrement64(&Globals.CleanCacheInvalidations);
+                return TRUE;
+            }
+            return InterlockedCompareExchange(state, 0, 0) == AvFileModified;
+        }
+    }
+
+    {
+        LONGLONG deadline = InterlockedCompareExchange64(validUntil, 0, 0);
+        LONGLONG now = (LONGLONG)KeQueryInterruptTime();
+        if (deadline > now) {
+            InterlockedIncrement64(&Globals.CleanCacheHits);
+            return FALSE;
+        }
+    }
+
+    if (InterlockedCompareExchange(state, AvFileModified, AvFileNotInfected) == AvFileNotInfected) {
+        InterlockedExchange64(validUntil, 0);
+        InterlockedExchange64(cleanGeneration, 0);
+        InterlockedIncrement64(&Globals.CleanCacheExpired);
+        return TRUE;
+    }
+
+    return InterlockedCompareExchange(state, 0, 0) == AvFileModified;
+}
+
 NTSTATUS
 AvScan (
     _Inout_  PFLT_CALLBACK_DATA    Data,
@@ -1562,7 +1637,7 @@ Return Value:
         //  and is already known to be clean
         //
 
-        if (IS_FILE_NEED_SCAN( StreamContext )){
+        if (AvFileNeedsScan(StreamContext, IsInTxWriter)){
 
             if (ScanMode == AvUserMode) {
 
@@ -1918,6 +1993,9 @@ Return Value:
         //  because the file is part of a transaction writer
         //
 
+        if (IS_FILE_TX_NOT_INFECTED(streamContext)) {
+            InterlockedIncrement64(&Globals.CleanCacheInvalidations);
+        }
         SET_FILE_TX_MODIFIED( streamContext );
 
     } else {
@@ -1927,6 +2005,9 @@ Return Value:
         //  is already scanning the file as it is being modified here.
         //
 
+        if (IS_FILE_NOT_INFECTED(streamContext)) {
+            InterlockedIncrement64(&Globals.CleanCacheInvalidations);
+        }
         SET_FILE_MODIFIED( streamContext );
     }
 
@@ -2655,7 +2736,7 @@ Return Value:
 
 
 
-    if (IS_FILE_NEED_SCAN( streamContext )) {
+    if (AvFileNeedsScan(streamContext, isTxWriter)) {
 
         status = AvScan( Data,
                          FltObjects,
@@ -2903,14 +2984,13 @@ Return Value:
 Cleanup:
 
     //
-    //  We only insert the entry when the file is clean or infected.
+    // Persist confirmed infected state only. Clean verdict reuse is handled by
+    // the bounded stream/SHA-256 caches above; putting every clean file in the
+    // legacy unbounded FileId AVL table would consume kernel memory without a
+    // trustworthy lifetime/database generation.
     //
-
-    if (!IS_FILE_MODIFIED( streamContext ) ||
-        IS_FILE_INFECTED( streamContext )) {
-
+    if (IS_FILE_INFECTED( streamContext )) {
         if (!NT_SUCCESS ( AvSyncCache( FltObjects->Instance, streamContext ))) {
-
             AV_DBG_PRINT( AVDBG_TRACE_ERROR,
                       ("[AV] AvPreCleanup: AvSyncCache FAILED!! \n") );
         }
@@ -3315,6 +3395,30 @@ Return Value:
     if (NT_SUCCESS(status) && value->Type == REG_DWORD &&
         value->DataLength == sizeof(ULONG) && *(PULONG)value->Data == 1) {
         Globals.Enforcement = 1;
+    }
+
+    RtlInitUnicodeString(&valueName, L"CoexistenceMode");
+    status = ZwQueryValueKey(settingsKey, &valueName, KeyValuePartialInformation,
+                             value, valueLength, &resultLength);
+    if (NT_SUCCESS(status) && value->Type == REG_DWORD && value->DataLength == sizeof(ULONG) &&
+        (*(PULONG)value->Data == 0 || *(PULONG)value->Data == 1)) {
+        Globals.CoexistenceMode = *(PULONG)value->Data;
+    }
+
+    RtlInitUnicodeString(&valueName, L"MaxPendingScans");
+    status = ZwQueryValueKey(settingsKey, &valueName, KeyValuePartialInformation,
+                             value, valueLength, &resultLength);
+    if (NT_SUCCESS(status) && value->Type == REG_DWORD && value->DataLength == sizeof(ULONG) &&
+        *(PULONG)value->Data >= 1 && *(PULONG)value->Data <= AO_BROKER_WORKERS) {
+        Globals.MaxPendingScans = *(PULONG)value->Data;
+    }
+
+    RtlInitUnicodeString(&valueName, L"CleanCacheTtlMs");
+    status = ZwQueryValueKey(settingsKey, &valueName, KeyValuePartialInformation,
+                             value, valueLength, &resultLength);
+    if (NT_SUCCESS(status) && value->Type == REG_DWORD && value->DataLength == sizeof(ULONG) &&
+        *(PULONG)value->Data <= 300000) {
+        Globals.CleanCacheTtlMs = *(PULONG)value->Data;
     }
 
     status = STATUS_SUCCESS;

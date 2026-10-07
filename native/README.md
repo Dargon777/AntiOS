@@ -34,7 +34,10 @@ antivirus, a certified driver, or a ready-to-install Defender replacement.
   the filter after rule removal to clear a previous positive in this prototype.
 - `--status` reports SCM state and configured/actual Windows process protection
   separately. `--driver-status` reads loaded policy and counters; it does not infer
-  protection from a registry setting. `--scan-file PATH` is a bounded diagnostic.
+  protection from a registry setting. Protocol v4 also reports CoexistenceMode,
+  bounded four-worker scan admission, peak pending work, overload bypasses, delivery/completion
+  timeouts, cancellations and total/average/max kernel wait latency. `--scan-file PATH`
+  is a bounded diagnostic.
   Diagnostic exits: 0 clean, 1 confirmed signature, 2 incomplete/review/error.
 
 ## Explicit limitations
@@ -112,7 +115,8 @@ Use a disposable **Windows 11 24H2+ x64 NTFS VM**, with a snapshot and working
 recovery access. Keep Defender, Secure Boot and signature enforcement enabled.
 There is deliberately no test-signing or signature-bypass installer.
 
-1. Obtain an altitude assigned to this filter by Microsoft. Generate the INF
+1. Obtain an altitude assigned to this filter by Microsoft in the current
+   FSFilter Anti-Virus group (numeric range 320000 <= altitude < 329999; maximum 329998). Generate the INF
    with `New-DriverInf.ps1 -AssignedAltitude <your-allocation> -OutputDirectory
    <package>`. The script validates syntax, not ownership. It has no borrowed or
    default altitude. Run the WDK INF/catalog validation and approved driver-signing
@@ -139,7 +143,20 @@ There is deliberately no test-signing or signature-bypass installer.
    to DWORD 1, then reload/restart. Verify the **loaded** policy with driver status.
    Run the same test with `-ExpectedMode Enforce`. It must observe Windows error
    225 for the marked execute/process/image-section paths and no marked-fixture process execution; clean execution must still work.
-6. Before considering deployment, also test the matrix below. Revert to audit or
+6. With Microsoft Defender real-time protection still enabled, run the dedicated
+   coexistence stress harness against the harmless clean fixture:
+
+   ```powershell
+   .\\native\\windows\\Test-NativeCoexistence.ps1 \
+     -ServiceExecutable <installed-exe> \
+     -CleanFixture <fixtures>\\clean.exe \
+     -ReportPath <coexistence.json>
+   ```
+
+   The test requires both `WdFilter` and `AntiOS-Filter` to be loaded, verifies Defender real-time state before and after the run, opens many
+   distinct clean executables concurrently with `FILE_EXECUTE`, verifies bounded
+   admission/latency and refuses any configuration that disables coexistence.
+7. Before considering deployment, also test the matrix below. Revert to audit or
    restore the VM snapshot if any criterion fails. Never label a failed/skipped
    VM test as protection readiness.
 
@@ -153,6 +170,7 @@ There is deliberately no test-signing or signature-bypass installer.
 | Ordinary-user malformed/duplicate IPC and handle passing | Cannot connect to scan/abort ports or forge a verdict |
 | Sleep/resume, low memory, disk fault, reboot | Driver Verifier clean, recovery path works, no boot failure |
 | HVCI/Memory Integrity + other antivirus filters | Signed package loads and coexists under normal security settings |
+| Defender real-time + AntiOS concurrent execute opens | `Test-NativeCoexistence.ps1` passes with WdFilter loaded, queue drains, peak pending stays bounded, clean opens are never blocked, and latency remains below the documented ceiling |
 | False positives, latency, corpus effectiveness | Published representative measurements, not just EICAR/inert tests |
 | Service upgrades/removal | Stop succeeds, handles drain, signed files cannot be replaced by a standard user |
 
@@ -191,3 +209,71 @@ Technical references:
 - [Minifilter INF requirements](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/creating-an-inf-file-for-a-minifilter-driver)
 - [Altitude request](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/minifilter-altitude-request)
 - [Protected anti-malware services](https://learn.microsoft.com/en-us/windows/win32/services/protecting-anti-malware-services-)
+
+
+### Coexistence diagnostics
+
+`--driver-status` reports `section_conflicts` separately from generic incomplete
+coverage. This counter records `STATUS_FILE_LOCK_CONFLICT` returned while creating
+a Filter Manager data-scan section. Such conflicts can occur while another filter
+or file owner is using the stream; they remain fail-open in the laboratory
+coexistence policy and must be interpreted together with busy-bypass, timeout and
+latency counters rather than treated as a malware verdict.
+
+
+The coexistence VM run additionally rejects AntiOS-related Microsoft Defender
+path/process exclusions and any AntiOS antivirus entry in Windows Security
+Center. This prevents a passing result from being manufactured by weakening the
+other protection layer.
+
+
+## Bounded clean-verdict cache
+
+Native protocol v4 adds two conservative clean-only cache layers to reduce repeat
+ClamD work without turning a stale path into a permanent allow-list:
+
+1. The minifilter keeps a clean verdict in the current stream context for
+   `CleanCacheTtlMs` (30 seconds by default, hard-bounded to 0–300000 ms).
+   `IRP_MJ_WRITE` and other modifying operations immediately move the stream
+   back to `AvFileModified` and clear the clean deadline.
+2. The LocalSystem broker keeps a fixed 128-entry SHA-256 cache over the exact
+   immutable snapshot supplied by Filter Manager. This survives stream-context
+   recreation and avoids resending identical bytes to ClamD during the same
+   bounded TTL.
+
+Only a current-database `AO_CLEAR` result is cached. `AO_UNKNOWN`,
+`AO_REVIEW`, detections, cancelled scans, malformed engine replies and stale
+database results are never cached as clean. If CNG hashing is unavailable the
+broker simply disables its content cache and continues normal ClamD scanning.
+
+The old per-volume file-ID state table is deliberately **not** trusted as a
+cross-handle clean verdict because it carries no cache lifetime/database
+generation. A cached `AvFileNotInfected` loaded from that table is converted
+back to `AvFileModified` and rescanned.
+
+The cache is a performance optimization, not a new trust boundary. A signature
+database update can make a cached clean result stale for at most the configured
+TTL (30 seconds by default), after which the file returns to the normal scan
+path. `--driver-status` exposes `clean_cache_ttl_ms`, `cache_hits`,
+`cache_expired` and `cache_invalidations`.
+
+
+### Database-generation watcher
+
+Protocol v4 binds every cached clean verdict to the ClamAV signature database
+generation reported by the trusted `VERSION` response. The LocalSystem broker
+polls the verified ClamD peer every 2 seconds using a VERSION-only request. When
+the generation changes, the broker clears its fixed SHA-256 cache and sends the
+new generation to the minifilter. Existing stream clean verdicts remain in place
+physically but become invalid immediately because their stored generation no
+longer matches the driver's active generation.
+
+If the trusted VERSION probe fails or reports an unknown/stale database, the
+broker publishes generation `0`. That conservatively invalidates kernel clean
+cache hits until a trusted current generation is observed again. A clean verdict
+produced by an in-flight scan is cached only when its verdict generation still
+matches the driver's active generation at completion, preventing an older scan
+from re-authorizing a stream after FreshClam/ClamD reload.
+
+`--driver-status` exposes `database_generation` and
+`database_generation_changes` in addition to the clean-cache counters.

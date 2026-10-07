@@ -30,6 +30,18 @@ public static class NativeExecuteOpen {
 '@
 try {
     $before = Driver-Status
+    if ([int]$before.protocol -lt 4) { throw 'Native protocol v4+ is required.' }
+    if ([int]$before.coexistence_mode -ne 1) { throw 'CoexistenceMode must stay enabled during VM acceptance.' }
+    if ([int]$before.max_pending -lt 1 -or [int]$before.max_pending -gt 4) {
+        throw 'MaxPendingScans exceeds the four-worker native broker capacity.'
+    }
+    if ([long]$before.clean_cache_ttl_ms -lt 0 -or [long]$before.clean_cache_ttl_ms -gt 300000) {
+        throw 'CleanCacheTtlMs is outside the bounded production-safe range.'
+    }
+    if ([long]$before.database_generation -le 0) {
+        throw 'Trusted ClamD database generation is not synchronized with the driver.'
+    }
+    if (-not [bool]$before.fail_open_on_incomplete) { throw 'Lab filter must not fail closed on incomplete verdicts.' }
     $enforce = $ExpectedMode -eq 'Enforce'
     if ([bool]$before.enforcement -ne $enforce) { throw 'Actual loaded driver policy differs from requested test mode.' }
     $marked = Join-Path $fixtures 'marked.exe'
@@ -94,6 +106,9 @@ try {
     if ($after.detections -le $before.detections) { throw 'No native detection observed.' }
     if ($enforce -and $after.blocked -le $before.blocked) { throw 'No native block observed.' }
     if (-not $enforce -and $after.blocked -ne $before.blocked) { throw 'Audit recorded an unexpected block.' }
+    if ([int]$after.pending -ne 0) { throw 'Native scan queue did not drain.' }
+    if ([int]$after.peak_pending -gt [int]$after.max_pending) { throw 'Native scan admission exceeded MaxPendingScans.' }
+    if ([long]$after.max_wait_ms -gt 15000) { throw 'Native wait telemetry exceeded the VM latency ceiling.' }
     $report.passed = $true
 } catch {
     $report.error = $_.Exception.Message

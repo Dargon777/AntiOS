@@ -30,7 +30,10 @@ AddReg=DriverRegistry
 
 [DriverRegistry]
 HKR,"Parameters","Enforcement",0x00010001,0
+HKR,"Parameters","CoexistenceMode",0x00010001,1
 HKR,"Parameters","LocalScanTimeout",0x00010001,5000
+HKR,"Parameters","CleanCacheTtlMs",0x00010001,30000
+HKR,"Parameters","MaxPendingScans",0x00010001,4
 HKR,"Parameters\Instances","DefaultInstance",0x00000000,%Instance%
 HKR,"Parameters\Instances\"%Instance%,"Altitude",0x00000000,"@ALTITUDE@"
 HKR,"Parameters\Instances\"%Instance%,"Flags",0x00010001,0

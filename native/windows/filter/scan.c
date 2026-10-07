@@ -18,6 +18,46 @@ Environment:
 
 #include "avscan.h"
 
+static VOID AvRecordWait(_In_ ULONGLONG Elapsed100ns)
+{
+    LONGLONG observed;
+    InterlockedExchangeAdd64(&Globals.TotalWait100ns, (LONGLONG)Elapsed100ns);
+    observed = InterlockedCompareExchange64(&Globals.MaxWait100ns, 0, 0);
+    while ((LONGLONG)Elapsed100ns > observed) {
+        LONGLONG previous = InterlockedCompareExchange64(
+            &Globals.MaxWait100ns, (LONGLONG)Elapsed100ns, observed);
+        if (previous == observed) break;
+        observed = previous;
+    }
+}
+
+static VOID AvRecordPeakPending(_In_ LONG Pending)
+{
+    LONG observed = InterlockedCompareExchange(&Globals.PeakPendingScans, 0, 0);
+    while (Pending > observed) {
+        LONG previous = InterlockedCompareExchange(&Globals.PeakPendingScans, Pending, observed);
+        if (previous == observed) break;
+        observed = previous;
+    }
+}
+
+static BOOLEAN AvTryAcquireScanSlot(VOID)
+{
+    LONG current = InterlockedCompareExchange(&Globals.PendingScans, 0, 0);
+    for (;;) {
+        LONG previous;
+        if (current < 0 || (ULONG)current >= Globals.MaxPendingScans) {
+            return FALSE;
+        }
+        previous = InterlockedCompareExchange(&Globals.PendingScans, current + 1, current);
+        if (previous == current) {
+            AvRecordPeakPending(current + 1);
+            return TRUE;
+        }
+        current = previous;
+    }
+}
+
 /* Removed the sample's demonstration string matcher. There is no kernel AV engine. */
 NTSTATUS
 AvScanInKernel(PCFLT_RELATED_OBJECTS FltObjects, UCHAR Major, BOOLEAN Tx, PAV_STREAM_CONTEXT Stream)
@@ -141,6 +181,9 @@ Return Value
     //
     if (!NT_SUCCESS( status ) || status == STATUS_TIMEOUT) {
 
+        if (status == STATUS_TIMEOUT) {
+            InterlockedIncrement64(&Globals.DeliveryTimeouts);
+        }
         if ((status != STATUS_PORT_DISCONNECTED) &&
             (status != STATUS_TIMEOUT)) {
 
@@ -168,6 +211,11 @@ Return Value
     if (!NT_SUCCESS(status) ||
         (status == STATUS_TIMEOUT)) {
 
+        if (status == STATUS_TIMEOUT) {
+            InterlockedIncrement64(&Globals.CompletionTimeouts);
+        } else if (status == STATUS_CANCELLED) {
+            InterlockedIncrement64(&Globals.CancelledOpens);
+        }
         //
         //  At this point we came out of the wait with an error. We are in one of the following conditions:
         //
@@ -276,14 +324,22 @@ AvScanInUser(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS Objects, UCHAR Major
              BOOLEAN Tx, DEVICE_TYPE DeviceType)
 {
     NTSTATUS status;
+    ULONGLONG started = KeQueryInterruptTime();
+
     InterlockedIncrement64(&Globals.Attempts);
-    if (InterlockedIncrement(&Globals.PendingScans) > 4) {
+    if (!AvTryAcquireScanSlot()) {
+        /* Coexistence is intentionally fail-open on overload. A second AV can
+           briefly own file resources; queueing unbounded execute opens would
+           create a system-wide launch stall without improving verdict quality. */
         InterlockedIncrement64(&Globals.Incomplete);
-        InterlockedDecrement(&Globals.PendingScans);
+        InterlockedIncrement64(&Globals.BusyBypass);
+        AvRecordWait(KeQueryInterruptTime() - started);
         return STATUS_DEVICE_BUSY;
     }
+
     status = AvScanInUserImpl(Data, Objects, Major, Tx, DeviceType);
     if (status != STATUS_SUCCESS) InterlockedIncrement64(&Globals.Incomplete);
     InterlockedDecrement(&Globals.PendingScans);
+    AvRecordWait(KeQueryInterruptTime() - started);
     return status;
 }

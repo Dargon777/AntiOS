@@ -7,6 +7,7 @@ on:
       - "antios/**"
       - "tests/**"
       - "scripts/**"
+      - "native/**"
       - "installer/**"
       - "release/**"
       - "LICENSE"
@@ -81,7 +82,8 @@ jobs:
             ".\scripts\protection-bootstrap.ps1",
             ".\scripts\protection-repair.ps1",
             ".\scripts\protection-first-run.ps1",
-            ".\scripts\guard-startup.ps1"
+            ".\scripts\guard-startup.ps1",
+            ".\native\windows\amsi\Install-AmsiProvider.ps1"
           )) {
             $tokens = $null
             $errors = $null
@@ -162,6 +164,15 @@ jobs:
           pyinstaller --clean --noconfirm --onedir --contents-directory _guard --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --hidden-import pystray._win32 --version-file release/windows-guard-version.txt --console --name AntiOS-Guard antios_guard_entry.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Build AMSI coexistence provider
+        shell: pwsh
+        run: |
+          .\native\windows\build.ps1 -Target Amsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath ".\build\native\windows\AntiOS-AmsiProvider.dll")) {
+            throw "AntiOS-AmsiProvider.dll was not produced"
+          }
+
       - name: Verify Windows resources and scan worker
         shell: pwsh
         run: |
@@ -192,11 +203,27 @@ jobs:
           description: DargonITP AntiOS Antivirus
           description-url: https://github.com/Dargon777/AntiOS
 
+      - name: Sign AMSI coexistence provider
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\build\native\windows
+          files-folder-filter: dll
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: DargonITP AntiOS AMSI Provider
+          description-url: https://github.com/Dargon777/AntiOS
+
       - name: Verify application Authenticode signatures
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
-          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe")) {
+          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe", ".\build\native\windows\AntiOS-AmsiProvider.dll")) {
             $signature = Get-AuthenticodeSignature $file
             Write-Host "$file => $($signature.Status) / $($signature.SignerCertificate.Subject)"
             if ($signature.Status -ne "Valid") {
@@ -261,7 +288,7 @@ jobs:
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
           ./installer-output/AntiOS-Setup.exe /S /NOENGINE=1 "/D=$installDir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "Uninstall.exe")) {
+          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "AntiOS-AmsiProvider.dll", "Install-AmsiProvider.ps1", "Uninstall.exe")) {
             if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {
               throw "Installer smoke missing $required"
             }
@@ -297,6 +324,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\dist\AntiOS\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\dist\AntiOS\AntiOS.exe coexistence-status --json | ConvertFrom-Json | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\dist\AntiOS\AntiOS.exe config show --json | ConvertFrom-Json | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/smoke-antivirus.py .\dist\AntiOS\AntiOS.exe
@@ -322,6 +351,9 @@ jobs:
           Copy-Item .\dist\AntiOS\* .\package\ -Recurse -Force
           Copy-Item .\dist\AntiOS-GUI\* .\package\ -Recurse -Force
           Copy-Item .\dist\AntiOS-Guard\* .\package\ -Recurse -Force
+          Copy-Item .\build\native\windows\AntiOS-AmsiProvider.dll .\package\AntiOS-AmsiProvider.dll -Force
+          Copy-Item .\native\windows\amsi\Install-AmsiProvider.ps1 .\package\Install-AmsiProvider.ps1 -Force
+          Copy-Item .\native\windows\LICENSE.microsoft .\package\LICENSE.native-MS-PL.txt -Force
           Copy-Item .\scripts\guard-startup.ps1 .\package\guard-startup.ps1
           Copy-Item .\scripts\protection-engine.ps1 .\package\protection-engine.ps1
           Copy-Item .\scripts\install.ps1 .\package\install.ps1
@@ -344,6 +376,7 @@ jobs:
           Copy-Item .\docs\ANTIVIRUS.md .\package\ANTIVIRUS.md
           Copy-Item .\docs\CLAMAV.md .\package\CLAMAV.md
           Copy-Item .\docs\GUARD.md .\package\GUARD.md
+          Copy-Item .\docs\COEXISTENCE.md .\package\COEXISTENCE.md
           Copy-Item .\config\clamav .\package\clamav-config -Recurse
           $version = (Get-Content .\release\VERSION -Raw).Trim()
           $commit = "$env:GITHUB_SHA"

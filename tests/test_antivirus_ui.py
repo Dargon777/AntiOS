@@ -137,6 +137,7 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         root.update()
         assert panel.export_button.winfo_ismapped()
         assert panel.tree.winfo_ismapped()
+        assert panel.incident_button.winfo_ismapped()
         assert panel.tree.winfo_height() >= 60
 
         # Store/GUI-only packages must not offer a Guard companion they do not ship.
@@ -157,6 +158,8 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
             assert panel.status["text"]
             assert panel.export_button.winfo_ismapped()
             assert panel.tree.winfo_ismapped()
+            assert panel.incident_button.winfo_ismapped()
+            assert panel.incident_button["text"] == MESSAGES[language]["incident_viewer_button"]
             assert not hasattr(panel, "engine_choice")
 
         panel._scan()
@@ -173,3 +176,52 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
     finally:
         root.destroy()
 
+
+
+
+def test_layered_chip_requires_verified_defender_and_antios_engine():
+    from antios.antivirus_ui import AntivirusPanel
+
+    class FakeWidget:
+        def __init__(self):
+            self.values = {}
+        def configure(self, **values):
+            self.values.update(values)
+
+    panel = AntivirusPanel.__new__(AntivirusPanel)
+    panel.palette = {"ok": "ok", "muted": "muted"}
+    panel.engine_chip = FakeWidget()
+    panel.protection_detail = FakeWidget()
+    panel.guard_state = "monitoring"
+    panel.layered_active = False
+    messages = {
+        "layered_engine": "Microsoft Defender + AntiOS",
+        "managed_engine": "AntiOS Engine · ClamAV",
+        "protection_layered_detail": "layered-detail",
+        "protection_active_detail": "antios-detail",
+    }
+    panel.t = lambda key, **values: messages[key]
+
+    panel._sync_protection_ui({
+        "capabilities": {
+            "standalone_detection_engine": True,
+            "layered_with_defender": True,
+            "resident_post_write_detection": True,
+        }
+    })
+    assert panel.layered_active is True
+    assert panel.engine_chip.values["text"] == "Microsoft Defender + AntiOS"
+    assert panel.engine_chip.values["fg"] == "ok"
+    assert panel.protection_detail.values["text"] == "layered-detail"
+
+    panel._sync_protection_ui({
+        "capabilities": {
+            "standalone_detection_engine": False,
+            "layered_with_defender": True,
+            "resident_post_write_detection": True,
+        }
+    })
+    assert panel.layered_active is False
+    assert panel.engine_chip.values["text"] == "AntiOS Engine · ClamAV"
+    assert panel.engine_chip.values["fg"] == "muted"
+    assert panel.protection_detail.values["text"] == "antios-detail"

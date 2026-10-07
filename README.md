@@ -6,7 +6,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 19
+> **Pre-release:** 2.0.0 alpha 21
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -31,12 +31,19 @@ Open **Antivirus** from the sidebar or press `Ctrl+6`:
 - Encrypt and isolate a selected detection in current-user Windows DPAPI quarantine.
 - Restore selected quarantined items without overwriting existing files.
 - Run Defender quick/full scans or update its signatures after confirmation.
+- Run in a documented [layered coexistence mode](docs/COEXISTENCE.md): Defender stays configured as-is while AntiOS remains an independent companion layer.
+- The Windows native tree includes a signed-gated x64 AMSI companion provider so AntiOS can add an independent AMSI scanning layer without claiming the primary Windows antivirus slot.
 - Export a JSON scan report.
 - Explore the separate [experimental native Windows filter/service](native/README.md); source and lab tooling only, not part of the release package.
 - Run the optional [resident Guard](docs/GUARD.md) for automatic post-write checks in selected folders, with explicit opt-in quarantine.
 - On a same-user Setup, Guard now covers Downloads, Desktop, Documents, the user Temp directory and the user Startup folder; executable/script-like writes use a short 200 ms settle path and are still revalidated if they continue changing.
+- Guard also includes a bounded, detection-only [behavior correlation layer](docs/BEHAVIOR.md): it correlates watched file changes with new Windows process starts, suspicious parent→interpreter chains, recent-write→execution transitions and mass file changes. Behavioral signals are journaled and shown in the Antivirus UI, but never quarantine files or terminate processes on their own.
+- A separate explainable [RiskContext fusion layer](docs/RISK.md) combines scanner verdict, fresh path-specific behavior, file origin and native pre-execution state. Only a confirmed scanner threat is eligible for automatic enforcement; behavior/origin alone remain review-only.
+- A bounded [Incident Graph](docs/INCIDENTS.md) connects related writes, process ancestry, behavior findings and RiskContext verdicts into one local attack chain. Ordinary process starts do not create incidents, and the graph never expands automatic enforcement.
+- The Antivirus page includes a structured [Incident Viewer](docs/INCIDENT_VIEWER.md) that deduplicates recent incident snapshots and renders the selected graph as a causal tree with node evidence instead of a raw JSON popup.
+- Incident Viewer includes a conservative [Response Center](docs/INCIDENT_RESPONSE.md): rescan linked files, open their location, export a local report, and isolate only freshly confirmed scanner threats after explicit confirmation and quarantine revalidation.
 
-The current production-core work includes independent ClamAV detection, encrypted quarantine, an optional post-write Resident Guard, a managed ClamAV service/update lifecycle, verified Windows service ownership for the ClamD loopback peer, and an experimental native execute-open minifilter. It is **not yet a certified primary Windows antivirus replacement**; see the [readiness gates](docs/DEFENDER_REPLACEMENT.md). AntiOS does not disable Defender or fake Windows Security registration. The built-in local database contains only the EICAR test hash; [ClamAV integration](docs/CLAMAV.md) supplies independent official signatures and archive/file-format analysis. Default limits are 32 MiB per file and 100,000 files, with skipped files and failed provider calls explicitly reported.
+The current production-core work includes independent ClamAV detection, encrypted quarantine, an optional post-write Resident Guard with bounded behavior correlation and incident graphs, a managed ClamAV service/update lifecycle, verified Windows service ownership for the ClamD loopback peer, and an experimental native execute-open minifilter. It is **not yet a certified primary Windows antivirus replacement**; see the [readiness gates](docs/DEFENDER_REPLACEMENT.md). AntiOS does not disable Defender or fake Windows Security registration. The built-in local database contains only the EICAR test hash; [ClamAV integration](docs/CLAMAV.md) supplies independent official signatures and archive/file-format analysis. Default limits are 32 MiB per file and 100,000 files, with skipped files and failed provider calls explicitly reported.
 
 Details, CLI examples, exit codes and quarantine recovery: [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
 
@@ -165,6 +172,9 @@ Antivirus stack status:
 ```powershell
 antios protection-status
 antios protection-status --json
+
+antios coexistence-status
+antios coexistence-status --json
 ```
 
 Check for an AntiOS update:
@@ -269,7 +279,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a19-py3-none-any.whl
+python -m pip install .\antios-2.0.0a21-py3-none-any.whl
 antios-gui
 ```
 

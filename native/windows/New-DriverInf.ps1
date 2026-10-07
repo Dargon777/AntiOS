@@ -6,6 +6,10 @@ param(
 $ErrorActionPreference = 'Stop'
 # Numeric validation is not evidence that Microsoft assigned this altitude to AntiOS.
 # The operator must supply the actual allocation; no borrowed/default sample altitude.
+$altitudeValue = [decimal]::Parse($AssignedAltitude, [Globalization.CultureInfo]::InvariantCulture)
+if ($altitudeValue -lt [decimal]320000 -or $altitudeValue -ge [decimal]329999) {
+    throw 'AssignedAltitude must be inside the current FSFilter Anti-Virus range: 320000 <= altitude < 329999.'
+}
 New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
 $template = Get-Content -Raw "$PSScriptRoot\AntiOS-Filter.inf.in"
 $template.Replace('@ALTITUDE@', $AssignedAltitude).Replace('@DATE@', (Get-Date -Format 'MM/dd/yyyy')) |

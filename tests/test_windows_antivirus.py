@@ -53,3 +53,48 @@ def test_native_amsi_accepts_benign_buffer():
         assert result < 32768
     finally:
         provider.close()
+
+
+def test_defender_status_builds_layered_coexistence_profile(monkeypatch):
+    monkeypatch.setattr(windows_antivirus, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        windows_antivirus,
+        "_powershell_executable",
+        lambda: r"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    )
+    payload = (
+        '{"AMRunningMode":"Normal","AntivirusEnabled":true,'
+        '"AntispywareEnabled":true,"RealTimeProtectionEnabled":true,'
+        '"BehaviorMonitorEnabled":true,"IoavProtectionEnabled":true,'
+        '"NISEnabled":true,"IsTamperProtected":true,'
+        '"AntivirusSignatureVersion":"1.2.3","AntivirusSignatureLastUpdated":"now"}'
+    )
+    calls = []
+    def runner(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout=payload, stderr="")
+
+    status = windows_antivirus.defender_status(runner=runner)
+    profile = windows_antivirus.coexistence_profile(status)
+    assert status["realtime_active"] is True
+    assert status["tamper_protected"] is True
+    assert profile["mode"] == "layered"
+    assert profile["layered_with_defender"] is True
+    assert profile["primary_antivirus_registration"] is False
+    assert profile["defender_configuration_changed"] is False
+    assert profile["stealth_or_hiding"] is False
+    assert "shell" not in calls[0][1]
+    assert "Get-MpComputerStatus" in calls[0][0][-1]
+
+
+def test_defender_status_failure_is_non_destructive(monkeypatch):
+    monkeypatch.setattr(windows_antivirus, "_is_windows", lambda: True)
+    monkeypatch.setattr(windows_antivirus, "_powershell_executable", lambda: "powershell.exe")
+    def runner(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="cmdlet unavailable")
+    status = windows_antivirus.defender_status(runner=runner)
+    assert status["available"] is False
+    assert status["reason"] == "query-failed"
+    profile = windows_antivirus.coexistence_profile(status)
+    assert profile["mode"] == "defender-unavailable"
+    assert profile["defender_configuration_changed"] is False
