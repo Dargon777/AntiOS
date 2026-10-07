@@ -2962,14 +2962,13 @@ Return Value:
 Cleanup:
 
     //
-    //  We only insert the entry when the file is clean or infected.
+    // Persist confirmed infected state only. Clean verdict reuse is handled by
+    // the bounded stream/SHA-256 caches above; putting every clean file in the
+    // legacy unbounded FileId AVL table would consume kernel memory without a
+    // trustworthy lifetime/database generation.
     //
-
-    if (!IS_FILE_MODIFIED( streamContext ) ||
-        IS_FILE_INFECTED( streamContext )) {
-
+    if (IS_FILE_INFECTED( streamContext )) {
         if (!NT_SUCCESS ( AvSyncCache( FltObjects->Instance, streamContext ))) {
-
             AV_DBG_PRINT( AVDBG_TRACE_ERROR,
                       ("[AV] AvPreCleanup: AvSyncCache FAILED!! \n") );
         }
