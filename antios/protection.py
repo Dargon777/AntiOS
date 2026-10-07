@@ -134,12 +134,13 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     native_coexistence = bool(
         native_running and
         driver.get("driver_available") is True and
+        driver.get("exit_code") == 0 and
         driver.get("coexistence_mode") == 1 and
         driver.get("fail_open_on_incomplete") is True and
         isinstance(driver.get("max_pending"), int) and
         1 <= driver.get("max_pending") <= 16 and
         isinstance(driver.get("pending"), int) and
-        driver.get("pending") <= driver.get("max_pending")
+        0 <= driver.get("pending") <= driver.get("max_pending")
     )
     pre_execution = bool(
         native_running and
