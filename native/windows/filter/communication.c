@@ -76,7 +76,8 @@ NTSTATUS
 AvUpdateStreamContextWithScanResult (
     _Inout_  PAV_STREAM_CONTEXT StreamContext,
     _In_  PAV_SCAN_CONTEXT ScanContext,
-    _In_  AVSCAN_RESULT ScanResult
+    _In_  AVSCAN_RESULT ScanResult,
+    _In_  ULONGLONG DatabaseGeneration
     );
 
 NTSTATUS
@@ -89,7 +90,8 @@ AvHandleCmdCreateSectionForDataScan (
 NTSTATUS
 AvHandleCmdCloseSectionForDataScan (
     _Inout_  PAV_SCAN_CONTEXT ScanContext,
-    _In_  AVSCAN_RESULT ScanResult
+    _In_  AVSCAN_RESULT ScanResult,
+    _In_  ULONGLONG DatabaseGeneration
     );
 
 #ifdef ALLOC_PRAGMA
@@ -822,7 +824,8 @@ NTSTATUS
 AvUpdateStreamContextWithScanResult (
     _Inout_  PAV_STREAM_CONTEXT StreamContext,
     _In_  PAV_SCAN_CONTEXT ScanContext,
-    _In_  AVSCAN_RESULT ScanResult
+    _In_  AVSCAN_RESULT ScanResult,
+    _In_  ULONGLONG DatabaseGeneration
     )
 /*++
 
@@ -872,16 +875,40 @@ Return Value:
 
                 InterlockedCompareExchange( &StreamContext->TxState, AvFileInfected, AvFileScanning );
                 InterlockedExchange64(&StreamContext->TxCleanValidUntil100ns, 0);
+                InterlockedExchange64(&StreamContext->TxCleanDatabaseGeneration, 0);
 
             } else {
 
                 InterlockedCompareExchange( &StreamContext->State, AvFileInfected, AvFileScanning );
                 InterlockedExchange64(&StreamContext->CleanValidUntil100ns, 0);
+                InterlockedExchange64(&StreamContext->CleanDatabaseGeneration, 0);
             }
             break;
         case AvScanResultClean:
         {
             LONGLONG validUntil = 0;
+            LONGLONG activeGeneration = InterlockedCompareExchange64(&Globals.DatabaseGeneration, 0, 0);
+
+            // A first verified clean verdict may establish the initial generation.
+            if (activeGeneration == 0 && DatabaseGeneration != 0) {
+                LONGLONG previousGeneration = InterlockedCompareExchange64(
+                    &Globals.DatabaseGeneration, (LONGLONG)DatabaseGeneration, 0);
+                if (previousGeneration == 0) {
+                    InterlockedIncrement64(&Globals.DatabaseGenerationChanges);
+                    activeGeneration = (LONGLONG)DatabaseGeneration;
+                } else {
+                    activeGeneration = previousGeneration;
+                }
+            }
+
+            // Never cache a verdict produced by an unknown or no-longer-current
+            // database generation. The watcher will update Globals on FreshClam changes.
+            if (DatabaseGeneration == 0 || (LONGLONG)DatabaseGeneration != activeGeneration) {
+                InterlockedIncrement64(&Globals.CleanCacheInvalidations);
+                SET_FILE_MODIFIED_EX( ScanContext->IsFileInTxWriter, StreamContext );
+                break;
+            }
+
             if (Globals.CleanCacheTtlMs) {
                 validUntil = (LONGLONG)KeQueryInterruptTime() +
                              ((LONGLONG)Globals.CleanCacheTtlMs * 10000);
@@ -890,22 +917,26 @@ Return Value:
             //
             // If after the scan and before setting this file as clean, the file gets modified,
             // leave it modified. A successful transition records only a bounded
-            // monotonic clean lifetime; modifying I/O clears the deadline.
+            // monotonic clean lifetime and the exact database generation.
             //
             if (ScanContext->IsFileInTxWriter) {
                 LONG previous = InterlockedCompareExchange(
                     &StreamContext->TxState, AvFileNotInfected, AvFileScanning);
                 if (previous == AvFileScanning) {
+                    InterlockedExchange64(&StreamContext->TxCleanDatabaseGeneration, (LONGLONG)DatabaseGeneration);
                     InterlockedExchange64(&StreamContext->TxCleanValidUntil100ns, validUntil);
                 } else {
+                    InterlockedExchange64(&StreamContext->TxCleanDatabaseGeneration, 0);
                     InterlockedExchange64(&StreamContext->TxCleanValidUntil100ns, 0);
                 }
             } else {
                 LONG previous = InterlockedCompareExchange(
                     &StreamContext->State, AvFileNotInfected, AvFileScanning);
                 if (previous == AvFileScanning) {
+                    InterlockedExchange64(&StreamContext->CleanDatabaseGeneration, (LONGLONG)DatabaseGeneration);
                     InterlockedExchange64(&StreamContext->CleanValidUntil100ns, validUntil);
                 } else {
+                    InterlockedExchange64(&StreamContext->CleanDatabaseGeneration, 0);
                     InterlockedExchange64(&StreamContext->CleanValidUntil100ns, 0);
                 }
             }
@@ -1060,7 +1091,8 @@ Return Value:
 NTSTATUS
 AvHandleCmdCloseSectionForDataScan (
     _Inout_  PAV_SCAN_CONTEXT ScanContext,
-    _In_  AVSCAN_RESULT ScanResult
+    _In_  AVSCAN_RESULT ScanResult,
+    _In_  ULONGLONG DatabaseGeneration
     )
 /*++
 
@@ -1105,7 +1137,7 @@ Return Value:
     //
     //  Update stream context will succeed.
     //
-    AvUpdateStreamContextWithScanResult(streamContext, ScanContext, ScanResult);
+    AvUpdateStreamContextWithScanResult(streamContext, ScanContext, ScanResult, DatabaseGeneration);
 
 Cleanup:
 
@@ -1186,6 +1218,8 @@ AvMessageNotifyCallback (
         state.CleanCacheHits = InterlockedCompareExchange64(&Globals.CleanCacheHits, 0, 0);
         state.CleanCacheExpired = InterlockedCompareExchange64(&Globals.CleanCacheExpired, 0, 0);
         state.CleanCacheInvalidations = InterlockedCompareExchange64(&Globals.CleanCacheInvalidations, 0, 0);
+        state.DatabaseGeneration = InterlockedCompareExchange64(&Globals.DatabaseGeneration, 0, 0);
+        state.DatabaseGenerationChanges = InterlockedCompareExchange64(&Globals.DatabaseGenerationChanges, 0, 0);
         state.TotalWait100ns = InterlockedCompareExchange64(&Globals.TotalWait100ns, 0, 0);
         state.MaxWait100ns = InterlockedCompareExchange64(&Globals.MaxWait100ns, 0, 0);
         __try {
@@ -1198,17 +1232,33 @@ AvMessageNotifyCallback (
     }
     if (*(PAVSCAN_CONNECTION_TYPE)ConnectionCookie != AvConnectForScan || !AvSystemMessageCaller())
         return STATUS_ACCESS_DENIED;
+
+    if (command.Command == AvCmdSetDatabaseGeneration) {
+        LONGLONG previousGeneration;
+        if (command.ScanId != 0 || command.ScanThreadId != 0 || command.ResultFlags != 0 ||
+            command.FileHandle != NULL || OutputBuffer != NULL || OutputBufferSize != 0)
+            return STATUS_INVALID_PARAMETER;
+        previousGeneration = InterlockedExchange64(
+            &Globals.DatabaseGeneration, (LONGLONG)command.DatabaseGeneration);
+        if (previousGeneration != (LONGLONG)command.DatabaseGeneration)
+            InterlockedIncrement64(&Globals.DatabaseGenerationChanges);
+        return STATUS_SUCCESS;
+    }
+
     if (command.ScanId <= 0 ||
         (command.Command != AvCmdCreateSectionForDataScan && command.Command != AvCmdCloseSectionForDataScan))
         return STATUS_INVALID_PARAMETER;
     if (command.Command == AvCmdCreateSectionForDataScan &&
-        (command.ResultFlags != 0 || !OutputBuffer || OutputBufferSize != sizeof(reply) ||
+        (command.ResultFlags != 0 || command.DatabaseGeneration != 0 ||
+         !OutputBuffer || OutputBufferSize != sizeof(reply) ||
          !IS_ALIGNED(OutputBuffer, sizeof(HANDLE))))
         return STATUS_INVALID_PARAMETER;
     if (command.Command == AvCmdCloseSectionForDataScan &&
         (command.ScanResult < AvScanResultUndetermined || command.ScanResult > AvScanResultClean ||
          (command.ResultFlags & ~AO_SCAN_FLAG_CLEAN_CACHE_HIT) != 0 ||
-         (command.ResultFlags != 0 && command.ScanResult != AvScanResultClean)))
+         (command.ResultFlags != 0 && command.ScanResult != AvScanResultClean) ||
+         (command.ScanResult == AvScanResultClean && command.DatabaseGeneration == 0) ||
+         (command.ScanResult != AvScanResultClean && command.DatabaseGeneration != 0)))
         return STATUS_INVALID_PARAMETER;
     status = AvGetScanCtxSynchronized(command.ScanId, &scanContext);
     if (!NT_SUCCESS(status)) return status;
@@ -1228,7 +1278,8 @@ AvMessageNotifyCallback (
         if (command.ResultFlags & AO_SCAN_FLAG_CLEAN_CACHE_HIT) {
             InterlockedIncrement64(&Globals.CleanCacheHits);
         }
-        status = AvHandleCmdCloseSectionForDataScan(scanContext, command.ScanResult);
+        status = AvHandleCmdCloseSectionForDataScan(
+            scanContext, command.ScanResult, command.DatabaseGeneration);
     }
     AvReleaseScanContext(scanContext);
     return status;
