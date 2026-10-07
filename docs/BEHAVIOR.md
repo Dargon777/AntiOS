@@ -124,3 +124,14 @@ Those limitations are surfaced by describing the feature as behavior
 
 A future collector may use a supported ETW/Event Log source when that can be
 added without requiring unsafe hooks or weakening Windows security controls.
+
+
+## Risk fusion
+
+Path-specific behavior findings can feed the separate
+[RiskContext](RISK.md) decision layer after an antivirus scan. RiskContext uses
+only fresh findings whose subject exactly matches the scanned path; a global
+behavior alert is not blindly assigned to every unrelated file.
+
+Behavior-only evidence remains review-only regardless of score. Automatic
+enforcement eligibility still requires a confirmed scanner threat.
