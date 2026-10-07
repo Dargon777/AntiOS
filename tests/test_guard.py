@@ -781,12 +781,15 @@ def test_guard_builds_incident_graph_from_write_execute_and_scan(tmp_path):
         assert "evaluated-as" in relations
         assert latest["node_count"] >= 4
         assert latest["classification"] in {"high", "critical-behavior"}
+        until(lambda: any(
+            event["kind"] == "incident-update"
+            for event in read_guard_state(state, history=True).get("events", [])
+        ))
         history = read_guard_state(state, history=True)
         incident_events = [
             event for event in history["events"]
             if event["kind"] == "incident-update"
         ]
-        assert incident_events
         assert incident_events[0]["data"]["incident"]["id"] == latest["id"]
     finally:
         stop.set()
