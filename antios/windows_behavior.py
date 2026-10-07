@@ -90,7 +90,7 @@ class WindowsProcessSampler:
                         pid=pid,
                         ppid=int(entry.th32ParentProcessID),
                         image=image,
-                        path=self._path(pid),
+                        path="",
                     )
                 entry.dwSize = ctypes.sizeof(entry)
                 ok = self.kernel32.Process32NextW(handle, ctypes.byref(entry))
@@ -105,11 +105,25 @@ class WindowsProcessSampler:
             return []
 
         previous = self._known
+
+        # Carry cached paths for existing processes and resolve only newly
+        # observed PIDs. This keeps the 500 ms poll lightweight even on systems
+        # with hundreds of processes.
+        new_pids = []
+        for pid, process in list(current.items()):
+            old = previous.get(pid)
+            if old is not None:
+                current[pid] = _SnapshotProcess(
+                    process.pid, process.ppid, process.image, old.path)
+            else:
+                new_pids.append(pid)
+                current[pid] = _SnapshotProcess(
+                    process.pid, process.ppid, process.image, self._path(pid))
+
         self._known = current
         events: list[ProcessEvent] = []
-        for pid, process in current.items():
-            if pid in previous:
-                continue
+        for pid in new_pids:
+            process = current[pid]
             parent = current.get(process.ppid) or previous.get(process.ppid)
             events.append(ProcessEvent(
                 pid=process.pid,
