@@ -65,6 +65,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clamav-daemon gcc
           python -m pip install pytest -e .
+      - name: Native coexistence source contracts
+        run: python -m pytest tests/test_native_coexistence_contract.py tests/test_protection.py -v
       - name: Native protocol, cancellation and real archive scanning
         env:
           ANTIOS_REQUIRE_NATIVE: '1'
