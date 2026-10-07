@@ -259,3 +259,63 @@ def test_behavior_monitoring_is_reported_without_claiming_blocking(monkeypatch):
     assert status["capabilities"]["pre_execution_blocking"] is False
     rendered = protection.render_protection_status(status)
     assert "Behavior monitor: attention (toolhelp-snapshot, score=85, findings=1)" in rendered
+
+
+
+def test_risk_fusion_is_reported_without_expanding_auto_enforcement(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(protection, "read_guard_state", lambda: {
+        "running": True,
+        "state": "attention",
+        "behavior": {
+            "state": "attention",
+            "mode": "detect-only",
+            "collector": "toolhelp-snapshot",
+            "highest_score": 75,
+            "recent_findings": 1,
+        },
+        "risk": {
+            "mode": "fusion",
+            "evaluations": 4,
+            "highest_score": 80,
+            "native_pre_execution": "active",
+            "last": {
+                "classification": "high",
+                "score": 80,
+                "origin": "downloads",
+                "native_pre_execution": "active",
+                "automatic_enforcement_eligible": False,
+            },
+        },
+    })
+    monkeypatch.setattr(protection, "_native_status", lambda: {
+        "available": True,
+        "service": {"service_state": 4, "exit_code": 0},
+        "driver": {
+            "driver_available": True,
+            "exit_code": 0,
+            "enforcement": 1,
+        },
+    })
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    status = protection.collect_protection_status("clamd")
+    assert status["capabilities"]["risk_fusion"] is True
+    assert status["risk"]["last"]["automatic_enforcement_eligible"] is False
+    rendered = protection.render_protection_status(status)
+    assert "Risk fusion: high (score=80, origin=downloads, native=active, auto-enforce=False)" in rendered
+
+
+def test_native_pre_execution_helper_is_tri_state():
+    assert protection.native_pre_execution_active({
+        "available": False,
+    }) is None
+    assert protection.native_pre_execution_active({
+        "available": True,
+        "service": {"service_state": 4, "exit_code": 0},
+        "driver": {"driver_available": True, "exit_code": 0, "enforcement": 1},
+    }) is True
+    assert protection.native_pre_execution_active({
+        "available": True,
+        "service": {"service_state": 4, "exit_code": 0},
+        "driver": {"driver_available": True, "exit_code": 0, "enforcement": 0},
+    }) is False
