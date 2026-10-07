@@ -152,7 +152,9 @@ static int driver_status_json(void) {
                "\"attempts\":%lld,\"incomplete\":%lld,\"detections\":%lld,\"blocked\":%lld,"
                "\"busy_bypass\":%lld,\"delivery_timeouts\":%lld,\"completion_timeouts\":%lld,"
                "\"cancelled_opens\":%lld,\"cache_hits\":%lld,\"cache_expired\":%lld,"
-               "\"cache_invalidations\":%lld,\"total_wait_ms\":%llu,\"average_wait_ms\":%llu,\"max_wait_ms\":%llu}\n",
+               "\"cache_invalidations\":%lld,\"database_generation\":%lld,"
+               "\"database_generation_changes\":%lld,\"total_wait_ms\":%llu,"
+               "\"average_wait_ms\":%llu,\"max_wait_ms\":%llu}\n",
                state.ProtocolVersion, state.Enforcement, state.CoexistenceMode,
                state.LocalScanTimeoutMs, state.CleanCacheTtlMs,
                state.MaxPendingScans, state.PendingScans, state.PeakPendingScans,
@@ -162,6 +164,7 @@ static int driver_status_json(void) {
                (long long)state.CompletionTimeouts, (long long)state.CancelledOpens,
                (long long)state.CleanCacheHits, (long long)state.CleanCacheExpired,
                (long long)state.CleanCacheInvalidations,
+               (long long)state.DatabaseGeneration, (long long)state.DatabaseGenerationChanges,
                total_ms, average_ms, max_ms);
     }
     return 0;
@@ -173,7 +176,7 @@ static int scan_file(const wchar_t *path, int verified) {
     LARGE_INTEGER length;
     unsigned char *data = NULL;
     DWORD got = 0;
-    struct ao_outcome result = {AO_UNKNOWN, 0, "", "file unreadable or outside size limit"};
+    struct ao_outcome result = {AO_UNKNOWN, 0, 0, "", "file unreadable or outside size limit"};
     file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file != INVALID_HANDLE_VALUE) {
         if (GetFileSizeEx(file, &length) && length.QuadPart >= 0 && length.QuadPart <= AO_MAX_FILE_BYTES) {
@@ -189,8 +192,10 @@ static int scan_file(const wchar_t *path, int verified) {
     }
     if (data) HeapFree(GetProcessHeap(), 0, data);
     /* Name/detail are bounded printable ASCII from the strict engine parser. */
-    printf("{\"result\":%d,\"database_current\":%s,\"name\":\"%s\",\"detail\":\"%s\"}\n",
-           (int)result.result, result.database_current ? "true" : "false", result.name, result.detail);
+    printf("{\"result\":%d,\"database_current\":%s,\"database_generation\":%llu,"
+           "\"name\":\"%s\",\"detail\":\"%s\"}\n",
+           (int)result.result, result.database_current ? "true" : "false",
+           (unsigned long long)result.database_generation, result.name, result.detail);
     return result.result == AO_CLEAR ? 0 : result.result == AO_THREAT ? 1 : 2;
 }
 int wmain(int argc, wchar_t **argv) {
