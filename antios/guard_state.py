@@ -171,13 +171,18 @@ def read_incident_history(folder=None, *, limit=50):
                 snapshot = dict(incident)
                 snapshot["_journal_at"] = float(journal_at)
                 newest[incident_id] = snapshot
+            else:
+                # The current status may contain a newer graph snapshot, while
+                # the journal carries the precise wall-clock time of its most
+                # recent persisted update.
+                newest[incident_id]["_journal_at"] = float(journal_at)
             if len(newest) >= limit:
                 break
 
     values = list(newest.values())
     values.sort(
         key=lambda item: (
-            float(item.get("updated_at", 0) or 0),
+            float(item.get("_journal_at", 0) or 0),
             str(item.get("id", "")),
         ),
         reverse=True,
