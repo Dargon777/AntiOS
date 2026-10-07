@@ -207,6 +207,9 @@ def test_real_tk_incident_viewer_renders_history_tree_and_details():
         root.update()
         assert len(viewer.incident_tree.get_children()) == 1
         assert len(viewer.chain.get_children()) >= 1
+        assert str(viewer.rescan_button["state"]) == "normal"
+        assert str(viewer.isolate_button["state"]) == "disabled"
+        assert str(viewer.report_button["state"]) == "normal"
 
         process_item = next(
             iid for iid, row in viewer.rows.items()
@@ -217,8 +220,29 @@ def test_real_tk_incident_viewer_renders_history_tree_and_details():
         details = viewer.details.get("1.0", "end")
         assert "PID: 500" in details
         assert "payload.exe" in details
+        assert str(viewer.reveal_button["state"]) == "normal"
 
-        viewer.window.destroy()
+        incident_id = incident["id"]
+        viewer.response_scans[incident_id] = {
+            "incident_id": incident_id,
+            "results": [{
+                "path": r"C:\Users\A\Downloads\payload.exe",
+                "result": {
+                    "findings": [{
+                        "kind": "threat",
+                        "name": "Inert.Test",
+                        "path": r"C:\Users\A\Downloads\payload.exe",
+                        "sha256": "a" * 64,
+                        "fingerprint": [1, 2, 3, 4],
+                    }]
+                },
+            }],
+            "errors": [],
+        }
+        viewer._sync_response_buttons()
+        assert str(viewer.isolate_button["state"]) == "normal"
+
+        viewer._close()
         root.update()
     finally:
         root.destroy()
