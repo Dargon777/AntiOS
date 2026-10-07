@@ -208,6 +208,7 @@ typedef struct _AO_DRIVER_STATUS {
 } AO_DRIVER_STATUS;
 
 #define AO_PROTOCOL_VERSION 2u
+#define AO_BROKER_WORKERS 4u
 #define AO_MAX_SECTION_BYTES (32u * 1024u * 1024u)
 typedef struct _AO_SECTION_REPLY {
     HANDLE SectionHandle;
