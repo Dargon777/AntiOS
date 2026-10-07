@@ -2,7 +2,7 @@
 # This script never changes Defender, Windows Security registration or AMSI FeatureBits.
 [CmdletBinding()]
 param(
-    [string]$ProviderDll = (Join-Path $PSScriptRoot '..\..\..\build\native\windows\AntiOS-AmsiProvider.dll'),
+    [string]$ProviderDll = (Join-Path $PSScriptRoot 'AntiOS-AmsiProvider.dll'),
     [switch]$Uninstall,
     [switch]$Apply,
     [switch]$Json
