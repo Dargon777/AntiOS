@@ -437,32 +437,41 @@ class Dashboard:
         if self.config.updates.auto_update:
             self._start_update_worker(download=True, automatic=True)
 
+    def _heal_managed_engine(self) -> dict:
+        from .protection import collect_protection_status
+        from .protection_repair import run_protection_bootstrap, run_protection_repair
+
+        status = collect_protection_status()
+        caps = status.get("capabilities", {})
+        if caps.get("standalone_detection_engine"):
+            return {"action": "already-ready", "status": status}
+
+        managed = status.get("managed_runtime", {})
+        managed_files = managed.get("files", {}) if isinstance(managed, dict) else {}
+        repairable = bool(managed_files) and all(bool(value) for value in managed_files.values())
+        if repairable:
+            result = run_protection_repair(apply=True, update_signatures=True)
+            return {"action": "repaired", "result": result}
+        result = run_protection_bootstrap()
+        return {"action": "bootstrapped", "result": result}
+
     def _resident_autostart_worker(self) -> None:
         try:
-            from .protection import collect_protection_status
-            from .protection_repair import run_protection_repair
             from .resident import ensure_resident_guard
 
-            status = collect_protection_status()
-            caps = status.get("capabilities", {})
-            managed = status.get("managed_runtime", {})
-            managed_files = managed.get("files", {}) if isinstance(managed, dict) else {}
-            repairable = bool(managed_files) and all(bool(value) for value in managed_files.values())
-            if not caps.get("standalone_detection_engine") and repairable:
-                run_protection_repair(apply=True, update_signatures=True)
+            self._heal_managed_engine()
             value = ensure_resident_guard()
             self.antivirus_queue.put(("guard-action", value))
         except Exception as exc:
             self.antivirus_queue.put(("error", f"Resident protection startup failed: {exc}"))
 
     def repair_protection(self) -> dict:
-        """Repair the managed engine, refresh signatures and restore Resident Guard."""
-        from .protection_repair import run_protection_repair
+        """Repair/bootstrap the managed engine and restore Resident Guard."""
         from .resident import ensure_resident_guard
 
-        repair = run_protection_repair(apply=True, update_signatures=True)
+        engine = self._heal_managed_engine()
         guard = ensure_resident_guard()
-        return {"repair": repair, "guard": guard}
+        return {"engine": engine, "guard": guard}
 
     def set_resident_protection_enabled(self, enabled: bool) -> dict:
         """Persist the user's Guard preference and apply it immediately."""
