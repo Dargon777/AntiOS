@@ -118,6 +118,8 @@ def test_legacy_file_id_cache_does_not_store_clean_verdicts():
     cleanup = driver[cleanup_start:cleanup_end]
     assert "if (IS_FILE_INFECTED( streamContext ))" in cleanup
     assert "clean file in the legacy" not in cleanup
-    load = driver[driver.index("NTSTATUS\nAvLoadFileStateFromCache"):driver.index("NTSTATUS\nAvSyncCache")]
+    load_start = driver.rindex("NTSTATUS\nAvLoadFileStateFromCache")
+    load_end = driver.rindex("NTSTATUS\nAvSyncCache")
+    load = driver[load_start:load_end]
     assert "entry->InfectedState == AvFileNotInfected" in load
     assert "AvFileModified : entry->InfectedState" in load
