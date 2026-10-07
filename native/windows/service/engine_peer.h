@@ -13,5 +13,7 @@ void ao_engine_peer_close(struct ao_engine_peer *peer);
 #include "../engine/engine.h"
 struct ao_outcome ao_engine_scan(const wchar_t *service_name, const void *data, size_t size,
                                 unsigned timeout, ao_cancel_fn cancel, void *context);
+uint64_t ao_engine_generation(const wchar_t *service_name, unsigned timeout,
+                              ao_cancel_fn cancel, void *context, int *database_current);
 
 #endif
