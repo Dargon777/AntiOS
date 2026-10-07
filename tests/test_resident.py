@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,8 +45,8 @@ def test_configure_resident_guard_uses_persistent_task(monkeypatch, tmp_path):
     assert "-EngineServiceName" in args
     assert "clamd" in args
     assert "-RootsJson" in args
-    payload = args[args.index("-RootsJson") + 1]
-    assert str(root) in payload
+    payload = json.loads(args[args.index("-RootsJson") + 1])
+    assert payload == [str(root)]
 
 
 def test_ensure_resident_guard_repairs_stopped_state(monkeypatch):
