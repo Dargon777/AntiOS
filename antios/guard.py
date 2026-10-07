@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from collections import OrderedDict
 from dataclasses import dataclass
+import errno
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,16 @@ _FAST_SCAN_SUFFIXES = frozenset({
     ".js", ".jse", ".wsf", ".wsh", ".hta", ".jar", ".lnk", ".url",
 })
 _FAST_SETTLE_SECONDS = 0.20
+_MAX_TRANSIENT_SCAN_RETRIES = 3
+
+
+def _transient_scan_conflict(exc: BaseException) -> bool:
+    """Return True for short-lived file ownership conflicts common with parallel AVs."""
+    if not isinstance(exc, OSError):
+        return False
+    if getattr(exc, "winerror", None) in {32, 33}:  # sharing / lock violation
+        return True
+    return getattr(exc, "errno", None) in {errno.EAGAIN, errno.EBUSY, getattr(errno, "ETXTBSY", -1)}
 
 
 @dataclass(frozen=True)
@@ -143,6 +154,7 @@ class Guard:
         self.pending = OrderedDict()
         self.queue_cursor = None
         self.known, self.failures, self.threats = {}, {}, {}
+        self.transient_retries = {}
         self.status = {'schema': 1, 'kind': 'antivirus-guard', 'run_id': uuid.uuid4().hex,
                        'state': 'starting', 'running': True, 'pid': os.getpid(),
                        'started_at': time.time(), 'heartbeat': time.time(),
@@ -152,7 +164,8 @@ class Guard:
                        'engine': {}, 'scanned': 0, 'detections': 0, 'quarantined': 0,
                        'errors': 0, 'pending': 0, 'unresolved': 0, 'inventory_issues': [],
                        'capacity_exceeded': False, 'notifications': 'starting',
-                       'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS}
+                       'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS,
+                       'transient_deferrals': 0}
 
     def _settle_delay(self, path: Path) -> float:
         """Prioritize executable/script-like writes without claiming execution blocking."""
@@ -299,6 +312,7 @@ class Guard:
                         result = self.scanner(path, engine='clamav', timeout=45, cancelled=cancelled)
                         if cancelled():
                             break
+                        self.transient_retries.pop(path, None)
                         self.status['scanned'] += result['summary']['files_scanned']
                         if not result['engine'].get('available') or result['engine'].get('failed_during_scan'):
                             self.status['engine'] = dict(result['engine'], available=False)
@@ -336,12 +350,38 @@ class Guard:
                                 self.known.pop(next(iter(self.known)))
                             self.known[path] = (identity, time.monotonic(), 30 if incomplete else self.policy.rescan)
                     except (OSError, RuntimeError, ValueError) as exc:
-                        self.status['errors'] += 1
-                        self.failures[path] = str(exc)[:500]
-                        if len(self.known) >= self.policy.max_files and path not in self.known:
-                            self.known.pop(next(iter(self.known)))
-                        self.known[path] = (identity, time.monotonic(), 30)
-                        store.event('scan-error', {'path': str(path), 'error': str(exc)[:500]})
+                        if isinstance(exc, FileNotFoundError):
+                            # Another protection/remediation layer may have removed or
+                            # quarantined the file between discovery and our scan.
+                            self.transient_retries.pop(path, None)
+                            self.failures.pop(path, None)
+                            self.known.pop(path, None)
+                            store.event('scan-vanished', {'path': str(path)})
+                        elif _transient_scan_conflict(exc):
+                            retries = self.transient_retries.get(path, 0) + 1
+                            if retries <= _MAX_TRANSIENT_SCAN_RETRIES:
+                                self.transient_retries[path] = retries
+                                self.status['transient_deferrals'] += 1
+                                delay = min(2.0, max(0.25, self._settle_delay(path) * (retries + 1)))
+                                self.pending[path] = (identity, time.monotonic() + delay)
+                                store.event('scan-deferred', {
+                                    'path': str(path), 'retry': retries,
+                                    'reason': str(exc)[:500], 'delay_seconds': delay,
+                                })
+                            else:
+                                self.transient_retries.pop(path, None)
+                                self.status['errors'] += 1
+                                self.failures[path] = str(exc)[:500]
+                                self.known[path] = (identity, time.monotonic(), 30)
+                                store.event('scan-error', {'path': str(path), 'error': str(exc)[:500]})
+                        else:
+                            self.transient_retries.pop(path, None)
+                            self.status['errors'] += 1
+                            self.failures[path] = str(exc)[:500]
+                            if len(self.known) >= self.policy.max_files and path not in self.known:
+                                self.known.pop(next(iter(self.known)))
+                            self.known[path] = (identity, time.monotonic(), 30)
+                            store.event('scan-error', {'path': str(path), 'error': str(exc)[:500]})
                     self.status.pop('current_path', None)
                 if len(self.failures) > self.policy.max_files or len(self.threats) > self.policy.max_files:
                     raise RuntimeError('Guard incident capacity exceeded; review history and reduce watched scope')
