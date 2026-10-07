@@ -3,6 +3,7 @@
 param(
     [string]$Executable = (Join-Path $PSScriptRoot 'AntiOS-Guard.exe'),
     [string[]]$Roots = @(),
+    [string]$RootsJson,
     [ValidateSet('notify', 'quarantine')][string]$Mode = 'notify',
     [ValidatePattern('^[A-Za-z0-9_-]{1,80}$')][string]$EngineServiceName,
     [switch]$AllowManagedUnsigned,
@@ -11,6 +12,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($RootsJson) {
+    if ($Roots.Count -gt 0) {
+        throw 'Use -Roots or -RootsJson, not both.'
+    }
+    $decodedRoots = ConvertFrom-Json -InputObject $RootsJson
+    if ($decodedRoots -is [string]) {
+        $Roots = @([string]$decodedRoots)
+    } else {
+        $Roots = @($decodedRoots | ForEach-Object { [string]$_ })
+    }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $taskName = "AntiOS Guard ($($identity.User.Value))"
 
