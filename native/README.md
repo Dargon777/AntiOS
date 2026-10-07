@@ -35,7 +35,7 @@ antivirus, a certified driver, or a ready-to-install Defender replacement.
 - `--status` reports SCM state and configured/actual Windows process protection
   separately. `--driver-status` reads loaded policy and counters; it does not infer
   protection from a registry setting. Protocol v2 also reports CoexistenceMode,
-  bounded scan admission, peak pending work, overload bypasses, delivery/completion
+  bounded four-worker scan admission, peak pending work, overload bypasses, delivery/completion
   timeouts, cancellations and total/average/max kernel wait latency. `--scan-file PATH`
   is a bounded diagnostic.
   Diagnostic exits: 0 clean, 1 confirmed signature, 2 incomplete/review/error.
@@ -152,7 +152,7 @@ There is deliberately no test-signing or signature-bypass installer.
      -ReportPath <coexistence.json>
    ```
 
-   The test requires both `WdFilter` and `AntiOS-Filter` to be loaded, opens many
+   The test requires both `WdFilter` and `AntiOS-Filter` to be loaded, verifies Defender real-time state before and after the run, opens many
    distinct clean executables concurrently with `FILE_EXECUTE`, verifies bounded
    admission/latency and refuses any configuration that disables coexistence.
 7. Before considering deployment, also test the matrix below. Revert to audit or
