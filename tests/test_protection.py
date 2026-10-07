@@ -367,3 +367,24 @@ def test_incident_graph_is_reported_as_correlation_not_enforcement(monkeypatch):
     assert status["incidents"]["latest"]["id"] == "INC-000001"
     rendered = protection.render_protection_status(status)
     assert "Incident graph: attention (active=1, score=85, latest=INC-000001, nodes=5, edges=4)" in rendered
+
+
+def test_amsi_provider_is_reported_without_changing_layered_semantics(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(protection, "read_guard_state",
+                        lambda: {"running": True, "state": "monitoring"})
+    monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    monkeypatch.setattr(protection, "amsi_provider_status", lambda: {
+        "available": True,
+        "registered": True,
+        "module_exists": True,
+        "architecture": "x64",
+    })
+    status = protection.collect_protection_status("clamd")
+    assert status["capabilities"]["layered_with_defender"] is True
+    assert status["capabilities"]["amsi_provider_registered"] is True
+    assert status["capabilities"]["amsi_provider_engine_ready"] is True
+    assert status["production_primary_antivirus"] is False
+    rendered = protection.render_protection_status(status)
+    assert "AntiOS AMSI provider: registered" in rendered
