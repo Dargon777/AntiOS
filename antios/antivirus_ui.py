@@ -892,7 +892,11 @@ class AntivirusPanel:
             caps = {}
         layered = bool(
             caps.get("standalone_detection_engine") and
-            caps.get("layered_with_defender")
+            caps.get("layered_with_defender") and
+            (
+                caps.get("resident_post_write_detection") or
+                caps.get("pre_execution_blocking")
+            )
         )
         self.layered_active = layered
         self.engine_chip.configure(
