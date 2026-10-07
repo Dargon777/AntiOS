@@ -38,7 +38,16 @@ jobs:
       - name: Validate AMSI provider exports without registering it
         shell: pwsh
         run: |
-          $exports = (& dumpbin.exe /nologo /exports .\build\native\windows\AntiOS-AmsiProvider.dll | Out-String)
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (-not $vs) { throw 'Visual Studio C++ toolchain was not found.' }
+          $dumpbin = Get-ChildItem -LiteralPath (Join-Path $vs 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'bin\Hostx64\x64\dumpbin.exe' } |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            Select-Object -First 1
+          if (-not $dumpbin) { throw 'dumpbin.exe was not found in the selected MSVC toolchain.' }
+          $exports = (& $dumpbin /nologo /exports .\build\native\windows\AntiOS-AmsiProvider.dll | Out-String)
           if ($exports -notmatch 'DllGetClassObject' -or $exports -notmatch 'DllCanUnloadNow') {
             throw 'AntiOS AMSI provider is missing required COM exports.'
           }
