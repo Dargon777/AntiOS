@@ -9,6 +9,7 @@
 #include <amsi.h>
 #include <objbase.h>
 #include <new>
+#include <string.h>
 #include <wchar.h>
 #include "../service/engine_peer.h"
 #include "../engine/engine.h"
@@ -46,7 +47,7 @@ static DWORD managed_engine_service_name(wchar_t name[81]) {
 class AntiOSAmsiProvider final : public IAntimalwareProvider {
 public:
     AntiOSAmsiProvider() : refs_(1) { InterlockedIncrement(&g_objects); }
-    ~AntiOSAmsiProvider() override { InterlockedDecrement(&g_objects); }
+    ~AntiOSAmsiProvider() { InterlockedDecrement(&g_objects); }
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **object) override {
         if (!object) return E_POINTER;
@@ -148,7 +149,8 @@ private:
 
 class AntiOSClassFactory final : public IClassFactory {
 public:
-    AntiOSClassFactory() : refs_(1) {}
+    AntiOSClassFactory() : refs_(1) { InterlockedIncrement(&g_objects); }
+    ~AntiOSClassFactory() { InterlockedDecrement(&g_objects); }
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **object) override {
         if (!object) return E_POINTER;
