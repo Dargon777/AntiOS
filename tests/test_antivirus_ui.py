@@ -203,6 +203,7 @@ def test_layered_chip_requires_verified_defender_and_antios_engine():
         "capabilities": {
             "standalone_detection_engine": True,
             "layered_with_defender": True,
+            "resident_post_write_detection": True,
         }
     })
     assert panel.layered_active is True
@@ -214,6 +215,7 @@ def test_layered_chip_requires_verified_defender_and_antios_engine():
         "capabilities": {
             "standalone_detection_engine": False,
             "layered_with_defender": True,
+            "resident_post_write_detection": True,
         }
     })
     assert panel.layered_active is False
