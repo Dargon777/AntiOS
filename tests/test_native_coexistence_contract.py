@@ -4,6 +4,7 @@ from pathlib import Path
 def test_native_coexistence_protocol_contract():
     avlib = Path("native/windows/inc/avlib.h").read_text(encoding="utf-8")
     assert "#define AO_PROTOCOL_VERSION 2u" in avlib
+    assert "#define AO_BROKER_WORKERS 4u" in avlib
     for field in (
         "CoexistenceMode", "LocalScanTimeoutMs", "MaxPendingScans",
         "PeakPendingScans", "BusyBypass", "DeliveryTimeouts",
@@ -30,8 +31,22 @@ def test_native_coexistence_harness_requires_defender_to_remain_active():
     script = Path("native/windows/Test-NativeCoexistence.ps1").read_text(encoding="utf-8")
     assert "Get-MpComputerStatus" in script
     assert "RealTimeProtectionEnabled" in script
+    assert "defenderAfter" in script
     assert "WdFilter" in script
     assert "CoexistenceMode must be enabled" in script
     assert "Set-MpPreference" not in script
     assert "Add-MpPreference" not in script
     assert "Remove-MpPreference" not in script
+
+
+def test_native_admission_matches_broker_capacity():
+    avlib = Path("native/windows/inc/avlib.h").read_text(encoding="utf-8")
+    broker = Path("native/windows/service/userscan.c").read_text(encoding="utf-8")
+    driver = Path("native/windows/filter/avscan.c").read_text(encoding="utf-8")
+    installer = Path("native/windows/Install-NativeService.ps1").read_text(encoding="utf-8")
+    harness = Path("native/windows/Test-NativeCoexistence.ps1").read_text(encoding="utf-8")
+    assert "#define AO_BROKER_WORKERS 4u" in avlib
+    assert "#define WORKERS AO_BROKER_WORKERS" in broker
+    assert "<= AO_BROKER_WORKERS" in driver
+    assert "four native broker workers" in installer
+    assert "four-worker native broker capacity" in harness
