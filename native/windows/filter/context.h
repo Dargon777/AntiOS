@@ -96,13 +96,13 @@ typedef struct _AV_TRANSACTION_CONTEXT {
 
 
 #define SET_FILE_UNKNOWN( _sCtx )        InterlockedExchange(&(_sCtx)->State, AvFileUnknown)
-#define SET_FILE_MODIFIED( _sCtx )       { InterlockedExchange(&(_sCtx)->State, AvFileModified); InterlockedExchange64(&(_sCtx)->CleanValidUntil100ns, 0); }
+#define SET_FILE_MODIFIED( _sCtx )       { InterlockedExchange(&(_sCtx)->State, AvFileModified); InterlockedExchange64(&(_sCtx)->CleanValidUntil100ns, 0); InterlockedExchange64(&(_sCtx)->CleanDatabaseGeneration, 0); }
 #define SET_FILE_INFECTED( _sCtx )       InterlockedExchange(&(_sCtx)->State, AvFileInfected)
 #define SET_FILE_NOT_INFECTED( _sCtx )   InterlockedExchange(&(_sCtx)->State, AvFileNotInfected)
 #define SET_FILE_SCANNING( _sCtx )       InterlockedExchange(&(_sCtx)->State, AvFileScanning)
 
 #define SET_FILE_TX_UNKNOWN( _sCtx )        InterlockedExchange(&(_sCtx)->TxState, AvFileUnknown)
-#define SET_FILE_TX_MODIFIED( _sCtx )       { InterlockedExchange(&(_sCtx)->TxState, AvFileModified); InterlockedExchange64(&(_sCtx)->TxCleanValidUntil100ns, 0); }
+#define SET_FILE_TX_MODIFIED( _sCtx )       { InterlockedExchange(&(_sCtx)->TxState, AvFileModified); InterlockedExchange64(&(_sCtx)->TxCleanValidUntil100ns, 0); InterlockedExchange64(&(_sCtx)->TxCleanDatabaseGeneration, 0); }
 #define SET_FILE_TX_INFECTED( _sCtx )       InterlockedExchange(&(_sCtx)->TxState, AvFileInfected)
 #define SET_FILE_TX_NOT_INFECTED( _sCtx )   InterlockedExchange(&(_sCtx)->TxState, AvFileNotInfected)
 #define SET_FILE_TX_SCANNING( _sCtx )       InterlockedExchange(&(_sCtx)->TxState, AvFileScanning)
@@ -213,6 +213,8 @@ typedef struct _AV_STREAM_CONTEXT {
     // modifying I/O clears the corresponding deadline before the next open.
     volatile LONGLONG CleanValidUntil100ns;
     volatile LONGLONG TxCleanValidUntil100ns;
+    volatile LONGLONG CleanDatabaseGeneration;
+    volatile LONGLONG TxCleanDatabaseGeneration;
 
     //
     // Revision numbers for files on CSVFS
