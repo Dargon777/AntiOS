@@ -16,6 +16,7 @@ import uuid
 
 from .antivirus import checked_path, fingerprint, is_link
 from .clamav import ClamAVScanner
+from .coexistence import defender_protected_roots
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
 from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
@@ -125,10 +126,14 @@ class Guard:
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
-        self.excluded = (self.state_dir, default_quarantine_path().absolute())
+        self.excluded = (
+            self.state_dir,
+            default_quarantine_path().absolute(),
+            *defender_protected_roots(),
+        )
         for excluded in self.excluded:
             if any(root == excluded or excluded in root.parents for root in self.roots):
-                raise ValueError('A watched root cannot be inside Guard state or quarantine storage')
+                raise ValueError('A watched root cannot be inside protected Guard, quarantine or Defender storage')
         if scanner is None:
             self.scanner = lambda path, **kwargs: run_scan_process(
                 path, engine_service=policy.engine_service,
