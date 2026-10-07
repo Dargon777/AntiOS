@@ -90,3 +90,21 @@ def test_clean_cache_is_bounded_and_invalidated_by_writes():
     assert "*(PULONG)value->Data <= 300000" in driver
     assert "CleanCacheInvalidations" in driver
     assert "CleanCacheTtlMs must stay between 0 and 300000 milliseconds." in installer
+
+
+
+def test_broker_clean_cache_is_fixed_bounded_and_clean_only():
+    broker = Path("native/windows/service/userscan.c").read_text(encoding="utf-8")
+    build = Path("native/windows/build.ps1").read_text(encoding="utf-8")
+    wire = Path("native/windows/inc/avlib.h").read_text(encoding="utf-8")
+    communication = Path("native/windows/filter/communication.c").read_text(encoding="utf-8")
+    assert "#define CLEAN_CACHE_ENTRIES 128u" in broker
+    assert "BCryptHashData" in broker
+    assert "BCryptFinishHash" in broker
+    assert "outcome.result == AO_CLEAR && outcome.database_current" in broker
+    assert "clean_cache_store(broker, digest, size)" in broker
+    assert "AO_SCAN_FLAG_CLEAN_CACHE_HIT" in broker
+    assert "bcrypt.lib" in build
+    assert "#define AO_SCAN_FLAG_CLEAN_CACHE_HIT 0x00000001u" in wire
+    assert "(command.ResultFlags & ~AO_SCAN_FLAG_CLEAN_CACHE_HIT) != 0" in communication
+    assert "command.ResultFlags != 0 && command.ScanResult != AvScanResultClean" in communication
