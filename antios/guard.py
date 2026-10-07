@@ -21,6 +21,7 @@ from .clamav import ClamAVScanner
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
 from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
+from .risk import evaluate_risk
 from .scan_process import run_scan_process
 from .windows_process import hidden_process_kwargs
 
@@ -133,7 +134,8 @@ def probe_engine(service_name=None):
 class Guard:
     def __init__(self, policy, state_dir=None, *, scanner=None,
                  probe=None, quarantine_factory=Quarantine, watcher_factory=None,
-                 status_observer=None, behavior_engine=None, process_sampler=None):
+                 status_observer=None, behavior_engine=None, process_sampler=None,
+                 native_probe=None):
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
@@ -168,6 +170,18 @@ class Guard:
             behavior_collector = 'file-correlation-only'
         self._behavior_events = []
         self._behavior_collector = behavior_collector
+        if native_probe is not None:
+            self.native_probe = native_probe
+        elif os.name == 'nt':
+            def _default_native_probe():
+                from .protection import native_pre_execution_active
+                return native_pre_execution_active()
+            self.native_probe = _default_native_probe
+        else:
+            self.native_probe = lambda: None
+        self._native_checked_at = float('-inf')
+        self._native_pre_execution = None
+        self._native_probe_errors = 0
         self._last_observed_state = None
         self.pending = OrderedDict()
         self.queue_cursor = None
@@ -185,7 +199,10 @@ class Guard:
                        'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS,
                        'transient_deferrals': 0,
                        'behavior': dict(self.behavior.status(), collector=behavior_collector,
-                                        collector_errors=0)}
+                                        collector_errors=0),
+                       'risk': {'mode': 'fusion', 'evaluations': 0, 'highest_score': 0,
+                                'last': None, 'native_pre_execution': 'unknown',
+                                'native_probe_errors': 0}}
 
     def _queue_behavior_findings(self, findings):
         for finding in findings:
@@ -198,6 +215,43 @@ class Guard:
             collector=self._behavior_collector,
             collector_errors=previous.get('collector_errors', 0),
         )
+
+    def _native_state(self, now: float) -> bool | None:
+        if now - self._native_checked_at < 15:
+            return self._native_pre_execution
+        self._native_checked_at = now
+        try:
+            value = self.native_probe()
+            if value not in {True, False, None}:
+                raise ValueError('native pre-execution probe returned invalid state')
+            self._native_pre_execution = value
+        except (OSError, RuntimeError, ValueError):
+            self._native_probe_errors += 1
+            self._native_pre_execution = None
+        return self._native_pre_execution
+
+    def _record_risk(self, path: Path, result: dict, store: GuardState):
+        evidence = self.behavior.findings_for_subject(str(path), max_age=60)
+        native = self._native_state(time.monotonic())
+        context = evaluate_risk(
+            str(path), result, behavior_findings=evidence,
+            native_pre_execution=native,
+        ).to_dict()
+        risk = self.status.get('risk', {})
+        risk.update(
+            mode='fusion',
+            evaluations=int(risk.get('evaluations', 0)) + 1,
+            highest_score=max(int(risk.get('highest_score', 0)), context['score']),
+            last=context,
+            native_pre_execution=context['native_pre_execution'],
+            native_probe_errors=self._native_probe_errors,
+        )
+        self.status['risk'] = risk
+        # Keep the bounded journal useful: clean/low contexts stay in status,
+        # while decisions needing review or confirmed remediation are persisted.
+        if context['score'] >= 40 or context['confirmed_threat'] or not context['scanner_complete']:
+            store.event('risk-context', context)
+        return context
 
     def _settle_delay(self, path: Path) -> float:
         """Prioritize executable/script-like writes without claiming execution blocking."""
@@ -387,16 +441,18 @@ class Guard:
                         else:
                             self.failures.pop(path, None)
                         findings = result['findings']
+                        risk_context = self._record_risk(path, result, store)
                         if findings or incomplete:
                             store.event('scan', {'path': str(path), 'verdict': result['verdict'],
                                 'coverage': result['coverage'], 'findings': findings,
-                                'issues': result['issues'], 'engine': result['engine']})
+                                'issues': result['issues'], 'engine': result['engine'],
+                                'risk': risk_context})
                         for finding in findings:
                             if finding['kind'] != 'threat':
                                 continue
                             self.threats[path] = finding['name']
                             self.status['detections'] += 1
-                            if self.policy.auto_quarantine:
+                            if self.policy.auto_quarantine and risk_context['automatic_enforcement_eligible']:
                                 item = self.quarantine_factory().add(finding, dry_run=False)
                                 store.event('quarantined', {'path': str(path), 'id': item['id'], 'name': finding['name']})
                                 self.status['quarantined'] += 1
