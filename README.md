@@ -31,6 +31,7 @@ Open **Antivirus** from the sidebar or press `Ctrl+6`:
 - Encrypt and isolate a selected detection in current-user Windows DPAPI quarantine.
 - Restore selected quarantined items without overwriting existing files.
 - Run Defender quick/full scans or update its signatures after confirmation.
+- Run in a documented [layered coexistence mode](docs/COEXISTENCE.md): Defender stays configured as-is while AntiOS remains an independent companion layer.
 - Export a JSON scan report.
 - Explore the separate [experimental native Windows filter/service](native/README.md); source and lab tooling only, not part of the release package.
 - Run the optional [resident Guard](docs/GUARD.md) for automatic post-write checks in selected folders, with explicit opt-in quarantine.
