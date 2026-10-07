@@ -11,6 +11,7 @@ themselves supply prevention, tamper protection or Windows antivirus registratio
 | Remediation | DPAPI quarantine with stable-file revalidation, SHA-256 restore checks, hardened Windows ACL and whole-vault integrity verification | Windows failure/recovery matrix and service-owned quarantine design for broader machine-wide remediation |
 | Updates | Setup bootstrap + pinned engine manifest + FreshClam SYSTEM task; protection-repair can restore service/ACL/task state; AntiOS updater verifies release hash and requires Authenticode before automatic install | Enable release Trusted Signing, long-running failure/recovery telemetry and signed engine/version policy |
 | Pre-execution prevention | Experimental execute-open minifilter + native ClamD broker; VM acceptance now requires FILE_EXECUTE, CreateProcess and SEC_IMAGE mapping coverage | Signed deployment, concurrency/Driver Verifier/HVCI acceptance and Microsoft-assigned altitude |
+| Defender coexistence | Read-only Defender/WSC diagnostics, secondary-mode policy, Guard-side exclusion of Defender protected stores and signed AMSI-provider source; no primary WSC registration | Windows VM validation with Defender active, signed AMSI registration, latency/compatibility matrix and production signing |
 | Windows service | Native SCM service diagnostics plus Python/Guard binding to a verified own-process LocalSystem ClamD peer | Signed Windows installation, stop/recovery, native service PPL path and full upgrade lifecycle |
 | Boot protection / protected service | ELAM/PPL not implemented; SCM service is not protected | ELAM eligibility, page-hash signing, protected dependencies/engine and Windows integration |
 | Primary antivirus registration | Not implemented | Applicable Microsoft partner onboarding and documented integration |
@@ -31,6 +32,11 @@ require MVI membership for the early-launch submission route.
 [Protected antimalware services](https://learn.microsoft.com/en-us/windows/win32/services/protecting-anti-malware-services-)
 require an ELAM driver and appropriate signing of the service and dependencies.
 These are external program and validation gates; code changes cannot grant them.
+
+The repository also exposes `antios coexistence-status`; see
+[COEXISTENCE.md](COEXISTENCE.md). Coexistence mode intentionally keeps Defender
+as the registered primary solution and treats AntiOS as a parallel secondary
+layer. This does not satisfy the separate primary-AV registration gate.
 
 The repository now also exposes `antios protection-status`, which reports engine
 freshness/identity, Resident Guard state and native service/driver enforcement
