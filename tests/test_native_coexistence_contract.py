@@ -35,6 +35,11 @@ def test_native_coexistence_harness_requires_defender_to_remain_active():
     assert "defenderAfter" in script
     assert "WdFilter" in script
     assert "CoexistenceMode must be enabled" in script
+    assert "Get-MpPreference" in script
+    assert "ExclusionPath" in script
+    assert "ExclusionProcess" in script
+    assert "root/SecurityCenter2" in script
+    assert "AntiVirusProduct" in script
     assert "Set-MpPreference" not in script
     assert "Add-MpPreference" not in script
     assert "Remove-MpPreference" not in script
