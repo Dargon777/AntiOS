@@ -66,3 +66,11 @@ def test_driver_inf_altitude_range_matches_antivirus_group():
     assert "[decimal]329999" in script
     assert "-gt [decimal]329999" in script
     assert "320000 <= altitude <= 329999" in script
+
+
+def test_native_admission_never_transiently_exceeds_limit():
+    scan = Path("native/windows/filter/scan.c").read_text(encoding="utf-8")
+    assert "static BOOLEAN AvTryAcquireScanSlot" in scan
+    assert "InterlockedCompareExchange(&Globals.PendingScans, current + 1, current)" in scan
+    admission = scan[scan.index("NTSTATUS\nAvScanInUser("):]
+    assert "InterlockedIncrement(&Globals.PendingScans)" not in admission
