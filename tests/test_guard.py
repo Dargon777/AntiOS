@@ -598,10 +598,6 @@ def test_guard_fuses_scan_behavior_origin_and_native_state(tmp_path):
         native_probe=lambda: True,
     )
     stop, failures = threading.Event(), []
-    thread = threading.Thread(
-        target=lambda: instance.run(stop),
-        daemon=True,
-    )
     # Keep exceptions visible instead of losing them in a raw thread.
     def run_guard():
         try:
