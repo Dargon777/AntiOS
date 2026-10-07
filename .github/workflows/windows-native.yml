@@ -21,7 +21,8 @@ jobs:
             ".\native\windows\build.ps1",
             ".\native\windows\Install-NativeService.ps1",
             ".\native\windows\New-DriverInf.ps1",
-            ".\native\windows\Test-NativeVm.ps1"
+            ".\native\windows\Test-NativeVm.ps1",
+            ".\native\windows\amsi\Install-AmsiProvider.ps1"
           )) {
             $tokens = $null
             $errors = $null
@@ -34,6 +35,13 @@ jobs:
       - name: Compile unsigned x64 service and filter with pinned WDK
         shell: pwsh
         run: ./native/windows/build.ps1 -Restore
+      - name: Validate AMSI provider exports without registering it
+        shell: pwsh
+        run: |
+          $exports = (& dumpbin.exe /nologo /exports .\build\native\windows\AntiOS-AmsiProvider.dll | Out-String)
+          if ($exports -notmatch 'DllGetClassObject' -or $exports -notmatch 'DllCanUnloadNow') {
+            throw 'AntiOS AMSI provider is missing required COM exports.'
+          }
       - name: Test native Windows socket client and diagnostics (no driver install)
         env:
           ANTIOS_NATIVE_EXE: build/native/windows/AntiOS-Service.exe
@@ -48,6 +56,7 @@ jobs:
           path: |
             build/native/windows/AntiOS-Service.exe
             build/native/windows/AntiOS-Filter.sys
+            build/native/windows/AntiOS-AmsiProvider.dll
             build/native/windows/Native-Inert.exe
             build/native/windows/EXPERIMENTAL.txt
             build/native/windows/LICENSE.microsoft
