@@ -436,6 +436,14 @@ class AntivirusPanel:
             anchor="w",
         )
         self.provider_status.pack(side="left", fill="x", expand=True)
+        repair_button = self.app._button(
+            engine_row,
+            self.t("repair_protection"),
+            self._repair_protection,
+            kind="secondary",
+        )
+        repair_button.pack(side="right", padx=(10, 0))
+        self.buttons.append(repair_button)
 
         signature_row = tk.Frame(advanced, bg=self.palette["surface"])
         signature_row.pack(fill="x", pady=(0, 8))
@@ -628,6 +636,9 @@ class AntivirusPanel:
         # Compatibility alias: the old raw JSON popup is now the structured
         # Incident Viewer.
         self._incident_history()
+
+    def _repair_protection(self) -> None:
+        self._run("guard-action", self.app.repair_protection)
 
     def _defender(self, action: str) -> None:
         from tkinter import messagebox
