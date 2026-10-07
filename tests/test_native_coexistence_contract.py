@@ -108,3 +108,14 @@ def test_broker_clean_cache_is_fixed_bounded_and_clean_only():
     assert "#define AO_SCAN_FLAG_CLEAN_CACHE_HIT 0x00000001u" in wire
     assert "(command.ResultFlags & ~AO_SCAN_FLAG_CLEAN_CACHE_HIT) != 0" in communication
     assert "command.ResultFlags != 0 && command.ScanResult != AvScanResultClean" in communication
+
+
+
+def test_legacy_file_id_cache_does_not_store_clean_verdicts():
+    driver = Path("native/windows/filter/avscan.c").read_text(encoding="utf-8")
+    cleanup = driver[driver.index("FLT_PREOP_CALLBACK_STATUS\nAvPreCleanup"):driver.index("NTSTATUS\nAvKtmNotificationCallback")]
+    assert "if (IS_FILE_INFECTED( streamContext ))" in cleanup
+    assert "clean file in the legacy" not in cleanup
+    load = driver[driver.index("NTSTATUS\nAvLoadFileStateFromCache"):driver.index("NTSTATUS\nAvSyncCache")]
+    assert "entry->InfectedState == AvFileNotInfected" in load
+    assert "AvFileModified : entry->InfectedState" in load
