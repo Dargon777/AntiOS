@@ -102,3 +102,31 @@ certification.
 
 The point of coexistence is narrower and useful: **keep Defender active and add
 an independent AntiOS protection path without weakening either product.**
+
+
+## Native coexistence telemetry
+
+The experimental minifilter now uses native protocol v2 for coexistence diagnostics.
+Its default INF remains audit/manual-start and sets:
+
+- `CoexistenceMode=1`;
+- `MaxPendingScans=4`;
+- `Enforcement=0`;
+- a bounded local scan timeout.
+
+The loaded driver exposes current/peak pending scans, overload bypasses, message
+delivery timeouts, scan completion timeouts, cancelled execute opens and total,
+average and maximum wait latency. These values are measurements, not a security
+score. A high or growing timeout/bypass count means the machine needs review even
+if both products are technically running.
+
+On overload the prototype remains fail-open and increments an incomplete/bypass
+counter. This is intentional for coexistence: blocking the system because another
+security filter briefly owns I/O would turn a detection gap into an availability
+failure. Production readiness requires the VM stress harness to demonstrate that
+this bounded fail-open path is rare and observable.
+
+`Test-NativeCoexistence.ps1` refuses to run unless Defender real-time protection
+is active and `WdFilter` is loaded. It then exercises many simultaneous harmless
+`FILE_EXECUTE` opens while AntiOS is attached, checks that clean files are not
+blocked, verifies the queue drains and records latency/timeout deltas.
