@@ -19,3 +19,7 @@ Copyright (c) 1989-2011 Microsoft Corporation. The full license, pinned upstream
 revision, attribution and changes are provided in native/windows/LICENSE.microsoft,
 native/windows/UPSTREAM_COMMIT and native/README.md. This exception does not
 relicense the Python AntiOS application.
+
+The optional native Windows components, including AntiOS-Filter.sys,
+AntiOS-Service.exe and AntiOS-AmsiProvider.dll, are distributed under the
+Microsoft Public License (MS-PL) as documented in native/windows/LICENSE.microsoft.
