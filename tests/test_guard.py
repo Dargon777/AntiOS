@@ -649,3 +649,61 @@ def test_guard_confirmed_threat_risk_allows_existing_auto_quarantine_only(tmp_pa
         stop.set()
         thread.join(3)
     assert not failures
+
+
+
+def test_process_correlation_stays_live_during_scan(tmp_path):
+    root = tmp_path / "watched-live"
+    root.mkdir()
+    target = root / "payload.exe"
+    target.write_bytes(b"ordinary")
+
+    behavior = BehaviorEngine()
+    behavior.observe_file_change(str(target))
+
+    class Sampler:
+        def __init__(self):
+            self.calls = 0
+        def poll(self):
+            self.calls += 1
+            if self.calls == 2:
+                return [ProcessEvent(
+                    pid=202, ppid=101, image="payload.exe",
+                    path=str(target), parent_image="explorer.exe",
+                )]
+            return []
+
+    sampler = Sampler()
+    def slow_scan(path, **options):
+        deadline = time.monotonic() + 0.7
+        while time.monotonic() < deadline:
+            assert options["cancelled"]() is False
+            time.sleep(0.05)
+        return scan(path, **options)
+
+    state = tmp_path / "live-state"
+    policy = guard.GuardPolicy((root,), interval=0.1, settle=0.05)
+    instance = guard.Guard(
+        policy, state, scanner=slow_scan, probe=probe,
+        watcher_factory=PollNotifications,
+        behavior_engine=behavior, process_sampler=sampler,
+        native_probe=lambda: None,
+    )
+    stop, failures = threading.Event(), []
+    def run_guard():
+        try:
+            instance.run(stop)
+        except Exception as exc:
+            failures.append(exc)
+    thread = threading.Thread(target=run_guard, daemon=True)
+    thread.start()
+    try:
+        until(lambda: instance.status.get("risk", {}).get("evaluations", 0) >= 1)
+        assert sampler.calls >= 2
+        context = instance.status["risk"]["last"]
+        assert context["behavior_score"] == 75
+        assert "changed-then-executed" in context["behavior_rules"]
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
