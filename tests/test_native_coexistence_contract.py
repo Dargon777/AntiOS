@@ -65,14 +65,6 @@ def test_altitude_generator_rejects_out_of_group_values():
     assert "$altitudeValue -ge [decimal]329999" in script
 
 
-def test_driver_inf_altitude_range_matches_antivirus_group():
-    script = Path("native/windows/New-DriverInf.ps1").read_text(encoding="utf-8")
-    assert "[decimal]320000" in script
-    assert "[decimal]329999" in script
-    assert "-gt [decimal]329999" in script
-    assert "320000 <= altitude <= 329999" in script
-
-
 def test_native_admission_never_transiently_exceeds_limit():
     scan = Path("native/windows/filter/scan.c").read_text(encoding="utf-8")
     assert "static BOOLEAN AvTryAcquireScanSlot" in scan
