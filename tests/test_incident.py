@@ -156,3 +156,65 @@ def test_update_queue_is_bounded_and_drainable():
     updates = incidents.drain_updates()
     assert len(updates) <= 100
     assert incidents.drain_updates() == []
+
+
+
+def test_later_low_risk_cannot_downgrade_high_behavior_incident():
+    incidents, _clock = graph()
+    path = r"C:\Users\A\Downloads\payload.exe"
+    first = incidents.observe_process(
+        ProcessEvent(
+            pid=201, ppid=100, image="powershell.exe", path=path,
+            parent_image="WINWORD.EXE",
+        ),
+        behavior_findings=[{
+            "rule": "document-spawns-interpreter",
+            "score": 85,
+            "severity": "high",
+            "summary": "word spawned powershell",
+        }],
+    )[0]
+    assert first["classification"] == "high"
+    later = incidents.observe_risk({
+        "path": path,
+        "score": 5,
+        "classification": "low",
+        "confirmed_threat": False,
+        "automatic_enforcement_eligible": False,
+        "scanner_verdict": "no-threats-found",
+        "scanner_complete": True,
+    })[0]
+    assert later["score"] == 85
+    assert later["classification"] == "high"
+
+
+def test_mass_file_behavior_attaches_recent_files_to_incident():
+    incidents, clock = graph()
+    interpreter = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    incidents.observe_process(
+        ProcessEvent(
+            pid=300, ppid=100, image="powershell.exe", path=interpreter,
+            parent_image="explorer.exe",
+        ),
+        behavior_findings=[{
+            "rule": "document-spawns-interpreter",
+            "score": 85,
+            "severity": "high",
+            "summary": "seed",
+        }],
+    )
+    for index in range(12):
+        incidents.observe_file_change(fr"C:\Victim\doc-{index}.txt")
+        clock.advance(0.1)
+    updates = incidents.observe_behavior_findings([{
+        "rule": "interpreter-with-mass-file-changes",
+        "score": 95,
+        "severity": "critical",
+        "summary": "mass changes",
+        "subject": interpreter,
+    }])
+    snapshot = updates[-1]
+    assert snapshot["classification"] == "critical-behavior"
+    assert snapshot["score"] == 95
+    assert sum(node["kind"] == "file" for node in snapshot["nodes"]) >= 10
+    assert any(edge["relation"] == "correlated-write" for edge in snapshot["edges"])
