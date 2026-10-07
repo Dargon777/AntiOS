@@ -115,7 +115,8 @@ Use a disposable **Windows 11 24H2+ x64 NTFS VM**, with a snapshot and working
 recovery access. Keep Defender, Secure Boot and signature enforcement enabled.
 There is deliberately no test-signing or signature-bypass installer.
 
-1. Obtain an altitude assigned to this filter by Microsoft. Generate the INF
+1. Obtain an altitude assigned to this filter by Microsoft in the current
+   FSFilter Anti-Virus group (numeric range 320000 <= altitude < 329999). Generate the INF
    with `New-DriverInf.ps1 -AssignedAltitude <your-allocation> -OutputDirectory
    <package>`. The script validates syntax, not ownership. It has no borrowed or
    default altitude. Run the WDK INF/catalog validation and approved driver-signing
