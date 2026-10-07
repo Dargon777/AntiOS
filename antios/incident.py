@@ -221,12 +221,6 @@ class IncidentGraph:
             changed_id, "file-change", "file changed", now, {"path": path},
         ))
         self._edge(incident, file_id, changed_id, "modified", now)
-        process_nodes = [
-            node for node in incident.nodes.values() if node.kind == "process"
-        ]
-        if process_nodes:
-            latest = max(process_nodes, key=lambda node: node.at)
-            self._edge(incident, latest.id, changed_id, "correlated-write", now)
         self._queue_update(incident, "file-change")
         return [self.snapshot(incident.id)]
 
