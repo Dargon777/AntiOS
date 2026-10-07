@@ -21,12 +21,21 @@ foreach ($source in @(
     Copy-Item (Join-Path $full "*") $stage -Recurse -Force
 }
 
+$amsiProvider = Join-Path $repoRoot "build\native\windows\AntiOS-AmsiProvider.dll"
+if (-not (Test-Path -LiteralPath $amsiProvider -PathType Leaf)) {
+    throw "AMSI provider build not found: $amsiProvider"
+}
+Copy-Item -LiteralPath $amsiProvider -Destination (Join-Path $stage "AntiOS-AmsiProvider.dll") -Force
+
 foreach ($path in @(
     "scripts\guard-startup.ps1",
     "scripts\protection-engine.ps1",
     "scripts\protection-bootstrap.ps1",
     "scripts\protection-repair.ps1",
     "scripts\protection-first-run.ps1",
+    "native\windows\amsi\Install-AmsiProvider.ps1",
+    "native\windows\LICENSE.microsoft",
+    "docs\COEXISTENCE.md",
     "release\clamav-windows.json",
     "README.md",
     "README.ru.md",
@@ -67,6 +76,10 @@ $required = @(
     "protection-bootstrap.ps1",
     "protection-repair.ps1",
     "protection-first-run.ps1",
+    "AntiOS-AmsiProvider.dll",
+    "Install-AmsiProvider.ps1",
+    "LICENSE.microsoft",
+    "COEXISTENCE.md",
     "clamav-windows.json",
     "LICENSE"
 )
