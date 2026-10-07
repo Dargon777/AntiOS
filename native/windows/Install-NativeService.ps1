@@ -24,7 +24,7 @@ $driverParameters = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\AntiOS-Filter\\
 $coexistence = Get-ItemPropertyValue -Path $driverParameters -Name CoexistenceMode -ErrorAction Stop
 $maxPending = Get-ItemPropertyValue -Path $driverParameters -Name MaxPendingScans -ErrorAction Stop
 if ([int]$coexistence -ne 1) { throw 'AntiOS native service requires CoexistenceMode=1.' }
-if ([int]$maxPending -lt 1 -or [int]$maxPending -gt 16) { throw 'MaxPendingScans must remain between 1 and 16.' }
+if ([int]$maxPending -lt 1 -or [int]$maxPending -gt 4) { throw 'MaxPendingScans must remain between 1 and the four native broker workers.' }
 if ($EngineServiceName -in @('AntiOSNative','AntiOS-Filter')) { throw 'Select the actual ClamD service.' }
 $engine = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'"
 if (-not $engine -or $engine.ServiceType -ne 'Own Process' -or $engine.StartName -ne 'LocalSystem') {
