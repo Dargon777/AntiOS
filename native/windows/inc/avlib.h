@@ -194,7 +194,7 @@ typedef struct _AO_DRIVER_STATUS {
     ULONG MaxPendingScans;
     LONG PendingScans;
     LONG PeakPendingScans;
-    ULONG Reserved;
+    ULONG SectionConflicts;
     LONGLONG Attempts;
     LONGLONG Incomplete;
     LONGLONG Detections;
