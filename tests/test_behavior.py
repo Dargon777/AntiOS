@@ -108,3 +108,20 @@ def test_old_file_change_does_not_correlate_with_execution():
 def test_engine_is_detection_only():
     behavior, _clock = engine()
     assert behavior.status()["mode"] == "detect-only"
+
+
+
+def test_findings_for_subject_returns_only_fresh_exact_path():
+    behavior, clock = engine()
+    path = r"C:\Users\Alice\Downloads\payload.exe"
+    behavior.observe_file_change(path)
+    behavior.observe_process(ProcessEvent(
+        pid=20, ppid=10, image="payload.exe", path=path, parent_image="explorer.exe",
+    ))
+    matching = behavior.findings_for_subject(path, max_age=30)
+    assert {item["rule"] for item in matching} == {
+        "user-writable-execution", "changed-then-executed"
+    }
+    assert behavior.findings_for_subject(r"C:\Other\payload.exe", max_age=30) == []
+    clock.advance(31)
+    assert behavior.findings_for_subject(path, max_age=30) == []
