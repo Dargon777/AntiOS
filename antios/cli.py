@@ -101,6 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
     protection_cmd.add_argument("--json", action="store_true")
     protection_cmd.add_argument("--engine-service", help="Explicit trusted Windows ClamD SCM service name.")
 
+    coexist_cmd = sub.add_parser(
+        "coexistence-status",
+        help="Show read-only Microsoft Defender, Windows Security and AntiOS AMSI coexistence state.",
+    )
+    coexist_cmd.add_argument("--json", action="store_true")
+
     repair_cmd = sub.add_parser(
         "protection-repair",
         help="Preview or repair the managed ClamAV service, ACLs and updater task.",
@@ -350,6 +356,15 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(status)
             else:
                 print(render_protection_status(status))
+            return 0
+
+        if args.command == "coexistence-status":
+            from .coexistence import collect_coexistence_status, render_coexistence_status
+            status = collect_coexistence_status()
+            if args.json:
+                _print_json(status)
+            else:
+                print(render_coexistence_status(status))
             return 0
 
         if args.command == "protection-repair":
