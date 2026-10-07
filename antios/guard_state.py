@@ -143,16 +143,20 @@ def read_incident_history(folder=None, *, limit=50):
             if isinstance(latest, dict):
                 incident_id = latest.get("id")
                 if isinstance(incident_id, str) and incident_id:
-                    newest[incident_id] = latest
+                    current = dict(latest)
+                    heartbeat = status.get("heartbeat")
+                    if isinstance(heartbeat, (int, float)) and math.isfinite(heartbeat):
+                        current["_journal_at"] = float(heartbeat)
+                    newest[incident_id] = current
 
         # Read more rows than the requested incident count because one incident
         # can have multiple coalesced snapshots across its lifetime.
         rows = db.execute(
-            "SELECT payload FROM events WHERE kind='incident-update' "
+            "SELECT at, payload FROM events WHERE kind='incident-update' "
             "ORDER BY id DESC LIMIT ?",
             (min(1000, limit * 12),),
         )
-        for (payload,) in rows:
+        for journal_at, payload in rows:
             try:
                 value = json.loads(payload)
             except (TypeError, ValueError):
@@ -163,7 +167,10 @@ def read_incident_history(folder=None, *, limit=50):
             incident_id = incident.get("id")
             if not isinstance(incident_id, str) or not incident_id:
                 continue
-            newest.setdefault(incident_id, incident)
+            if incident_id not in newest:
+                snapshot = dict(incident)
+                snapshot["_journal_at"] = float(journal_at)
+                newest[incident_id] = snapshot
             if len(newest) >= limit:
                 break
 
