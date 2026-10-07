@@ -16,6 +16,7 @@ import time
 import uuid
 
 from .antivirus import checked_path, fingerprint, is_link
+from .behavior import BehaviorEngine
 from .clamav import ClamAVScanner
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
 from .guard_state import GuardState, default_guard_path, read_guard_state
@@ -132,7 +133,7 @@ def probe_engine(service_name=None):
 class Guard:
     def __init__(self, policy, state_dir=None, *, scanner=None,
                  probe=None, quarantine_factory=Quarantine, watcher_factory=None,
-                 status_observer=None):
+                 status_observer=None, behavior_engine=None, process_sampler=None):
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
@@ -150,6 +151,23 @@ class Guard:
         self.quarantine_factory = quarantine_factory
         self.watcher_factory = watcher_factory or (DirectoryNotifications if os.name == 'nt' else PollNotifications)
         self.status_observer = status_observer
+        self.behavior = behavior_engine or BehaviorEngine()
+        if process_sampler is not None:
+            self.process_sampler = process_sampler
+            behavior_collector = 'injected'
+        elif os.name == 'nt':
+            try:
+                from .windows_behavior import WindowsProcessSampler
+                self.process_sampler = WindowsProcessSampler()
+                behavior_collector = 'toolhelp-snapshot'
+            except OSError:
+                self.process_sampler = None
+                behavior_collector = 'file-correlation-only'
+        else:
+            self.process_sampler = None
+            behavior_collector = 'file-correlation-only'
+        self._behavior_events = []
+        self._behavior_collector = behavior_collector
         self._last_observed_state = None
         self.pending = OrderedDict()
         self.queue_cursor = None
@@ -165,7 +183,21 @@ class Guard:
                        'errors': 0, 'pending': 0, 'unresolved': 0, 'inventory_issues': [],
                        'capacity_exceeded': False, 'notifications': 'starting',
                        'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS,
-                       'transient_deferrals': 0}
+                       'transient_deferrals': 0,
+                       'behavior': dict(self.behavior.status(), collector=behavior_collector,
+                                        collector_errors=0)}
+
+    def _queue_behavior_findings(self, findings):
+        for finding in findings:
+            self._behavior_events.append(finding.to_dict())
+        if len(self._behavior_events) > 100:
+            del self._behavior_events[:-100]
+        previous = self.status.get('behavior', {})
+        self.status['behavior'] = dict(
+            self.behavior.status(),
+            collector=self._behavior_collector,
+            collector_errors=previous.get('collector_errors', 0),
+        )
 
     def _settle_delay(self, path: Path) -> float:
         """Prioritize executable/script-like writes without claiming execution blocking."""
@@ -195,6 +227,10 @@ class Guard:
                     and not any(path == root or root in path.parents for root in self.excluded)}
         if not affected:
             return False
+        if batch.paths:
+            self._queue_behavior_findings(
+                self.behavior.observe_many_file_changes(str(path) for path in batch.paths)
+            )
         def matches(path):
             return path in affected or not affected.isdisjoint(path.parents)
         for path in list(self.known):
@@ -216,6 +252,7 @@ class Guard:
             raise
         watcher = None
         last_heartbeat, last_probe, last_inventory = 0.0, float('-inf'), float('-inf')
+        last_process_poll = float('-inf')
         version, changed, notification_error = None, True, False
         next_notification_retry = 0.0
 
@@ -224,6 +261,12 @@ class Guard:
             now = time.monotonic()
             if now - last_heartbeat >= 0.5:
                 last_heartbeat = now
+                previous_behavior = self.status.get('behavior', {})
+                self.status['behavior'] = dict(
+                    self.behavior.status(),
+                    collector=self._behavior_collector,
+                    collector_errors=previous_behavior.get('collector_errors', 0),
+                )
                 self.status.update(heartbeat=time.time(), pending=len(self.pending),
                                    unresolved=len(self.failures), active_threats=len(self.threats))
                 store.publish(self.status)
@@ -237,6 +280,27 @@ class Guard:
         try:
             while not cancelled():
                 now = time.monotonic()
+
+                if self.process_sampler is not None and now - last_process_poll >= 0.5:
+                    last_process_poll = now
+                    try:
+                        for event in self.process_sampler.poll():
+                            self._queue_behavior_findings(self.behavior.observe_process(event))
+                    except OSError as exc:
+                        previous_behavior = self.status.get('behavior', {})
+                        self._behavior_collector = 'file-correlation-only'
+                        self.process_sampler = None
+                        self.status['behavior'] = dict(
+                            self.behavior.status(),
+                            collector=self._behavior_collector,
+                            collector_errors=previous_behavior.get('collector_errors', 0) + 1,
+                            collector_detail=str(exc)[:500],
+                        )
+                        store.event('behavior-collector-error', {'error': str(exc)[:500]})
+
+                while self._behavior_events:
+                    store.event('behavior-alert', self._behavior_events.pop(0))
+
                 if watcher is None and now >= next_notification_retry:
                     next_notification_retry = now + 30
                     try:
@@ -388,7 +452,12 @@ class Guard:
                 degraded = (notification_error or self.failures or self.status['inventory_issues'] or
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
                             self.status['engine'].get('database_freshness') != 'current')
-                self.status['state'] = 'degraded' if degraded else 'attention' if self.threats else 'monitoring'
+                behavior_attention = self.status.get('behavior', {}).get('state') in {'attention', 'alert'}
+                self.status['state'] = (
+                    'degraded' if degraded else
+                    'attention' if self.threats or behavior_attention else
+                    'monitoring'
+                )
                 self._notify_status()
                 if watcher is not None:
                     try:
