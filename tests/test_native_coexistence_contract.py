@@ -58,3 +58,11 @@ def test_altitude_generator_rejects_out_of_group_values():
     assert "320000 <= altitude < 329999" in script
     assert "$altitudeValue -lt [decimal]320000" in script
     assert "$altitudeValue -ge [decimal]329999" in script
+
+
+def test_driver_inf_altitude_range_matches_antivirus_group():
+    script = Path("native/windows/New-DriverInf.ps1").read_text(encoding="utf-8")
+    assert "[decimal]320000" in script
+    assert "[decimal]329999" in script
+    assert "-gt [decimal]329999" in script
+    assert "320000 <= altitude <= 329999" in script
