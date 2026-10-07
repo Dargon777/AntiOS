@@ -195,6 +195,7 @@ class IncidentViewer:
         self.response_scans: dict[str, dict] = {}
         self.response_isolations: dict[str, dict] = {}
         self.response_queue: queue.Queue = queue.Queue()
+        self.response_cancel = threading.Event()
         self.response_busy = False
         self.response_after_id = None
 
@@ -554,6 +555,7 @@ class IncidentViewer:
 
         incident = self.selected_incident
         incident_id = self._current_incident_id()
+        self.response_cancel.clear()
         self.response_busy = True
         self.response_status.configure(
             text=self.t("response_scanning", current=0, total=len(paths))
@@ -566,6 +568,7 @@ class IncidentViewer:
                     incident,
                     signature_path=getattr(self.app, "antivirus_signatures", None),
                     require_verified_peer=(sys.platform == "win32"),
+                    cancelled=self.response_cancel.is_set,
                     progress=lambda current, total, path: self.response_queue.put(
                         ("scan-progress", incident_id, {
                             "current": current, "total": total, "path": path
@@ -706,6 +709,7 @@ class IncidentViewer:
             self.response_after_id = None
 
     def _close(self) -> None:
+        self.response_cancel.set()
         if self.response_after_id is not None:
             try:
                 self.window.after_cancel(self.response_after_id)
