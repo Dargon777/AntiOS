@@ -11,8 +11,10 @@
 #include <new>
 #include <string.h>
 #include <wchar.h>
+extern "C" {
 #include "../service/engine_peer.h"
 #include "../engine/engine.h"
+}
 
 static const CLSID CLSID_AntiOSAmsiProvider =
 {0x8e8a9d7d,0x814f,0x4a83,{0xa1,0x27,0x8c,0x48,0x94,0xe4,0x11,0x21}};
