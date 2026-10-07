@@ -5,6 +5,7 @@ import ctypes
 import json
 import os
 import queue
+import sys
 import threading
 import webbrowser
 from dataclasses import replace
@@ -359,6 +360,8 @@ class Dashboard:
         self.antivirus_busy = False
         self.antivirus_cancelable = False
         self.guard_probe_busy = False
+        self.update_busy = False
+        self.update_payload: dict[str, Any] | None = None
         self._tray_enabled = tray_enabled
         self._dashboard_tray: DashboardTray | None = None
         self._tray_commands: queue.Queue[str] = queue.Queue()
@@ -373,6 +376,7 @@ class Dashboard:
         self._build_pages()
         self.show_page("overview")
         self._initialize_tray()
+        self._start_background_services()
         if auto_refresh:
             self.refresh()
 
@@ -419,6 +423,150 @@ class Dashboard:
             self.set_protection_state(read_guard_state())
         except Exception:
             self.set_protection_state({"state": "not-running"})
+
+    def _start_background_services(self) -> None:
+        """Self-heal installed resident protection and check for updates."""
+        if os.name != "nt" or not getattr(sys, "frozen", False):
+            return
+        if self.config.protection.resident_enabled:
+            threading.Thread(
+                target=self._resident_autostart_worker,
+                daemon=True,
+                name="AntiOSResidentAutostart",
+            ).start()
+        if self.config.updates.auto_update:
+            self._start_update_worker(download=True, automatic=True)
+
+    def _resident_autostart_worker(self) -> None:
+        try:
+            from .resident import ensure_resident_guard
+            value = ensure_resident_guard()
+            self.antivirus_queue.put(("guard-action", value))
+        except Exception as exc:
+            self.antivirus_queue.put(("error", f"Resident protection startup failed: {exc}"))
+
+    def set_resident_protection_enabled(self, enabled: bool) -> dict:
+        """Persist the user's Guard preference and apply it immediately."""
+        self.config = replace(
+            self.config,
+            protection=replace(self.config.protection, resident_enabled=bool(enabled)),
+        )
+        self._persist_config()
+        if enabled:
+            from .resident import ensure_resident_guard
+            return ensure_resident_guard()
+        from .resident import disable_resident_guard
+        return disable_resident_guard()
+
+    def _save_update_preference(self) -> None:
+        enabled = bool(self.update_auto_var.get()) if hasattr(self, "update_auto_var") else True
+        self.config = replace(
+            self.config,
+            updates=replace(self.config.updates, auto_update=enabled),
+        )
+        self._persist_config()
+
+    def _set_update_status(self, text: str, *, warning: bool = False) -> None:
+        if hasattr(self, "update_status"):
+            try:
+                self.update_status.configure(
+                    text=text,
+                    fg=THEME["warn"] if warning else THEME["muted"],
+                )
+            except Exception:
+                pass
+
+    def _start_update_worker(self, *, download: bool, automatic: bool = False) -> None:
+        if self.update_busy:
+            return
+        self.update_busy = True
+        if not automatic:
+            self._set_update_status(self.t("settings.updates.checking"))
+
+        def worker() -> None:
+            try:
+                from .updater import (
+                    default_update_directory,
+                    download_update,
+                    latest_alpha,
+                    schedule_install,
+                )
+                payload = latest_alpha()
+                if download and payload.get("update_available"):
+                    target = default_update_directory(str(payload.get("tag") or "latest"))
+                    payload = download_update(
+                        target,
+                        require_signature=False,
+                        replace_existing=True,
+                    )
+                    if automatic and payload.get("install_ready"):
+                        payload["installer"] = schedule_install(
+                            payload["setup_path"],
+                            payload["sha256"],
+                        )
+                error = None
+            except Exception as exc:
+                payload = None
+                error = str(exc)[:1000]
+
+            def complete() -> None:
+                self.update_busy = False
+                if error:
+                    self._set_update_status(
+                        self.t("settings.updates.failed", error=error),
+                        warning=True,
+                    )
+                    return
+                assert payload is not None
+                self.update_payload = payload
+                if not payload.get("update_available"):
+                    self._set_update_status(self.t("settings.updates.latest"))
+                elif payload.get("installer"):
+                    self._set_update_status(
+                        self.t(
+                            "settings.updates.signed_ready",
+                            version=payload.get("latest_version"),
+                        )
+                    )
+                elif payload.get("downloaded") and payload.get("install_ready"):
+                    self._set_update_status(
+                        self.t(
+                            "settings.updates.downloaded",
+                            version=payload.get("latest_version"),
+                        )
+                    )
+                elif payload.get("downloaded"):
+                    self._set_update_status(
+                        self.t(
+                            "settings.updates.unsigned",
+                            version=payload.get("latest_version"),
+                        ),
+                        warning=True,
+                    )
+                else:
+                    self._set_update_status(
+                        self.t(
+                            "settings.updates.available",
+                            version=payload.get("latest_version"),
+                        )
+                    )
+
+            try:
+                self.root.after(0, complete)
+            except Exception:
+                pass
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name="AntiOSUpdateCheck",
+        ).start()
+
+    def _check_updates_now(self) -> None:
+        self._start_update_worker(download=False, automatic=False)
+
+    def _download_update_now(self) -> None:
+        self._start_update_worker(download=True, automatic=False)
 
     def _presence_heartbeat(self) -> None:
         if self._exiting or self._dashboard_tray is None:
@@ -1965,6 +2113,70 @@ class Dashboard:
             font=("Segoe UI", 9),
         )
         self.settings_status.pack(side="left", padx=(12, 0))
+
+        updates = tk.Frame(
+            body,
+            bg=THEME["surface"],
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
+        updates.pack(fill="x", pady=(0, 14))
+
+        tk.Label(
+            updates,
+            text=self.t("settings.updates.title"),
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", padx=20, pady=(18, 2))
+        tk.Label(
+            updates,
+            text=self.t("settings.updates.subtitle"),
+            bg=THEME["surface"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=20, pady=(0, 12))
+
+        self.update_auto_var = tk.BooleanVar(value=self.config.updates.auto_update)
+        tk.Checkbutton(
+            updates,
+            text=self.t("settings.updates.auto"),
+            variable=self.update_auto_var,
+            command=self._save_update_preference,
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            activebackground=THEME["surface"],
+            activeforeground=THEME["text"],
+            selectcolor=THEME["surface_alt"],
+            bd=0,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=20, pady=(0, 12))
+
+        update_actions = tk.Frame(updates, bg=THEME["surface"])
+        update_actions.pack(fill="x", padx=20, pady=(0, 10))
+        self._button(
+            update_actions,
+            self.t("settings.updates.check"),
+            self._check_updates_now,
+            kind="secondary",
+        ).pack(side="left")
+        self._button(
+            update_actions,
+            self.t("settings.updates.download"),
+            self._download_update_now,
+            kind="primary",
+        ).pack(side="left", padx=(8, 0))
+
+        self.update_status = tk.Label(
+            updates,
+            text=self.t("settings.updates.current", version=__version__),
+            bg=THEME["surface"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 9),
+            wraplength=780,
+            justify="left",
+        )
+        self.update_status.pack(anchor="w", padx=20, pady=(0, 18))
 
         about = tk.Frame(
             body,
