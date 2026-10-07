@@ -3,8 +3,22 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+import json
 import math
+import os
+from pathlib import Path
+import queue
+import sys
+import threading
 from typing import Any
+
+from .incident_response import (
+    build_incident_report,
+    confirmed_findings,
+    incident_file_paths,
+    isolate_confirmed_findings,
+    scan_incident_files,
+)
 
 
 _RELATION_PRIORITY = {
@@ -178,6 +192,11 @@ class IncidentViewer:
         self.t = t
         self.rows: dict[str, dict] = {}
         self.selected_incident: dict | None = None
+        self.response_scans: dict[str, dict] = {}
+        self.response_isolations: dict[str, dict] = {}
+        self.response_queue: queue.Queue = queue.Queue()
+        self.response_busy = False
+        self.response_after_id = None
 
         tk = app.tk
         self.window = tk.Toplevel(app.root)
@@ -324,13 +343,51 @@ class IncidentViewer:
         detail_scroll.grid(row=0, column=1, sticky="ns")
         self.details.configure(yscrollcommand=detail_scroll.set)
 
+        self.response_status = tk.Label(
+            self.window,
+            text=self.t("response_ready"),
+            bg=palette["bg"],
+            fg=palette["muted"],
+            font=("Segoe UI", 8),
+            anchor="w",
+            justify="left",
+        )
+        self.response_status.pack(fill="x", padx=18, pady=(0, 6))
+
         footer = tk.Frame(self.window, bg=palette["bg"])
         footer.pack(fill="x", padx=18, pady=(0, 14))
+        response_actions = tk.Frame(footer, bg=palette["bg"])
+        response_actions.pack(side="left")
+
+        self.rescan_button = app._button(
+            response_actions, self.t("response_rescan"), self._rescan_incident,
+            kind="primary",
+        )
+        self.rescan_button.pack(side="left")
+        self.isolate_button = app._button(
+            response_actions, self.t("response_isolate"), self._isolate_confirmed,
+            kind="danger",
+        )
+        self.isolate_button.pack(side="left", padx=(6, 0))
+        self.reveal_button = app._button(
+            response_actions, self.t("response_reveal"), self._reveal_selected,
+            kind="secondary",
+        )
+        self.reveal_button.pack(side="left", padx=(6, 0))
+        self.report_button = app._button(
+            response_actions, self.t("response_export"), self._export_incident,
+            kind="secondary",
+        )
+        self.report_button.pack(side="left", padx=(6, 0))
+
         app._button(
-            footer, self.t("incident_close"), self.window.destroy, kind="secondary"
+            footer, self.t("incident_close"), self._close, kind="secondary"
         ).pack(side="right")
 
+        self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._populate_incidents()
+        self._sync_response_buttons()
+        self.response_after_id = self.window.after(100, self._poll_response)
 
     def _populate_incidents(self) -> None:
         for index, incident in enumerate(self.incidents):
@@ -370,6 +427,7 @@ class IncidentViewer:
     def _render_incident(self, incident: dict) -> None:
         self.selected_incident = incident
         self.rows.clear()
+        self._sync_response_buttons()
         self.chain.delete(*self.chain.get_children())
         classification = str(incident.get("classification") or "unknown")
         label = (
@@ -451,6 +509,213 @@ class IncidentViewer:
             label = translated if translated != "av." + label_key else key.replace("_", " ")
             lines.append(f"{label}: {value}")
         self._set_details("\n".join(lines))
+        self._sync_response_buttons()
+
+    def _current_incident_id(self) -> str:
+        if not isinstance(self.selected_incident, dict):
+            return ""
+        value = self.selected_incident.get("id")
+        return str(value) if value else ""
+
+    def _selected_path(self) -> str | None:
+        selected = self.chain.selection()
+        if not selected or selected[0] not in self.rows:
+            return None
+        data = self.rows[selected[0]].get("data")
+        if not isinstance(data, dict):
+            return None
+        value = data.get("path")
+        return value if isinstance(value, str) and value else None
+
+    def _sync_response_buttons(self) -> None:
+        if not hasattr(self, "rescan_button"):
+            return
+        incident_id = self._current_incident_id()
+        has_incident = bool(incident_id and self.selected_incident)
+        scan = self.response_scans.get(incident_id)
+        threats = confirmed_findings(scan)
+        state = "disabled" if self.response_busy else "normal"
+        self.rescan_button.configure(state=state if has_incident else "disabled")
+        self.report_button.configure(state=state if has_incident else "disabled")
+        self.reveal_button.configure(
+            state=state if self._selected_path() else "disabled"
+        )
+        self.isolate_button.configure(
+            state="normal" if not self.response_busy and threats else "disabled"
+        )
+
+    def _rescan_incident(self) -> None:
+        if self.response_busy or not self.selected_incident:
+            return
+        paths = incident_file_paths(self.selected_incident)
+        if not paths:
+            self.response_status.configure(text=self.t("response_no_paths"))
+            return
+
+        incident = self.selected_incident
+        incident_id = self._current_incident_id()
+        self.response_busy = True
+        self.response_status.configure(
+            text=self.t("response_scanning", current=0, total=len(paths))
+        )
+        self._sync_response_buttons()
+
+        def worker() -> None:
+            try:
+                result = scan_incident_files(
+                    incident,
+                    signature_path=getattr(self.app, "antivirus_signatures", None),
+                    require_verified_peer=(sys.platform == "win32"),
+                    progress=lambda current, total, path: self.response_queue.put(
+                        ("scan-progress", incident_id, {
+                            "current": current, "total": total, "path": path
+                        })
+                    ),
+                )
+                self.response_queue.put(("scan-done", incident_id, result))
+            except Exception as exc:
+                self.response_queue.put(("response-error", incident_id, str(exc)[:1000]))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _isolate_confirmed(self) -> None:
+        if self.response_busy:
+            return
+        incident_id = self._current_incident_id()
+        scan = self.response_scans.get(incident_id)
+        findings = confirmed_findings(scan)
+        if not findings:
+            self._sync_response_buttons()
+            return
+
+        from tkinter import messagebox
+        if not messagebox.askyesno(
+            "AntiOS",
+            self.t("response_isolate_confirm", count=len(findings)),
+            parent=self.window,
+        ):
+            return
+
+        self.response_busy = True
+        self.response_status.configure(
+            text=self.t("response_isolating", count=len(findings))
+        )
+        self._sync_response_buttons()
+
+        def worker() -> None:
+            try:
+                result = isolate_confirmed_findings(scan)
+                self.response_queue.put(("isolation-done", incident_id, result))
+            except Exception as exc:
+                self.response_queue.put(("response-error", incident_id, str(exc)[:1000]))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _reveal_selected(self) -> None:
+        value = self._selected_path()
+        if not value:
+            return
+        try:
+            target = Path(value)
+            location = target if target.is_dir() else target.parent
+            if not location.exists():
+                raise FileNotFoundError(str(location))
+            if os.name != "nt" or not hasattr(os, "startfile"):
+                raise OSError("Open location is available on Windows only")
+            os.startfile(str(location))
+        except (OSError, ValueError) as exc:
+            self.response_status.configure(
+                text=self.t("response_error", error=str(exc))
+            )
+
+    def _export_incident(self) -> None:
+        if not self.selected_incident:
+            return
+        from tkinter import filedialog
+
+        incident_id = self._current_incident_id()
+        target = filedialog.asksaveasfilename(
+            parent=self.window,
+            defaultextension=".json",
+            initialfile=f"antios-incident-{incident_id or 'report'}.json",
+            filetypes=[("JSON", "*.json")],
+        )
+        if not target:
+            return
+        report = build_incident_report(
+            self.selected_incident,
+            response_scan=self.response_scans.get(incident_id),
+            isolation=self.response_isolations.get(incident_id),
+        )
+        try:
+            Path(target).write_text(
+                json.dumps(report, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self.response_status.configure(text=self.t("response_exported"))
+        except OSError as exc:
+            self.response_status.configure(
+                text=self.t("response_error", error=str(exc))
+            )
+
+    def _poll_response(self) -> None:
+        try:
+            while True:
+                kind, incident_id, value = self.response_queue.get_nowait()
+                if kind == "scan-progress":
+                    if incident_id == self._current_incident_id():
+                        self.response_status.configure(text=self.t(
+                            "response_scanning",
+                            current=value["current"],
+                            total=value["total"],
+                        ))
+                elif kind == "scan-done":
+                    self.response_scans[incident_id] = value
+                    self.response_busy = False
+                    threats = len(confirmed_findings(value))
+                    if incident_id == self._current_incident_id():
+                        self.response_status.configure(text=self.t(
+                            "response_scan_done",
+                            scanned=len(value.get("results", [])),
+                            threats=threats,
+                            errors=len(value.get("errors", [])),
+                        ))
+                elif kind == "isolation-done":
+                    self.response_isolations[incident_id] = value
+                    self.response_busy = False
+                    if incident_id == self._current_incident_id():
+                        self.response_status.configure(text=self.t(
+                            "response_isolate_done",
+                            isolated=len(value.get("isolated", [])),
+                            errors=len(value.get("errors", [])),
+                        ))
+                elif kind == "response-error":
+                    self.response_busy = False
+                    if incident_id == self._current_incident_id():
+                        self.response_status.configure(
+                            text=self.t("response_error", error=value)
+                        )
+                self._sync_response_buttons()
+        except queue.Empty:
+            pass
+
+        try:
+            if self.window.winfo_exists():
+                self.response_after_id = self.window.after(100, self._poll_response)
+        except Exception:
+            self.response_after_id = None
+
+    def _close(self) -> None:
+        if self.response_after_id is not None:
+            try:
+                self.window.after_cancel(self.response_after_id)
+            except Exception:
+                pass
+            self.response_after_id = None
+        try:
+            self.window.destroy()
+        except Exception:
+            pass
 
     def _set_details(self, value: str) -> None:
         self.details.configure(state="normal")
