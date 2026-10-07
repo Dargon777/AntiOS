@@ -1,0 +1,104 @@
+# AntiOS + Microsoft Defender coexistence
+
+AntiOS supports a **layered companion** model on Windows.
+
+The goal is simple: Microsoft Defender may remain active while AntiOS runs its
+own independent engine, Resident Guard and (when separately validated and
+deployed) native pre-execution filter. AntiOS does not need to impersonate,
+disable, hide from or replace Defender to provide this second layer.
+
+## Contract
+
+AntiOS coexistence mode follows these rules:
+
+- Microsoft Defender preferences are not changed.
+- AntiOS does not write fake Windows Security Center registration.
+- AntiOS does not register itself as the primary antivirus in this mode.
+- AntiOS does not add Defender exclusions for itself or its watched folders.
+- AntiOS does not use process hiding, rootkit techniques or anti-analysis tricks.
+- ClamAV signatures and verdicts remain independent from Defender.
+- Defender status is queried read-only with `Get-MpComputerStatus`.
+- A failure to query Defender never disables AntiOS scanning.
+
+`AntiOS.exe protection-status --json` exposes both the observed Defender state
+and the AntiOS coexistence profile.
+
+Typical healthy state:
+
+```json
+{
+  "coexistence": {
+    "mode": "layered",
+    "layered_with_defender": true,
+    "antios_role": "independent-companion",
+    "primary_antivirus_registration": false,
+    "defender_configuration_changed": false,
+    "security_center_spoofing": false,
+    "stealth_or_hiding": false
+  }
+}
+```
+
+## File ownership conflicts
+
+Two real-time products can touch the same file close together. A temporary
+sharing or lock violation is therefore not immediately treated as a broken
+protection stack.
+
+Resident Guard:
+
+1. keeps the original file identity;
+2. defers the scan after a transient sharing/lock conflict;
+3. retries at most three times with a bounded delay;
+4. reuses the normal inventory/revalidation path, so changed bytes cannot inherit
+   an old verdict;
+5. reports a real scan error if the conflict persists beyond the retry budget.
+
+If the file disappears between discovery and scan, Guard records a
+`scan-vanished` event instead of claiming the bytes were clean. This covers
+ordinary deletion as well as remediation performed by another protection layer.
+
+This is deliberately different from blindly ignoring `ACCESS_DENIED`: permanent
+permission problems remain visible because they can represent a real coverage
+gap.
+
+## Detection layers
+
+The intended production shape is:
+
+```text
+Windows application / download / script
+              |
+      +-------+--------+
+      |                |
+Microsoft Defender   AntiOS
+      |                |
+Defender engine     Resident Guard
+                   /        |
+             ClamAV      quarantine
+                   |
+          optional native filter
+       (only after signing/VM gates)
+```
+
+The released Guard is still post-write protection. The experimental native
+minifilter is the only AntiOS component designed for pre-execution file blocking,
+and it stays outside normal deployment until its signing, altitude, HVCI, Driver
+Verifier and Windows VM acceptance gates pass.
+
+## AMSI
+
+AntiOS can use Windows AMSI as an explicit compatibility scan engine. This is
+separate from the independent ClamAV path and does not make AntiOS a Defender
+plugin. A future AntiOS AMSI provider would require its own Windows integration
+and signing work; it should not be confused with the current AMSI client scanner.
+
+## What coexistence does not promise
+
+Layered mode is not equivalent to two certified primary antivirus products.
+It does not grant Windows Security Center primary registration, ELAM, protected
+service/PPL status, boot-time protection or external effectiveness
+certification.
+
+The point of coexistence is narrower and useful: **keep Defender active and add
+an independent AntiOS protection path without weakening either product.**
