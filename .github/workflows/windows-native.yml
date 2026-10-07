@@ -21,7 +21,8 @@ jobs:
             ".\native\windows\build.ps1",
             ".\native\windows\Install-NativeService.ps1",
             ".\native\windows\New-DriverInf.ps1",
-            ".\native\windows\Test-NativeVm.ps1"
+            ".\native\windows\Test-NativeVm.ps1",
+            ".\native\windows\Test-NativeCoexistence.ps1"
           )) {
             $tokens = $null
             $errors = $null
