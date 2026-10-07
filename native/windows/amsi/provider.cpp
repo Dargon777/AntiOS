@@ -52,7 +52,7 @@ public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **object) override {
         if (!object) return E_POINTER;
         *object = nullptr;
-        if (iid == __uuidof(IUnknown) || iid == __uuidof(IAntimalwareProvider)) {
+        if (IsEqualIID(iid, __uuidof(IUnknown)) || IsEqualIID(iid, __uuidof(IAntimalwareProvider))) {
             *object = static_cast<IAntimalwareProvider *>(this);
             AddRef();
             return S_OK;
@@ -155,7 +155,7 @@ public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **object) override {
         if (!object) return E_POINTER;
         *object = nullptr;
-        if (iid == __uuidof(IUnknown) || iid == __uuidof(IClassFactory)) {
+        if (IsEqualIID(iid, __uuidof(IUnknown)) || IsEqualIID(iid, __uuidof(IClassFactory))) {
             *object = static_cast<IClassFactory *>(this);
             AddRef();
             return S_OK;
@@ -199,7 +199,7 @@ extern "C" __declspec(dllexport) HRESULT __stdcall DllGetClassObject(
 ) {
     if (!object) return E_POINTER;
     *object = nullptr;
-    if (clsid != CLSID_AntiOSAmsiProvider) return CLASS_E_CLASSNOTAVAILABLE;
+    if (!IsEqualCLSID(clsid, CLSID_AntiOSAmsiProvider)) return CLASS_E_CLASSNOTAVAILABLE;
     AntiOSClassFactory *factory = new (std::nothrow) AntiOSClassFactory();
     if (!factory) return E_OUTOFMEMORY;
     HRESULT hr = factory->QueryInterface(iid, object);
