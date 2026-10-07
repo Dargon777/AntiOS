@@ -1079,9 +1079,13 @@ Return Value:
                 InterlockedExchange( &StreamContext->State, oldTxState );
                 if (oldTxState == AvFileNotInfected) {
                     InterlockedExchange64(
+                        &StreamContext->CleanDatabaseGeneration,
+                        InterlockedCompareExchange64(&StreamContext->TxCleanDatabaseGeneration, 0, 0));
+                    InterlockedExchange64(
                         &StreamContext->CleanValidUntil100ns,
                         InterlockedCompareExchange64(&StreamContext->TxCleanValidUntil100ns, 0, 0));
                 } else {
+                    InterlockedExchange64(&StreamContext->CleanDatabaseGeneration, 0);
                     InterlockedExchange64(&StreamContext->CleanValidUntil100ns, 0);
                 }
                 break;
@@ -1495,6 +1499,8 @@ AvFileNeedsScan (
     volatile LONG *state = IsInTxWriter ? &StreamContext->TxState : &StreamContext->State;
     volatile LONGLONG *validUntil = IsInTxWriter ?
         &StreamContext->TxCleanValidUntil100ns : &StreamContext->CleanValidUntil100ns;
+    volatile LONGLONG *cleanGeneration = IsInTxWriter ?
+        &StreamContext->TxCleanDatabaseGeneration : &StreamContext->CleanDatabaseGeneration;
     LONG observed = InterlockedCompareExchange(state, 0, 0);
 
     if (observed == AvFileModified) {
@@ -1502,6 +1508,21 @@ AvFileNeedsScan (
     }
     if (observed != AvFileNotInfected) {
         return FALSE;
+    }
+
+    {
+        LONGLONG activeGeneration = InterlockedCompareExchange64(&Globals.DatabaseGeneration, 0, 0);
+        LONGLONG verdictGeneration = InterlockedCompareExchange64(cleanGeneration, 0, 0);
+
+        if (activeGeneration == 0 || verdictGeneration != activeGeneration) {
+            if (InterlockedCompareExchange(state, AvFileModified, AvFileNotInfected) == AvFileNotInfected) {
+                InterlockedExchange64(validUntil, 0);
+                InterlockedExchange64(cleanGeneration, 0);
+                InterlockedIncrement64(&Globals.CleanCacheInvalidations);
+                return TRUE;
+            }
+            return InterlockedCompareExchange(state, 0, 0) == AvFileModified;
+        }
     }
 
     {
@@ -1515,6 +1536,7 @@ AvFileNeedsScan (
 
     if (InterlockedCompareExchange(state, AvFileModified, AvFileNotInfected) == AvFileNotInfected) {
         InterlockedExchange64(validUntil, 0);
+        InterlockedExchange64(cleanGeneration, 0);
         InterlockedIncrement64(&Globals.CleanCacheExpired);
         return TRUE;
     }
