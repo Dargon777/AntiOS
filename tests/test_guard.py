@@ -47,6 +47,16 @@ def launch(tmp_path, **options):
     policy = guard.GuardPolicy((root,), interval=0.1, settle=0.05,
                                 auto_quarantine=options.pop('auto_quarantine', False),
                                 max_queue=options.pop('max_queue', 256))
+
+    # Most tests below exercise Guard scheduling/scanning state, not external
+    # Windows collectors. Keep those unit tests deterministic; dedicated
+    # integration tests opt into injected process/native probes explicitly.
+    options.setdefault(
+        'process_sampler',
+        type("SilentSampler", (), {"poll": lambda self: []})(),
+    )
+    options.setdefault('native_probe', lambda: None)
+
     instance = guard.Guard(policy, state, scanner=options.pop('scanner', scan), probe=options.pop('probe', probe),
                            watcher_factory=options.pop('watcher_factory', PollNotifications), **options)
     stop, failures = threading.Event(), []
