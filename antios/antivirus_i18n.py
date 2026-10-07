@@ -529,3 +529,22 @@ for _locale, _texts in {
         layered_engine=_texts[0],
         protection_layered_detail=_texts[1],
     )
+
+
+# Resident behavior correlation is detection-only and shown compactly under Guard.
+for _locale, _texts in {
+    "en": ("Behavior: {state} · score {score} · signals {count}", "normal", "attention", "alert", "unavailable"),
+    "ru": ("Поведение: {state} · оценка {score} · событий {count}", "норма", "внимание", "тревога", "недоступно"),
+    "es": ("Comportamiento: {state} · puntuación {score} · señales {count}", "normal", "atención", "alerta", "no disponible"),
+    "zh-CN": ("行为监控：{state} · 评分 {score} · 信号 {count}", "正常", "注意", "警报", "不可用"),
+    "fi": ("Käyttäytyminen: {state} · pisteet {score} · signaalit {count}", "normaali", "huomio", "hälytys", "ei käytettävissä"),
+    "pl": ("Zachowanie: {state} · wynik {score} · sygnały {count}", "normalnie", "uwaga", "alarm", "niedostępne"),
+    "mn": ("Үйлдлийн хяналт: {state} · оноо {score} · дохио {count}", "хэвийн", "анхаарах", "түгшүүр", "боломжгүй"),
+}.items():
+    MESSAGES[_locale].update({
+        "behavior_status": _texts[0],
+        "behavior_normal": _texts[1],
+        "behavior_attention": _texts[2],
+        "behavior_alert": _texts[3],
+        "behavior_unavailable": _texts[4],
+    })
