@@ -25,6 +25,22 @@ function Assert-Administrator {
     }
 }
 
+function Open-Registry64 {
+    return [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64
+    )
+}
+
+function Remove-Registry64Tree([string]$SubKey) {
+    $base = Open-Registry64
+    try {
+        $base.DeleteSubKeyTree($SubKey, $false)
+    } finally {
+        $base.Dispose()
+    }
+}
+
 $result = [ordered]@{
     schema = 1
     kind = 'antios-amsi-provider-registration'
@@ -41,8 +57,8 @@ $result = [ordered]@{
 if ($Uninstall) {
     if ($Apply) {
         Assert-Administrator
-        Remove-Item -LiteralPath $ProviderKey -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $ClassKey -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Registry64Tree "SOFTWARE\Microsoft\AMSI\Providers\$ProviderClsid"
+        Remove-Registry64Tree "SOFTWARE\Classes\CLSID\$ProviderClsid"
     }
     if ($Json) { $result | ConvertTo-Json -Depth 5 } else { [pscustomobject]$result | Format-List }
     return
@@ -68,12 +84,32 @@ if ($signature.Status -ne 'Valid') {
 
 if ($Apply) {
     Assert-Administrator
-    New-Item -Path $InprocKey -Force | Out-Null
-    Set-Item -LiteralPath $ClassKey -Value 'AntiOS ClamAV Coexistence Provider'
-    Set-Item -LiteralPath $InprocKey -Value $dll
-    New-ItemProperty -LiteralPath $InprocKey -Name 'ThreadingModel' -PropertyType String -Value 'Both' -Force | Out-Null
-    New-Item -Path $ProviderKey -Force | Out-Null
-    Set-Item -LiteralPath $ProviderKey -Value 'AntiOS ClamAV Coexistence Provider'
+    $base = Open-Registry64
+    try {
+        $class = $base.CreateSubKey("SOFTWARE\Classes\CLSID\$ProviderClsid", $true)
+        try {
+            $class.SetValue('', 'AntiOS ClamAV Coexistence Provider', [Microsoft.Win32.RegistryValueKind]::String)
+        } finally {
+            $class.Dispose()
+        }
+
+        $inproc = $base.CreateSubKey("SOFTWARE\Classes\CLSID\$ProviderClsid\InprocServer32", $true)
+        try {
+            $inproc.SetValue('', $dll, [Microsoft.Win32.RegistryValueKind]::String)
+            $inproc.SetValue('ThreadingModel', 'Both', [Microsoft.Win32.RegistryValueKind]::String)
+        } finally {
+            $inproc.Dispose()
+        }
+
+        $provider = $base.CreateSubKey("SOFTWARE\Microsoft\AMSI\Providers\$ProviderClsid", $true)
+        try {
+            $provider.SetValue('', 'AntiOS ClamAV Coexistence Provider', [Microsoft.Win32.RegistryValueKind]::String)
+        } finally {
+            $provider.Dispose()
+        }
+    } finally {
+        $base.Dispose()
+    }
 }
 
 if ($Json) {
