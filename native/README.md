@@ -34,7 +34,7 @@ antivirus, a certified driver, or a ready-to-install Defender replacement.
   the filter after rule removal to clear a previous positive in this prototype.
 - `--status` reports SCM state and configured/actual Windows process protection
   separately. `--driver-status` reads loaded policy and counters; it does not infer
-  protection from a registry setting. Protocol v3 also reports CoexistenceMode,
+  protection from a registry setting. Protocol v4 also reports CoexistenceMode,
   bounded four-worker scan admission, peak pending work, overload bypasses, delivery/completion
   timeouts, cancellations and total/average/max kernel wait latency. `--scan-file PATH`
   is a bounded diagnostic.
@@ -229,7 +229,7 @@ other protection layer.
 
 ## Bounded clean-verdict cache
 
-Native protocol v3 adds two conservative clean-only cache layers to reduce repeat
+Native protocol v4 adds two conservative clean-only cache layers to reduce repeat
 ClamD work without turning a stale path into a permanent allow-list:
 
 1. The minifilter keeps a clean verdict in the current stream context for
@@ -256,3 +256,24 @@ database update can make a cached clean result stale for at most the configured
 TTL (30 seconds by default), after which the file returns to the normal scan
 path. `--driver-status` exposes `clean_cache_ttl_ms`, `cache_hits`,
 `cache_expired` and `cache_invalidations`.
+
+
+### Database-generation watcher
+
+Protocol v4 binds every cached clean verdict to the ClamAV signature database
+generation reported by the trusted `VERSION` response. The LocalSystem broker
+polls the verified ClamD peer every 2 seconds using a VERSION-only request. When
+the generation changes, the broker clears its fixed SHA-256 cache and sends the
+new generation to the minifilter. Existing stream clean verdicts remain in place
+physically but become invalid immediately because their stored generation no
+longer matches the driver's active generation.
+
+If the trusted VERSION probe fails or reports an unknown/stale database, the
+broker publishes generation `0`. That conservatively invalidates kernel clean
+cache hits until a trusted current generation is observed again. A clean verdict
+produced by an in-flight scan is cached only when its verdict generation still
+matches the driver's active generation at completion, preventing an older scan
+from re-authorizing a stream after FreshClam/ClamD reload.
+
+`--driver-status` exposes `database_generation` and
+`database_generation_changes` in addition to the clean-cache counters.
