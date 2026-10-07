@@ -155,3 +155,15 @@ RiskContext does not:
 - replace native pre-execution content enforcement.
 
 Those boundaries are deliberate false-positive and coexistence controls.
+
+
+## Incident Graph
+
+RiskContext decisions with meaningful score, incomplete coverage, or confirmed
+threat evidence can attach to the local [Incident Graph](INCIDENTS.md) as
+`risk` nodes. The graph preserves the highest severity observed during an
+incident, so a later low-risk evaluation cannot erase an earlier high-confidence
+behavior chain.
+
+This does not alter RiskContext's enforcement boundary: only confirmed scanner
+threats are eligible for unattended enforcement.
