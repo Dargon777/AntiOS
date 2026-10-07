@@ -208,7 +208,11 @@ def test_real_tk_incident_viewer_renders_history_tree_and_details():
         assert len(viewer.incident_tree.get_children()) == 1
         assert len(viewer.chain.get_children()) >= 1
 
-        viewer.chain.selection_set("process:500")
+        process_item = next(
+            iid for iid, row in viewer.rows.items()
+            if row["id"] == "process:500"
+        )
+        viewer.chain.selection_set(process_item)
         viewer._select_node()
         details = viewer.details.get("1.0", "end")
         assert "PID: 500" in details
