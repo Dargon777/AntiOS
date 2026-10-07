@@ -10,7 +10,7 @@ def test_amsi_provider_contract_is_secondary_and_signed_only():
     assert "AMSI_RESULT_DETECTED" in provider
     assert "AMSI_RESULT_NOT_DETECTED" in provider
     assert "ao_engine_scan" in provider
-    assert "SOFTWARE\\AntiOS" in provider
+    assert "EngineServiceName" in provider
     assert "WSC" not in provider
 
     assert "valid Authenticode signature" in installer
@@ -29,3 +29,14 @@ def test_coexistence_docs_forbid_primary_registration_and_defender_changes():
     assert "does not disable, stop or reconfigure Microsoft Defender" in text
     assert "does not write fake Windows Security Center antivirus registration" in text
     assert "does not add Defender exclusions" in text
+
+
+def test_setup_registers_only_signed_secondary_provider():
+    setup = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
+    assert "Install-AmsiProvider.ps1" in setup
+    assert "AntiOS-AmsiProvider.dll" in setup
+    assert "AmsiProviderExitCode" in setup
+    assert "-Uninstall -Apply" in setup
+    assert "Set-MpPreference" not in setup
+    assert "DisableRealtimeMonitoring" not in setup
+    assert "SecurityCenter2" not in setup
