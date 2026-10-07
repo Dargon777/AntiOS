@@ -114,7 +114,9 @@ static int status_json(void) {
     }
     printf("{\"installed\":true,\"service_state\":%lu,\"pid\":%lu,\"configured_protection_known\":%s,"
            "\"configured_protection\":%lu,\"actual_protection_known\":%s,\"actual_protection\":%lu,"
-           "\"primary_antivirus\":false,\"engine_readiness\":\"not_measured\"}\n",
+           "\"primary_antivirus\":false,\"windows_security_registration\":false,"
+           "\"defender_changes\":false,\"coexistence_mode\":\"parallel-secondary\","
+           "\"engine_readiness\":\"not_measured\"}\n",
            state.dwCurrentState, state.dwProcessId, config_known ? "true" : "false", configured.dwLaunchProtected,
            actual_known ? "true" : "false", actual.ProtectionLevel);
     CloseServiceHandle(service); CloseServiceHandle(manager);
@@ -139,7 +141,7 @@ static int driver_status_json(void) {
         printf("{\"driver_available\":false,\"error\":%lu}\n", (DWORD)result);
         return 2;
     }
-    printf("{\"driver_available\":true,\"enforcement\":%lu,\"pending\":%ld,"
+    printf("{\"driver_available\":true,\"enforcement\":%lu,\"fail_open_on_unknown\":true,\"pending\":%ld,"
            "\"attempts\":%lld,\"incomplete\":%lld,\"detections\":%lld,\"blocked\":%lld}\n",
            state.Enforcement, state.PendingScans, (long long)state.Attempts, (long long)state.Incomplete,
            (long long)state.Detections, (long long)state.Blocked);
