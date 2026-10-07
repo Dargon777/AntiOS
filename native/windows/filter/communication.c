@@ -1202,10 +1202,13 @@ AvMessageNotifyCallback (
         (command.Command != AvCmdCreateSectionForDataScan && command.Command != AvCmdCloseSectionForDataScan))
         return STATUS_INVALID_PARAMETER;
     if (command.Command == AvCmdCreateSectionForDataScan &&
-        (!OutputBuffer || OutputBufferSize != sizeof(reply) || !IS_ALIGNED(OutputBuffer, sizeof(HANDLE))))
+        (command.ResultFlags != 0 || !OutputBuffer || OutputBufferSize != sizeof(reply) ||
+         !IS_ALIGNED(OutputBuffer, sizeof(HANDLE))))
         return STATUS_INVALID_PARAMETER;
     if (command.Command == AvCmdCloseSectionForDataScan &&
-        (command.ScanResult < AvScanResultUndetermined || command.ScanResult > AvScanResultClean))
+        (command.ScanResult < AvScanResultUndetermined || command.ScanResult > AvScanResultClean ||
+         (command.ResultFlags & ~AO_SCAN_FLAG_CLEAN_CACHE_HIT) != 0 ||
+         (command.ResultFlags != 0 && command.ScanResult != AvScanResultClean)))
         return STATUS_INVALID_PARAMETER;
     status = AvGetScanCtxSynchronized(command.ScanId, &scanContext);
     if (!NT_SUCCESS(status)) return status;
@@ -1222,6 +1225,9 @@ AvMessageNotifyCallback (
             }
         }
     } else {
+        if (command.ResultFlags & AO_SCAN_FLAG_CLEAN_CACHE_HIT) {
+            InterlockedIncrement64(&Globals.CleanCacheHits);
+        }
         status = AvHandleCmdCloseSectionForDataScan(scanContext, command.ScanResult);
     }
     AvReleaseScanContext(scanContext);
