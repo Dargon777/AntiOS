@@ -135,3 +135,14 @@ behavior alert is not blindly assigned to every unrelated file.
 
 Behavior-only evidence remains review-only regardless of score. Automatic
 enforcement eligibility still requires a confirmed scanner threat.
+
+
+## Incident correlation
+
+Behavior findings with meaningful scores can become nodes in the bounded
+[Incident Graph](INCIDENTS.md). Process-subject findings preserve parent/child
+context, while mass-change rules may attach only the recent file changes already
+covered by the BehaviorEngine correlation window.
+
+The graph does not infer new behavior by itself; it only links evidence that
+existing collectors/rules already established.
