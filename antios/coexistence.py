@@ -25,6 +25,21 @@ _WSC_HEALTH = {
 }
 
 
+def defender_protected_roots() -> tuple[Path, ...]:
+    """Return Defender-owned stores AntiOS should not recursively monitor.
+
+    This is an AntiOS-side exclusion only. It does not change Defender's own
+    exclusions or protection policy.
+    """
+    if os.name != "nt":
+        return ()
+    program_data = Path(os.environ.get("ProgramData") or r"C:\ProgramData")
+    return (
+        (program_data / "Microsoft" / "Windows Defender").absolute(),
+        (program_data / "Microsoft" / "Windows Defender Advanced Threat Protection").absolute(),
+    )
+
+
 def _wsc_antivirus_health() -> dict:
     if os.name != "nt":
         return {"available": False, "reason": "windows-only"}
