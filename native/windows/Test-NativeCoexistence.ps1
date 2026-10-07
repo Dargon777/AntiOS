@@ -110,8 +110,8 @@ try {
     $report.driverBefore = $before
     if ([int]$before.protocol -lt 2) { throw 'Native protocol v2+ is required.' }
     if ([int]$before.coexistence_mode -ne 1) { throw 'Driver CoexistenceMode must be enabled.' }
-    if ([int]$before.max_pending -lt 1 -or [int]$before.max_pending -gt 16) {
-        throw 'Driver MaxPendingScans is outside the supported bound.'
+    if ([int]$before.max_pending -lt 1 -or [int]$before.max_pending -gt 4) {
+        throw 'Driver MaxPendingScans exceeds the four-worker native broker capacity.'
     }
     if ([int]$before.pending -ne 0) { throw 'Driver had pending scans before the stress test.' }
 
@@ -159,6 +159,20 @@ try {
     if ($attemptDelta -lt $ParallelOpens) { throw 'Not every distinct execute-open reached native scan admission.' }
     if ($blockDelta -ne 0) { throw 'Clean coexistence fixtures were unexpectedly blocked.' }
     if ([long]$after.max_wait_ms -gt 15000) { throw 'Driver-observed wait exceeded the coexistence latency ceiling.' }
+
+    $mpAfter = Get-MpComputerStatus
+    $report.defenderAfter = [ordered]@{
+        runningMode = [string]$mpAfter.AMRunningMode
+        antivirusEnabled = [bool]$mpAfter.AntivirusEnabled
+        realTimeProtectionEnabled = [bool]$mpAfter.RealTimeProtectionEnabled
+        behaviorMonitorEnabled = [bool]$mpAfter.BehaviorMonitorEnabled
+        ioavProtectionEnabled = [bool]$mpAfter.IoavProtectionEnabled
+        tamperProtected = [bool]$mpAfter.IsTamperProtected
+        signatureVersion = [string]$mpAfter.AntivirusSignatureVersion
+    }
+    if (-not $mpAfter.AntivirusEnabled -or -not $mpAfter.RealTimeProtectionEnabled) {
+        throw 'Microsoft Defender real-time protection was no longer active after the coexistence stress run.'
+    }
 
     $report.passed = $true
 } catch {
