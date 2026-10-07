@@ -144,6 +144,11 @@ def _amsi_provider_status() -> dict:
         }
 
 
+
+def amsi_provider_status() -> dict:
+    """Return only AntiOS's own AMSI registration state without probing Defender."""
+    return _amsi_provider_status()
+
 def evaluate_coexistence(defender: dict, wsc: dict, amsi: dict) -> dict:
     defender_active = bool(
         defender.get("available")
