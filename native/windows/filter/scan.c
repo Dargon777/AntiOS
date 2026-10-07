@@ -41,6 +41,23 @@ static VOID AvRecordPeakPending(_In_ LONG Pending)
     }
 }
 
+static BOOLEAN AvTryAcquireScanSlot(VOID)
+{
+    LONG current = InterlockedCompareExchange(&Globals.PendingScans, 0, 0);
+    for (;;) {
+        LONG previous;
+        if (current < 0 || (ULONG)current >= Globals.MaxPendingScans) {
+            return FALSE;
+        }
+        previous = InterlockedCompareExchange(&Globals.PendingScans, current + 1, current);
+        if (previous == current) {
+            AvRecordPeakPending(current + 1);
+            return TRUE;
+        }
+        current = previous;
+    }
+}
+
 /* Removed the sample's demonstration string matcher. There is no kernel AV engine. */
 NTSTATUS
 AvScanInKernel(PCFLT_RELATED_OBJECTS FltObjects, UCHAR Major, BOOLEAN Tx, PAV_STREAM_CONTEXT Stream)
@@ -307,22 +324,18 @@ AvScanInUser(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS Objects, UCHAR Major
              BOOLEAN Tx, DEVICE_TYPE DeviceType)
 {
     NTSTATUS status;
-    LONG pending;
     ULONGLONG started = KeQueryInterruptTime();
 
     InterlockedIncrement64(&Globals.Attempts);
-    pending = InterlockedIncrement(&Globals.PendingScans);
-    if ((ULONG)pending > Globals.MaxPendingScans) {
+    if (!AvTryAcquireScanSlot()) {
         /* Coexistence is intentionally fail-open on overload. A second AV can
            briefly own file resources; queueing unbounded execute opens would
            create a system-wide launch stall without improving verdict quality. */
         InterlockedIncrement64(&Globals.Incomplete);
         InterlockedIncrement64(&Globals.BusyBypass);
-        InterlockedDecrement(&Globals.PendingScans);
         AvRecordWait(KeQueryInterruptTime() - started);
         return STATUS_DEVICE_BUSY;
     }
-    AvRecordPeakPending(pending);
 
     status = AvScanInUserImpl(Data, Objects, Major, Tx, DeviceType);
     if (status != STATUS_SUCCESS) InterlockedIncrement64(&Globals.Incomplete);
