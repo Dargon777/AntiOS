@@ -113,11 +113,33 @@ files. Quarantine and history stay in the user's data directory.
   file content. It is local to `%LOCALAPPDATA%\AntiOS\Guard`. No telemetry is
   added. The state folder and quarantine are excluded from monitoring.
 
+## Behavior correlation
+
+Guard now includes a bounded **detection-only** correlation engine. On Windows it
+uses a read-only Tool Help process snapshot collector alongside the existing
+file-change watcher. The collector observes new process image/parent relationships
+and correlates them with explicit file changes inside configured Guard roots.
+
+Examples include Office/PDF or browser processes starting script interpreters,
+a recently changed executable being launched, and mass changes to watched files.
+A single executable launched from Downloads or user Temp is intentionally only a
+low-score signal because legitimate installers commonly do that.
+
+Behavior findings are written to the local Guard journal as `behavior-alert`
+events and are summarized in Guard/protection status and the Antivirus UI. They
+do **not** become ClamAV threat verdicts, do not trigger automatic quarantine,
+do not terminate processes and do not claim pre-execution blocking. If process
+sampling fails, Guard falls back to file-only behavior correlation and continues
+normal antivirus scanning.
+
+The complete rule IDs, scores, memory/time bounds and known visibility limits are
+documented in [BEHAVIOR.md](BEHAVIOR.md).
+
 ## Verification scope
 
 Tests cover new/existing/changed files, repeated writes, database-generation
 changes, bounded queues, restart/stop isolation, journal limits, quarantine
-opt-in, review-only outcomes and worker termination. Real ClamD integration uses
+opt-in, review-only outcomes, worker termination and behavior-correlation rules. Real ClamD integration uses
 an inert custom rule and detects a newly created ZIP containing that marker.
 This establishes functional behavior, not malware detection effectiveness.
 
