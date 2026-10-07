@@ -198,6 +198,13 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         guard.get("running") and
         guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
     )
+    behavior = guard.get("behavior", {}) if isinstance(guard.get("behavior"), dict) else {}
+    behavior_monitoring = bool(
+        guard_running and behavior.get("mode") == "detect-only"
+    )
+    behavior_process_visibility = bool(
+        behavior_monitoring and behavior.get("collector") in {"toolhelp-snapshot", "injected"}
+    )
     service = native.get("service", {})
     driver = native.get("driver", {})
     native_running = service.get("service_state") == 4 and service.get("exit_code") == 0
@@ -242,6 +249,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "capabilities": {
             "standalone_detection_engine": engine_ready,
             "resident_post_write_detection": guard_running and engine_ready,
+            "behavior_monitoring": behavior_monitoring,
+            "behavior_process_visibility": behavior_process_visibility,
             "pre_execution_blocking": pre_execution and engine_ready,
             "native_coexistence_ready": native_coexistence,
             "native_coexistence_observed_operational": (
@@ -273,6 +282,11 @@ def render_protection_status(status: dict) -> str:
         f"Database: {engine.get('database_freshness', 'unknown')}",
         f"Engine identity: {engine.get('peer_identity', 'unknown')}",
         f"Resident Guard: {guard.get('state', 'not-running')}",
+        "Behavior monitor: "
+        f"{guard.get('behavior', {}).get('state', 'unavailable')} "
+        f"({guard.get('behavior', {}).get('collector', 'unavailable')}, "
+        f"score={guard.get('behavior', {}).get('highest_score', 0)}, "
+        f"findings={guard.get('behavior', {}).get('recent_findings', 0)})",
         f"Managed runtime: {'healthy' if managed.get('healthy') else 'needs review'}",
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
