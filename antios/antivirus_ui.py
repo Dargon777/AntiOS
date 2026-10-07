@@ -290,11 +290,15 @@ class AntivirusPanel:
             guard_actions, self.t("guard_start"), self._guard_toggle, kind="primary"
         )
         self.guard_start_button.pack(side="left")
-        self.guard_history_button = self.app._button(
-            guard_actions, self.t("guard_history"), self._guard_history, kind="secondary"
+        self.incident_button = self.app._button(
+            guard_actions, self.t("incident_viewer_button"), self._incident_history,
+            kind="secondary"
         )
-        self.guard_history_button.pack(side="left", padx=(7, 0))
-        self.buttons.extend((self.guard_start_button, self.guard_history_button))
+        self.incident_button.pack(side="left", padx=(7, 0))
+        # Backward-compatible alias for integrations that referenced the old
+        # Guard history button directly.
+        self.guard_history_button = self.incident_button
+        self.buttons.extend((self.guard_start_button, self.incident_button))
 
         self.guard_status = tk.Label(
             guard_body,
@@ -615,10 +619,15 @@ class AntivirusPanel:
 
         self._run("guard-action", lambda: read_guard_state(stop=True))
 
-    def _guard_history(self) -> None:
-        from .guard_state import read_guard_state
+    def _incident_history(self) -> None:
+        from .guard_state import read_incident_history
 
-        self._run("guard-history", lambda: read_guard_state(history=True))
+        self._run("incident-history", lambda: read_incident_history(limit=50))
+
+    def _guard_history(self) -> None:
+        # Compatibility alias: the old raw JSON popup is now the structured
+        # Incident Viewer.
+        self._incident_history()
 
     def _defender(self, action: str) -> None:
         from tkinter import messagebox
@@ -1031,13 +1040,10 @@ class AntivirusPanel:
                 self._sync_protection_ui(value)
             elif kind == "guard-action":
                 self.last_guard_probe = 0
-            elif kind == "guard-history":
-                from tkinter import messagebox
+            elif kind == "incident-history":
+                from .incident_viewer import IncidentViewer
 
-                messagebox.showinfo(
-                    "AntiOS Guard",
-                    json.dumps(value, indent=2, ensure_ascii=False),
-                )
+                IncidentViewer(self.app, self.palette, value, self.t)
             elif kind == "idle":
                 self.app.antivirus_busy = False
                 self._set_busy()
