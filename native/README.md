@@ -4,6 +4,13 @@ This is **source for a laboratory prototype**, separate from AntiOS's Python GUI
 Guard, installer and Microsoft Store package. It is not a supported primary
 antivirus, a certified driver, or a ready-to-install Defender replacement.
 
+The native tree also contains an **x64 AMSI coexistence provider**. Unlike the
+kernel filter, that provider can be shipped as a normal signed DLL: it is an
+in-process `IAntimalwareProvider` backed by the same verified ClamD service
+identity checks. It is secondary-only, never registers AntiOS as the Windows
+Security primary antivirus and never changes Defender or AMSI FeatureBits.
+See [Defender coexistence mode](../docs/COEXISTENCE.md).
+
 ## Implemented
 
 - `AntiOS-Filter.sys`: a minifilter derived from Microsoft's AvScan sample,
