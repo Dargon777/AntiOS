@@ -130,3 +130,16 @@ this bounded fail-open path is rare and observable.
 is active and `WdFilter` is loaded. It then exercises many simultaneous harmless
 `FILE_EXECUTE` opens while AntiOS is attached, checks that clean files are not
 blocked, verifies the queue drains and records latency/timeout deltas.
+
+
+## Native admission bound
+
+The experimental native broker owns four scan workers. The minifilter therefore
+admits at most four concurrent user-mode scans in coexistence mode. Extra execute
+opens fail open into an explicit incomplete/busy-bypass counter rather than
+building an unbounded kernel wait queue. The installer rejects a
+`MaxPendingScans` value above the four native broker workers.
+
+The disposable-VM coexistence harness verifies Microsoft Defender real-time
+protection both before and after the stress run. A run cannot pass merely because
+Defender was active at startup and became inactive during testing.
