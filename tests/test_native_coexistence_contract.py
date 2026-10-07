@@ -102,7 +102,7 @@ def test_broker_clean_cache_is_fixed_bounded_and_clean_only():
     assert "BCryptHashData" in broker
     assert "BCryptFinishHash" in broker
     assert "outcome.result == AO_CLEAR && outcome.database_current" in broker
-    assert "clean_cache_store(broker, digest, size)" in broker
+    assert "clean_cache_store(broker, digest, size, outcome.database_generation)" in broker
     assert "AO_SCAN_FLAG_CLEAN_CACHE_HIT" in broker
     assert "bcrypt.lib" in build
     assert "#define AO_SCAN_FLAG_CLEAN_CACHE_HIT 0x00000001u" in wire
