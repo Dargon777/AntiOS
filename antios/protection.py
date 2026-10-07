@@ -217,6 +217,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
     )
     behavior = guard.get("behavior", {}) if isinstance(guard.get("behavior"), dict) else {}
+    risk = guard.get("risk", {}) if isinstance(guard.get("risk"), dict) else {}
+    last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
     behavior_monitoring = bool(
         guard_running and behavior.get("mode") == "detect-only"
     )
@@ -259,11 +261,13 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "native_coexistence": native_health,
         "defender": defender,
         "coexistence": coexistence,
+        "risk": risk,
         "capabilities": {
             "standalone_detection_engine": engine_ready,
             "resident_post_write_detection": guard_running and engine_ready,
             "behavior_monitoring": behavior_monitoring,
             "behavior_process_visibility": behavior_process_visibility,
+            "risk_fusion": guard_running and risk.get("mode") == "fusion",
             "pre_execution_blocking": pre_execution and engine_ready,
             "native_coexistence_ready": native_coexistence,
             "native_coexistence_observed_operational": (
@@ -300,6 +304,12 @@ def render_protection_status(status: dict) -> str:
         f"({guard.get('behavior', {}).get('collector', 'unavailable')}, "
         f"score={guard.get('behavior', {}).get('highest_score', 0)}, "
         f"findings={guard.get('behavior', {}).get('recent_findings', 0)})",
+        "Risk fusion: "
+        f"{last_risk.get('classification', 'unavailable')} "
+        f"(score={last_risk.get('score', 0)}, "
+        f"origin={last_risk.get('origin', 'unknown')}, "
+        f"native={last_risk.get('native_pre_execution', risk.get('native_pre_execution', 'unknown'))}, "
+        f"auto-enforce={last_risk.get('automatic_enforcement_eligible', False)})",
         f"Managed runtime: {'healthy' if managed.get('healthy') else 'needs review'}",
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
