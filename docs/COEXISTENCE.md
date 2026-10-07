@@ -135,6 +135,11 @@ The registration script only creates/removes AntiOS's CLSID and
 `HKLM\SOFTWARE\Microsoft\AMSI\Providers\{CLSID}` entry. It refuses an
 unsigned DLL and never changes AMSI signing policy.
 
+The current provider build is **x64 only**. Because AMSI providers are loaded
+in-process, 32-bit AMSI hosts are not covered by this DLL and must continue to
+rely on Defender/other 32-bit providers plus AntiOS file layers. AntiOS reports
+this architecture explicitly instead of claiming full script-host coverage.
+
 ## Why AntiOS does not register as primary AV in this mode
 
 On ordinary Windows 10/11 clients without the applicable Defender for Endpoint
