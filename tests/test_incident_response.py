@@ -184,3 +184,18 @@ def test_incident_report_records_response_and_safety_boundary():
     assert report["response"]["isolation"] is isolation
     assert report["safety"]["behavior_only_auto_enforcement"] is False
     assert report["safety"]["isolation_requires_fresh_confirmed_scan_finding"] is True
+
+
+
+def test_malformed_threat_is_not_quarantine_eligible():
+    malformed = finding(r"C:\Data\bad.exe")
+    malformed.pop("fingerprint")
+    response = {
+        "incident_id": "INC-TEST",
+        "results": [{
+            "path": malformed["path"],
+            "result": scan_result(malformed["path"], [malformed]),
+        }],
+        "errors": [],
+    }
+    assert confirmed_findings(response) == []
