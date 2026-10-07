@@ -713,6 +713,8 @@ Return Value:
     Globals.ScanIdCounter = 0;
     Globals.LocalScanTimeout = 5000;
     Globals.Enforcement = 0;
+    Globals.CoexistenceMode = 1;
+    Globals.MaxPendingScans = 4;
     Globals.NetworkScanTimeout = 5000;
 
 #if DBG
@@ -3315,6 +3317,22 @@ Return Value:
     if (NT_SUCCESS(status) && value->Type == REG_DWORD &&
         value->DataLength == sizeof(ULONG) && *(PULONG)value->Data == 1) {
         Globals.Enforcement = 1;
+    }
+
+    RtlInitUnicodeString(&valueName, L"CoexistenceMode");
+    status = ZwQueryValueKey(settingsKey, &valueName, KeyValuePartialInformation,
+                             value, valueLength, &resultLength);
+    if (NT_SUCCESS(status) && value->Type == REG_DWORD && value->DataLength == sizeof(ULONG) &&
+        (*(PULONG)value->Data == 0 || *(PULONG)value->Data == 1)) {
+        Globals.CoexistenceMode = *(PULONG)value->Data;
+    }
+
+    RtlInitUnicodeString(&valueName, L"MaxPendingScans");
+    status = ZwQueryValueKey(settingsKey, &valueName, KeyValuePartialInformation,
+                             value, valueLength, &resultLength);
+    if (NT_SUCCESS(status) && value->Type == REG_DWORD && value->DataLength == sizeof(ULONG) &&
+        *(PULONG)value->Data >= 1 && *(PULONG)value->Data <= 16) {
+        Globals.MaxPendingScans = *(PULONG)value->Data;
     }
 
     status = STATUS_SUCCESS;
