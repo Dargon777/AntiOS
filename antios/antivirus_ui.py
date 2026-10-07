@@ -38,6 +38,8 @@ class AntivirusPanel:
         self.mode = "findings"
         self.after_id = None
         self.last_guard_probe = 0.0
+        self.last_coexistence_probe = 0.0
+        self.coexistence_probe_busy = False
         self.guard_state = "not-running"
         self.advanced_visible = False
         self.labels: list[Any] = []
@@ -167,6 +169,17 @@ class AntivirusPanel:
             pady=7,
         )
         engine_chip.grid(row=0, column=2, sticky="ne", padx=18, pady=18)
+
+        self.coexistence_chip = tk.Label(
+            self.hero,
+            text="AntiOS independent",
+            bg=self.palette["surface_alt"],
+            fg=self.palette["muted"],
+            font=("Segoe UI Semibold", 8),
+            padx=12,
+            pady=7,
+        )
+        self.coexistence_chip.grid(row=1, column=2, sticky="se", padx=18, pady=(0, 18))
 
         # Primary work cards.
         primary = tk.Frame(outer, bg=self.palette["bg"])
@@ -882,6 +895,23 @@ class AntivirusPanel:
             text=self.t("guard_stop") if running else self.t("guard_start")
         )
 
+    def _sync_coexistence_ui(self, value: dict) -> None:
+        state = value.get("coexistence", {})
+        defender = value.get("defender", {})
+        amsi = value.get("antios_amsi", {})
+        layered = bool(state.get("defender_active_parallel"))
+        amsi_ready = bool(amsi.get("registered") and amsi.get("module_exists"))
+        if layered:
+            text = "Defender + AntiOS" + (" · AMSI" if amsi_ready else "")
+            color = self.palette["ok"]
+        elif defender.get("available"):
+            text = "Defender detected · review"
+            color = self.palette["warn"]
+        else:
+            text = "AntiOS independent"
+            color = self.palette["muted"]
+        self.coexistence_chip.configure(text=text, fg=color)
+
     def _set_busy(self) -> None:
         busy = self.app.antivirus_busy
         for button in self.buttons:
@@ -928,6 +958,29 @@ class AntivirusPanel:
 
             threading.Thread(target=probe_guard, daemon=True).start()
 
+        if (
+            sys.platform == "win32"
+            and time.monotonic() - self.last_coexistence_probe >= 15
+            and not self.coexistence_probe_busy
+        ):
+            self.last_coexistence_probe = time.monotonic()
+            self.coexistence_probe_busy = True
+
+            def probe_coexistence() -> None:
+                from .coexistence import collect_coexistence_status
+
+                try:
+                    value = collect_coexistence_status()
+                except Exception as exc:
+                    value = {
+                        "coexistence": {"mode": "unavailable"},
+                        "defender": {"available": False, "detail": str(exc)},
+                        "antios_amsi": {"registered": False},
+                    }
+                self.app.antivirus_queue.put(("coexistence-state", value))
+
+            threading.Thread(target=probe_coexistence, daemon=True).start()
+
         for _ in range(100):
             try:
                 kind, value = self.app.antivirus_queue.get_nowait()
@@ -938,6 +991,9 @@ class AntivirusPanel:
                 self.app.guard_probe_busy = False
                 self._sync_guard_ui(value)
                 self._set_busy()
+            elif kind == "coexistence-state":
+                self.coexistence_probe_busy = False
+                self._sync_coexistence_ui(value)
             elif kind == "guard-action":
                 self.last_guard_probe = 0
             elif kind == "guard-history":
