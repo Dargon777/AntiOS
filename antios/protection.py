@@ -111,7 +111,9 @@ def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
         isinstance(driver.get("pending"), int) and
         0 <= driver.get("pending") <= driver.get("max_pending") and
         isinstance(driver.get("clean_cache_ttl_ms"), int) and
-        0 <= driver.get("clean_cache_ttl_ms") <= 300000
+        0 <= driver.get("clean_cache_ttl_ms") <= 300000 and
+        isinstance(driver.get("database_generation"), int) and
+        driver.get("database_generation") > 0
     )
     if not configured:
         return {
