@@ -7,6 +7,7 @@ collapsed advanced section instead of competing with the main actions.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import sys
 import threading
@@ -38,6 +39,9 @@ class AntivirusPanel:
         self.mode = "findings"
         self.after_id = None
         self.last_guard_probe = 0.0
+        self.last_protection_probe = 0.0
+        self.protection_probe_busy = False
+        self.layered_active = False
         self.guard_state = "not-running"
         self.advanced_visible = False
         self.labels: list[Any] = []
@@ -157,7 +161,7 @@ class AntivirusPanel:
         )
         self.protection_detail.pack(fill="x")
 
-        engine_chip = tk.Label(
+        self.engine_chip = tk.Label(
             self.hero,
             text=self.t("managed_engine"),
             bg=self.palette["surface_alt"],
@@ -166,7 +170,7 @@ class AntivirusPanel:
             padx=12,
             pady=7,
         )
-        engine_chip.grid(row=0, column=2, sticky="ne", padx=18, pady=18)
+        self.engine_chip.grid(row=0, column=2, sticky="ne", padx=18, pady=18)
 
         # Primary work cards.
         primary = tk.Frame(outer, bg=self.palette["bg"])
@@ -846,7 +850,7 @@ class AntivirusPanel:
         if healthy:
             color = self.palette["ok"]
             title = self.t("protection_active")
-            detail = self.t("protection_active_detail")
+            detail = self.t("protection_layered_detail") if self.layered_active else self.t("protection_active_detail")
             short = self.t("guard_active_short")
         elif state == "starting":
             color = self.palette["info"]
@@ -882,6 +886,25 @@ class AntivirusPanel:
             text=self.t("guard_stop") if running else self.t("guard_start")
         )
 
+    def _sync_protection_ui(self, value: dict) -> None:
+        caps = value.get("capabilities") if isinstance(value, dict) else {}
+        if not isinstance(caps, dict):
+            caps = {}
+        layered = bool(
+            caps.get("standalone_detection_engine") and
+            caps.get("layered_with_defender")
+        )
+        self.layered_active = layered
+        self.engine_chip.configure(
+            text=self.t("layered_engine") if layered else self.t("managed_engine"),
+            fg=self.palette["ok"] if layered else self.palette["muted"],
+        )
+        if self.guard_state in _HEALTHY_GUARD_STATES:
+            self.protection_detail.configure(
+                text=self.t("protection_layered_detail") if layered
+                else self.t("protection_active_detail")
+            )
+
     def _set_busy(self) -> None:
         busy = self.app.antivirus_busy
         for button in self.buttons:
@@ -911,6 +934,25 @@ class AntivirusPanel:
 
     def _poll(self) -> None:
         if (
+            os.name == "nt"
+            and time.monotonic() - self.last_protection_probe >= 20
+            and not self.protection_probe_busy
+        ):
+            self.last_protection_probe = time.monotonic()
+            self.protection_probe_busy = True
+
+            def probe_protection() -> None:
+                from .protection import collect_protection_status
+
+                try:
+                    value = collect_protection_status()
+                except Exception as exc:
+                    value = {"error": str(exc)}
+                self.app.antivirus_queue.put(("protection-state", value))
+
+            threading.Thread(target=probe_protection, daemon=True).start()
+
+        if (
             time.monotonic() - self.last_guard_probe >= 3
             and not self.app.guard_probe_busy
         ):
@@ -938,6 +980,9 @@ class AntivirusPanel:
                 self.app.guard_probe_busy = False
                 self._sync_guard_ui(value)
                 self._set_busy()
+            elif kind == "protection-state":
+                self.protection_probe_busy = False
+                self._sync_protection_ui(value)
             elif kind == "guard-action":
                 self.last_guard_probe = 0
             elif kind == "guard-history":
