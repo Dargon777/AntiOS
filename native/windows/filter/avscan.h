@@ -125,6 +125,7 @@ typedef struct _AV_SCANNER_GLOBAL_DATA {
     //
 
     LONGLONG LocalScanTimeout;
+    ULONG CleanCacheTtlMs;
     ULONG Enforcement; /* 0: audit (default), 1: deny confirmed infections */
     ULONG CoexistenceMode; /* 1: bounded fail-open companion mode; never disables another AV */
     ULONG MaxPendingScans;
@@ -133,6 +134,7 @@ typedef struct _AV_SCANNER_GLOBAL_DATA {
     volatile LONG SectionConflicts;
     volatile LONGLONG Attempts, Incomplete, Detections, Blocked;
     volatile LONGLONG BusyBypass, DeliveryTimeouts, CompletionTimeouts, CancelledOpens;
+    volatile LONGLONG CleanCacheHits, CleanCacheExpired, CleanCacheInvalidations;
     volatile LONGLONG TotalWait100ns, MaxWait100ns;
 
     //
