@@ -152,6 +152,16 @@ def isolate_confirmed_findings(
     findings = confirmed_findings(response_scan)
     isolated: list[dict] = []
     errors: list[dict] = []
+    if not findings:
+        return {
+            "schema": 1,
+            "kind": "incident-response-isolation",
+            "incident_id": response_scan.get("incident_id"),
+            "finished_at": utc_now(),
+            "attempted": 0,
+            "isolated": [],
+            "errors": [],
+        }
     vault = quarantine_factory()
     for finding in findings:
         try:
