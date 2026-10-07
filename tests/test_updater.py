@@ -105,3 +105,50 @@ def test_download_update_refuses_unsigned_setup(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="Authenticode"):
         updater.download_update(tmp_path, require_signature=True)
     assert not (tmp_path / "AntiOS-Setup.exe").exists()
+
+
+
+def test_download_update_can_replace_cached_files(tmp_path, monkeypatch):
+    setup_bytes = b"fresh-setup"
+    digest = hashlib.sha256(setup_bytes).hexdigest()
+    release = {
+        "current_version": "2.0.0a21",
+        "current_alpha": 21,
+        "latest_alpha": 22,
+        "latest_version": "2.0.0a22",
+        "tag": "v2.0.0-alpha.22",
+        "published_at": None,
+        "html_url": None,
+        "update_available": True,
+        "assets": {
+            "AntiOS-Setup.exe": {
+                "url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.22/AntiOS-Setup.exe",
+                "size": len(setup_bytes),
+                "digest": f"sha256:{digest}",
+            },
+            "AntiOS-Setup.exe.sha256": {
+                "url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.22/AntiOS-Setup.exe.sha256",
+                "size": 90,
+                "digest": None,
+            },
+        },
+    }
+    monkeypatch.setattr(updater, "latest_alpha", lambda: release)
+
+    def fake_download(_url, destination, _limit):
+        destination.write_bytes(
+            f"{digest}  AntiOS-Setup.exe".encode("ascii")
+            if destination.name.endswith(".sha256") else setup_bytes
+        )
+
+    monkeypatch.setattr(updater, "_download", fake_download)
+    (tmp_path / "AntiOS-Setup.exe").write_bytes(b"old")
+    (tmp_path / "AntiOS-Setup.exe.sha256").write_text("old", encoding="ascii")
+
+    result = updater.download_update(
+        tmp_path,
+        require_signature=False,
+        replace_existing=True,
+    )
+    assert result["downloaded"] is True
+    assert (tmp_path / "AntiOS-Setup.exe").read_bytes() == setup_bytes
