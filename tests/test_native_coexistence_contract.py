@@ -3,7 +3,7 @@ from pathlib import Path
 
 def test_native_coexistence_protocol_contract():
     avlib = Path("native/windows/inc/avlib.h").read_text(encoding="utf-8")
-    assert "#define AO_PROTOCOL_VERSION 3u" in avlib
+    assert "#define AO_PROTOCOL_VERSION 4u" in avlib
     assert "#define AO_BROKER_WORKERS 4u" in avlib
     for field in (
         "CoexistenceMode", "LocalScanTimeoutMs", "CleanCacheTtlMs", "MaxPendingScans",
@@ -12,7 +12,7 @@ def test_native_coexistence_protocol_contract():
         "CleanCacheInvalidations", "TotalWait100ns", "MaxWait100ns",
     ):
         assert field in avlib
-    assert "C_ASSERT(sizeof(AO_DRIVER_STATUS) == 144);" in avlib
+    assert "C_ASSERT(sizeof(AO_DRIVER_STATUS) == 160);" in avlib
 
 
 def test_native_coexistence_defaults_are_bounded_and_non_takeover():
@@ -123,3 +123,26 @@ def test_legacy_file_id_cache_does_not_store_clean_verdicts():
     load = driver[load_start:load_end]
     assert "entry->InfectedState == AvFileNotInfected" in load
     assert "AvFileModified : entry->InfectedState" in load
+
+
+
+def test_database_generation_invalidates_kernel_and_broker_cache():
+    wire = Path("native/windows/inc/avlib.h").read_text(encoding="utf-8")
+    context = Path("native/windows/filter/context.h").read_text(encoding="utf-8")
+    communication = Path("native/windows/filter/communication.c").read_text(encoding="utf-8")
+    driver = Path("native/windows/filter/avscan.c").read_text(encoding="utf-8")
+    broker = Path("native/windows/service/userscan.c").read_text(encoding="utf-8")
+    engine = Path("native/windows/engine/engine.h").read_text(encoding="utf-8")
+    assert "AvCmdSetDatabaseGeneration" in wire
+    assert "ULONGLONG DatabaseGeneration" in wire
+    assert "DatabaseGenerationChanges" in wire
+    assert "CleanDatabaseGeneration" in context
+    assert "TxCleanDatabaseGeneration" in context
+    assert "command.Command == AvCmdSetDatabaseGeneration" in communication
+    assert "DatabaseGeneration == 0 || (LONGLONG)DatabaseGeneration != activeGeneration" in communication
+    assert "verdictGeneration != activeGeneration" in driver
+    assert "#define GENERATION_POLL_MS 2000u" in broker
+    assert "ao_engine_generation(" in broker
+    assert "clear_clean_cache(broker)" in broker
+    assert "entry->database_generation == database_generation" in broker
+    assert "uint64_t database_generation;" in engine
