@@ -9,7 +9,7 @@ import pytest
 
 from antios import guard
 from antios.antivirus import scan_files
-from antios.behavior import ProcessEvent
+from antios.behavior import BehaviorEngine, ProcessEvent
 from antios.clamav import ScanOutcome
 from antios.guard_notifications import ChangeBatch, PollNotifications
 from antios.guard_state import GuardState, read_guard_state
@@ -568,6 +568,87 @@ def test_guard_journals_behavior_findings_from_process_sampler(tmp_path):
         assert alerts[0]['data']['rule'] == 'document-spawns-interpreter'
         assert alerts[0]['data']['severity'] == 'high'
         assert instance.status['quarantined'] == 0
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+
+def test_guard_fuses_scan_behavior_origin_and_native_state(tmp_path):
+    root = tmp_path / "watched-risk"
+    root.mkdir()
+    target = root / "payload.exe"
+    target.write_bytes(b"ordinary")
+
+    behavior = BehaviorEngine()
+    behavior.observe_file_change(str(target))
+    behavior.observe_process(ProcessEvent(
+        pid=20, ppid=10, image="payload.exe", path=str(target),
+        parent_image="explorer.exe",
+    ))
+
+    state = tmp_path / "risk-state"
+    policy = guard.GuardPolicy((root,), interval=0.1, settle=0.05)
+    instance = guard.Guard(
+        policy, state, scanner=scan, probe=probe,
+        watcher_factory=PollNotifications,
+        behavior_engine=behavior,
+        process_sampler=type("SilentSampler", (), {"poll": lambda self: []})(),
+        native_probe=lambda: True,
+    )
+    stop, failures = threading.Event(), []
+    thread = threading.Thread(
+        target=lambda: instance.run(stop),
+        daemon=True,
+    )
+    # Keep exceptions visible instead of losing them in a raw thread.
+    def run_guard():
+        try:
+            instance.run(stop)
+        except Exception as exc:
+            failures.append(exc)
+    thread = threading.Thread(target=run_guard, daemon=True)
+    thread.start()
+    try:
+        until(lambda: instance.status.get("risk", {}).get("evaluations", 0) >= 1)
+        context = instance.status["risk"]["last"]
+        assert context["behavior_score"] == 75
+        assert "changed-then-executed" in context["behavior_rules"]
+        assert context["native_pre_execution"] == "active"
+        assert context["automatic_enforcement_eligible"] is False
+        assert context["classification"] in {"high", "critical-behavior"}
+        history = read_guard_state(state, history=True)
+        assert any(event["kind"] == "risk-context" for event in history["events"])
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_guard_confirmed_threat_risk_allows_existing_auto_quarantine_only(tmp_path):
+    isolated = []
+    class Vault:
+        def add(self, finding, *, dry_run):
+            isolated.append(finding)
+            Path(finding["path"]).unlink()
+            return {"id": "risk-test"}
+
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path,
+        auto_quarantine=True,
+        quarantine_factory=Vault,
+        native_probe=lambda: False,
+    )
+    try:
+        target = root / "confirmed.exe"
+        target.write_bytes(b"inert-marker")
+        until(lambda: instance.status["quarantined"] == 1)
+        context = instance.status["risk"]["last"]
+        assert context["confirmed_threat"] is True
+        assert context["score"] == 100
+        assert context["automatic_enforcement_eligible"] is True
+        assert len(isolated) == 1
     finally:
         stop.set()
         thread.join(3)
