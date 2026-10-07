@@ -88,10 +88,31 @@ Verifier and Windows VM acceptance gates pass.
 
 ## AMSI
 
-AntiOS can use Windows AMSI as an explicit compatibility scan engine. This is
-separate from the independent ClamAV path and does not make AntiOS a Defender
-plugin. A future AntiOS AMSI provider would require its own Windows integration
-and signing work; it should not be confused with the current AMSI client scanner.
+AntiOS keeps the existing AMSI client scan path and now also contains an **x64
+IAntimalwareProvider companion DLL** under `native/windows/amsi/`. The provider
+is backed by the same independently verified AntiOS ClamD service and is designed
+to coexist with Defender's provider rather than replace it.
+
+Production registration requires a valid Authenticode signature. The installer
+script refuses an unsigned DLL and only creates/removes AntiOS's own provider
+CLSID and AMSI provider entry; it never changes AMSI `FeatureBits`, Defender
+preferences or Windows Security Center registration.
+
+```powershell
+.\native\windows\build.ps1 -Target Amsi
+
+.\native\windows\amsi\Install-AmsiProvider.ps1 `
+  -ProviderDll .\build\native\windows\AntiOS-AmsiProvider.dll `
+  -Apply
+```
+
+Because AMSI providers load in-process, the current DLL covers x64 AMSI hosts.
+32-bit hosts continue to rely on Defender/other providers plus AntiOS file-system
+layers until a separate x86 provider is built.
+
+`antios coexistence-status` reports Defender/WSC state and whether the AntiOS
+AMSI provider is registered. `antios protection-status` includes that AMSI state
+alongside Guard, behavior/risk correlation and native-filter health.
 
 ## What coexistence does not promise
 
