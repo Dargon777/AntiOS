@@ -690,6 +690,10 @@ Return Value:
 
     sectionHandle = sectionContext->SectionHandle;
 
+    if (status == STATUS_FILE_LOCK_CONFLICT) {
+        InterlockedIncrement(&Globals.SectionConflicts);
+    }
+
     if (!NT_SUCCESS( status )) {
 
 #if DBG
@@ -1152,6 +1156,7 @@ AvMessageNotifyCallback (
         state.MaxPendingScans = Globals.MaxPendingScans;
         state.PendingScans = InterlockedCompareExchange(&Globals.PendingScans, 0, 0);
         state.PeakPendingScans = InterlockedCompareExchange(&Globals.PeakPendingScans, 0, 0);
+        state.SectionConflicts = (ULONG)InterlockedCompareExchange(&Globals.SectionConflicts, 0, 0);
         state.Attempts = InterlockedCompareExchange64(&Globals.Attempts, 0, 0);
         state.Incomplete = InterlockedCompareExchange64(&Globals.Incomplete, 0, 0);
         state.Detections = InterlockedCompareExchange64(&Globals.Detections, 0, 0);
