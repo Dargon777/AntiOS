@@ -891,6 +891,14 @@ class AntivirusPanel:
             }
             else "risk_unavailable"
         )
+        incidents = value.get("incidents") if isinstance(value.get("incidents"), dict) else {}
+        latest_incident = incidents.get("latest") if isinstance(incidents.get("latest"), dict) else {}
+        incident_state = str(incidents.get("state") or "unavailable")
+        incident_label = self.t(
+            "incident_" + incident_state
+            if incident_state in {"normal", "attention", "alert"}
+            else "incident_unavailable"
+        )
         self.guard_status.configure(
             text=self.t(
                 "guard_status",
@@ -905,6 +913,13 @@ class AntivirusPanel:
                 "risk_status",
                 state=risk_label,
                 score=last_risk.get("score", 0),
+            ) + "\n" + self.t(
+                "incident_status",
+                state=incident_label,
+                count=incidents.get("active_incidents", 0),
+                score=incidents.get("highest_score", 0),
+                nodes=latest_incident.get("node_count", 0),
+                edges=latest_incident.get("edge_count", 0),
             )
         )
 
