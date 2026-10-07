@@ -116,15 +116,19 @@ def _authenticode(path: Path) -> dict:
     if os.name != "nt":
         raise OSError("Authenticode verification requires Windows")
     powershell = system_executable("WindowsPowerShell/v1.0/powershell.exe")
+    escaped = str(path).replace("'", "''")
     command = (
-        "$s=Get-AuthenticodeSignature -LiteralPath $args[0];"
+        "$ErrorActionPreference='Stop';"
+        "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop;"
+        f"$p='{escaped}';"
+        "$s=Get-AuthenticodeSignature -LiteralPath $p;"
         "[pscustomobject]@{Status=[string]$s.Status;"
         "Subject=if($s.SignerCertificate){$s.SignerCertificate.Subject}else{$null};"
         "Thumbprint=if($s.SignerCertificate){$s.SignerCertificate.Thumbprint}else{$null}}"
         "|ConvertTo-Json -Compress"
     )
     result = subprocess.run(
-        [str(powershell), "-NoProfile", "-NonInteractive", "-Command", command, str(path)],
+        [str(powershell), "-NoProfile", "-NonInteractive", "-Command", command],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -188,7 +192,17 @@ def download_update(
 
         signature = None
         if require_signature or os.name == "nt":
-            signature = _authenticode(setup_path)
+            try:
+                signature = _authenticode(setup_path)
+            except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+                if require_signature:
+                    raise
+                signature = {
+                    "Status": "Unavailable",
+                    "Subject": None,
+                    "Thumbprint": None,
+                    "Error": str(exc)[:1000],
+                }
             if require_signature and signature.get("Status") != "Valid":
                 raise RuntimeError(
                     "Downloaded Setup is not Authenticode-signed with a valid trusted certificate; "
