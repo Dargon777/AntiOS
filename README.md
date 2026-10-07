@@ -33,6 +33,7 @@ Open **Antivirus** from the sidebar or press `Ctrl+6`:
 - Run Defender quick/full scans or update its signatures after confirmation.
 - Export a JSON scan report.
 - Explore the separate [experimental native Windows filter/service](native/README.md); source and lab tooling only, not part of the release package.
+- Inspect [Defender coexistence mode](docs/COEXISTENCE.md): AntiOS stays secondary, leaves Defender active, and can add its own signed AMSI provider without taking the Windows Security primary-AV slot.
 - Run the optional [resident Guard](docs/GUARD.md) for automatic post-write checks in selected folders, with explicit opt-in quarantine.
 - On a same-user Setup, Guard now covers Downloads, Desktop, Documents, the user Temp directory and the user Startup folder; executable/script-like writes use a short 200 ms settle path and are still revalidated if they continue changing.
 
@@ -165,6 +166,9 @@ Antivirus stack status:
 ```powershell
 antios protection-status
 antios protection-status --json
+
+antios coexistence-status
+antios coexistence-status --json
 ```
 
 Check for an AntiOS update:
