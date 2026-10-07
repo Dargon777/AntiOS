@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 
 from .clamav import ClamAVScanner
-from .coexistence import collect_coexistence_status
+from .coexistence import amsi_provider_status
 from .guard_state import read_guard_state
 from .windows_antivirus import coexistence_profile, defender_status
 from .windows_process import hidden_process_kwargs, system_executable
@@ -206,8 +206,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     native = _native_status()
     defender = defender_status()
     coexistence = coexistence_profile(defender)
-    amsi_probe = collect_coexistence_status()
-    amsi = amsi_probe.get("antios_amsi", {}) if isinstance(amsi_probe, dict) else {}
+    amsi = amsi_provider_status()
     peer_ok = (not engine.get("peer_verification_required") or
                engine.get("peer_verified") is True)
     engine_ready = bool(
