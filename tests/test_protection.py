@@ -104,7 +104,7 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
     assert "Native coexistence: healthy" in protection.render_protection_status(status)
 
     broken = status["native"]["driver"].copy()
-    broken["max_pending"] = 99
+    broken["max_pending"] = 5
     monkeypatch.setattr(protection, "_native_status", lambda: {
         "available": True,
         "service": {"service_state": 4, "exit_code": 0},
