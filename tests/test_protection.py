@@ -80,5 +80,6 @@ def test_layered_coexistence_capability(monkeypatch):
     status = protection.collect_protection_status()
     assert status["capabilities"]["defender_active_parallel"]
     assert status["capabilities"]["layered_coexistence"]
-    assert status["capabilities"]["amsi_stream_scanning"]
+    assert status["capabilities"]["amsi_provider_registered"]
+    assert status["capabilities"]["amsi_provider_engine_ready"]
     assert status["production_primary_antivirus"] is False
