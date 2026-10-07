@@ -126,6 +126,8 @@ static void clean_cache_store(struct broker *broker, const unsigned char digest[
     ReleaseSRWLockExclusive(&broker->cache_lock);
 }
 
+static void fail(struct broker *broker, HRESULT result);
+
 static int broker_cancelled(void *context) {
     struct broker *broker = context;
     return WaitForSingleObject(broker->stop, 0) == WAIT_OBJECT_0;
@@ -239,7 +241,7 @@ static void scan_section(struct worker *worker) {
     struct broker *broker = worker->broker;
     COMMAND_MESSAGE command = {0};
     AO_SECTION_REPLY section = {0};
-    struct ao_outcome outcome = {AO_UNKNOWN, 0, "", "section unavailable"};
+    struct ao_outcome outcome = {AO_UNKNOWN, 0, 0, "", "section unavailable"};
     unsigned char *snapshot = NULL, *view = NULL;
     unsigned char digest[32] = {0};
     DWORD returned = 0;
@@ -275,9 +277,9 @@ static void scan_section(struct worker *worker) {
             ULONGLONG generation = (ULONGLONG)InterlockedCompareExchange64(
                 &broker->database_generation, 0, 0);
             if (digest_valid && clean_cache_lookup(broker, digest, size, generation)) {
-            outcome.result = AO_CLEAR;
-            outcome.database_current = 1;
-            strcpy_s(outcome.detail, sizeof(outcome.detail), "bounded SHA-256 clean cache");
+                outcome.result = AO_CLEAR;
+                outcome.database_current = 1;
+                strcpy_s(outcome.detail, sizeof(outcome.detail), "bounded SHA-256 clean cache");
                 cache_hit = 1;
                 outcome.database_generation = generation;
             } else {
