@@ -140,6 +140,11 @@ behavior evidence, file origin and cached native pre-execution state into an
 explainable [RiskContext](RISK.md). Only confirmed scanner threats are eligible
 for unattended quarantine.
 
+Related file/process/behavior/risk evidence is also joined into a bounded
+[Incident Graph](INCIDENTS.md). Graph updates are journaled locally as
+`incident-update` events, coalesced per incident between heartbeats, and never
+create a new enforcement path.
+
 ## Verification scope
 
 Tests cover new/existing/changed files, repeated writes, database-generation
