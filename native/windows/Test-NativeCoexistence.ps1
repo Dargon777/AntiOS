@@ -100,6 +100,24 @@ try {
         throw 'Microsoft Defender real-time protection must remain active for this coexistence test.'
     }
 
+    $preferences = Get-MpPreference
+    $antiOSExclusions = @()
+    foreach ($value in @($preferences.ExclusionPath) + @($preferences.ExclusionProcess)) {
+        if ($null -ne $value -and [string]$value -match '(?i)antios') {
+            $antiOSExclusions += [string]$value
+        }
+    }
+    $report.antiOSDefenderExclusions = $antiOSExclusions
+    if ($antiOSExclusions.Count) {
+        throw 'AntiOS-related Defender exclusions are present; coexistence must be tested without exclusions.'
+    }
+
+    $securityProducts = @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop)
+    $report.securityCenterProducts = @($securityProducts | ForEach-Object { [string]$_.displayName })
+    if (@($securityProducts | Where-Object { [string]$_.displayName -match '(?i)antios' }).Count) {
+        throw 'AntiOS is registered in Windows Security Center; companion coexistence must not claim primary AV registration.'
+    }
+
     $filterList = (& "$env:SystemRoot\System32\fltmc.exe" filters 2>&1 | Out-String)
     $report.wdFilterLoaded = [bool]($filterList -match '(?im)^\s*WdFilter\s+')
     $report.antiOSFilterLoaded = [bool]($filterList -match '(?im)^\s*AntiOS-Filter\s+')
