@@ -216,3 +216,22 @@ def test_native_coexistence_rejects_unbounded_clean_cache():
     health = protection._native_coexistence_health(True, driver)
     assert health["configured"] is False
     assert health["state"] == "inactive/not-validated"
+
+
+
+def test_native_coexistence_rejects_unknown_database_generation():
+    driver = {
+        "driver_available": True,
+        "exit_code": 0,
+        "protocol": 4,
+        "coexistence_mode": 1,
+        "fail_open_on_incomplete": True,
+        "max_pending": 4,
+        "pending": 0,
+        "clean_cache_ttl_ms": 30000,
+        "database_generation": 0,
+        "database_generation_changes": 2,
+    }
+    health = protection._native_coexistence_health(True, driver)
+    assert health["configured"] is False
+    assert health["state"] == "inactive/not-validated"
