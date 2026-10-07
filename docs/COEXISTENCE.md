@@ -106,7 +106,7 @@ an independent AntiOS protection path without weakening either product.**
 
 ## Native coexistence telemetry
 
-The experimental minifilter now uses native protocol v3 for coexistence diagnostics.
+The experimental minifilter now uses native protocol v4 for coexistence diagnostics.
 Its default INF remains audit/manual-start and sets:
 
 - `CoexistenceMode=1`;
@@ -177,7 +177,7 @@ changes Security Center registration.
 
 ## Clean-verdict cache
 
-Protocol v3 adds a bounded clean-only cache to reduce duplicate work when
+Protocol v4 adds a bounded clean-only cache to reduce duplicate work when
 Defender and AntiOS both observe the same executable activity.
 
 - The kernel stream context keeps `AvFileNotInfected` only until the monotonic
@@ -199,3 +199,16 @@ Defender and AntiOS both observe the same executable activity.
 The disposable-VM harness reopens unchanged clean executables and requires
 cache-hit telemetry, then modifies the bytes and requires the next execute-open
 to miss the clean cache and re-enter the native scan path.
+
+
+### Generation changes
+
+The clean cache is also keyed to the trusted ClamAV database generation. The
+native service polls the verified ClamD `VERSION` response every 2 seconds.
+A changed generation clears the broker SHA-256 cache and updates the minifilter's
+global generation. Kernel stream clean states carry the generation that produced
+their verdict and are rejected on the next open as soon as it differs.
+
+A failed or stale VERSION probe publishes generation 0, deliberately disabling
+clean-cache reuse until a current trusted generation is restored. In-flight clean
+verdicts from the previous generation cannot overwrite a newer generation.
