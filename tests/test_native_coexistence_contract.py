@@ -3,15 +3,16 @@ from pathlib import Path
 
 def test_native_coexistence_protocol_contract():
     avlib = Path("native/windows/inc/avlib.h").read_text(encoding="utf-8")
-    assert "#define AO_PROTOCOL_VERSION 2u" in avlib
+    assert "#define AO_PROTOCOL_VERSION 3u" in avlib
     assert "#define AO_BROKER_WORKERS 4u" in avlib
     for field in (
-        "CoexistenceMode", "LocalScanTimeoutMs", "MaxPendingScans",
+        "CoexistenceMode", "LocalScanTimeoutMs", "CleanCacheTtlMs", "MaxPendingScans",
         "PeakPendingScans", "SectionConflicts", "BusyBypass", "DeliveryTimeouts",
-        "CompletionTimeouts", "CancelledOpens", "TotalWait100ns", "MaxWait100ns",
+        "CompletionTimeouts", "CancelledOpens", "CleanCacheHits", "CleanCacheExpired",
+        "CleanCacheInvalidations", "TotalWait100ns", "MaxWait100ns",
     ):
         assert field in avlib
-    assert "C_ASSERT(sizeof(AO_DRIVER_STATUS) == 112);" in avlib
+    assert "C_ASSERT(sizeof(AO_DRIVER_STATUS) == 144);" in avlib
 
 
 def test_native_coexistence_defaults_are_bounded_and_non_takeover():
@@ -19,6 +20,7 @@ def test_native_coexistence_defaults_are_bounded_and_non_takeover():
     assert '"Enforcement",0x00010001,0' in inf
     assert '"CoexistenceMode",0x00010001,1' in inf
     assert '"MaxPendingScans",0x00010001,4' in inf
+    assert '"CleanCacheTtlMs",0x00010001,30000' in inf
     assert 'LoadOrderGroup="FSFilter Anti-Virus"' in inf
 
     service = Path("native/windows/service/main.c").read_text(encoding="utf-8")
@@ -71,3 +73,20 @@ def test_native_admission_never_transiently_exceeds_limit():
     assert "InterlockedCompareExchange(&Globals.PendingScans, current + 1, current)" in scan
     admission = scan[scan.index("NTSTATUS\nAvScanInUser("):]
     assert "InterlockedIncrement(&Globals.PendingScans)" not in admission
+
+
+
+def test_clean_cache_is_bounded_and_invalidated_by_writes():
+    context = Path("native/windows/filter/context.h").read_text(encoding="utf-8")
+    communication = Path("native/windows/filter/communication.c").read_text(encoding="utf-8")
+    driver = Path("native/windows/filter/avscan.c").read_text(encoding="utf-8")
+    installer = Path("native/windows/Install-NativeService.ps1").read_text(encoding="utf-8")
+    assert "CleanValidUntil100ns" in context
+    assert "TxCleanValidUntil100ns" in context
+    assert "AvFileNotInfected, AvFileScanning" in communication
+    assert "AvFileModified, AvFileScanning" not in communication[communication.index("case AvScanResultClean:"):communication.index("default:", communication.index("case AvScanResultClean:"))]
+    assert "static BOOLEAN\nAvFileNeedsScan" in driver
+    assert "Globals.CleanCacheTtlMs = 30000" in driver
+    assert "*(PULONG)value->Data <= 300000" in driver
+    assert "CleanCacheInvalidations" in driver
+    assert "CleanCacheTtlMs must stay between 0 and 300000 milliseconds." in installer
