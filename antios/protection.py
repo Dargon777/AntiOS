@@ -219,6 +219,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     behavior = guard.get("behavior", {}) if isinstance(guard.get("behavior"), dict) else {}
     risk = guard.get("risk", {}) if isinstance(guard.get("risk"), dict) else {}
     last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
+    incidents = guard.get("incidents", {}) if isinstance(guard.get("incidents"), dict) else {}
+    latest_incident = incidents.get("latest") if isinstance(incidents.get("latest"), dict) else {}
     behavior_monitoring = bool(
         guard_running and behavior.get("mode") == "detect-only"
     )
@@ -262,12 +264,14 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "defender": defender,
         "coexistence": coexistence,
         "risk": risk,
+        "incidents": incidents,
         "capabilities": {
             "standalone_detection_engine": engine_ready,
             "resident_post_write_detection": guard_running and engine_ready,
             "behavior_monitoring": behavior_monitoring,
             "behavior_process_visibility": behavior_process_visibility,
             "risk_fusion": guard_running and risk.get("mode") == "fusion",
+            "incident_graph": guard_running and incidents.get("mode") == "correlation-graph",
             "pre_execution_blocking": pre_execution and engine_ready,
             "native_coexistence_ready": native_coexistence,
             "native_coexistence_observed_operational": (
@@ -294,6 +298,8 @@ def render_protection_status(status: dict) -> str:
     telemetry = native_health.get("telemetry", {})
     risk = status.get("risk", {}) if isinstance(status.get("risk"), dict) else {}
     last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
+    incidents = status.get("incidents", {}) if isinstance(status.get("incidents"), dict) else {}
+    latest_incident = incidents.get("latest") if isinstance(incidents.get("latest"), dict) else {}
     return "\n".join([
         "AntiOS protection status",
         f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
@@ -312,6 +318,13 @@ def render_protection_status(status: dict) -> str:
         f"origin={last_risk.get('origin', 'unknown')}, "
         f"native={last_risk.get('native_pre_execution', risk.get('native_pre_execution', 'unknown'))}, "
         f"auto-enforce={last_risk.get('automatic_enforcement_eligible', False)})",
+        "Incident graph: "
+        f"{incidents.get('state', 'unavailable')} "
+        f"(active={incidents.get('active_incidents', 0)}, "
+        f"score={incidents.get('highest_score', 0)}, "
+        f"latest={latest_incident.get('id', 'none')}, "
+        f"nodes={latest_incident.get('node_count', 0)}, "
+        f"edges={latest_incident.get('edge_count', 0)})",
         f"Managed runtime: {'healthy' if managed.get('healthy') else 'needs review'}",
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
