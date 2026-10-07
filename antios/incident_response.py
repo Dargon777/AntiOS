@@ -69,6 +69,7 @@ def scan_incident_files(
 ) -> dict:
     """Freshly scan incident-linked paths without changing files."""
     paths = incident_file_paths(incident)
+    started_at = utc_now()
     results: list[dict] = []
     errors: list[dict] = []
     total = len(paths)
@@ -79,7 +80,7 @@ def scan_incident_files(
                 "schema": 1,
                 "kind": "incident-response-scan",
                 "incident_id": incident.get("id"),
-                "started_at": None,
+                "started_at": started_at,
                 "finished_at": utc_now(),
                 "cancelled": True,
                 "paths": paths,
@@ -104,6 +105,7 @@ def scan_incident_files(
         "schema": 1,
         "kind": "incident-response-scan",
         "incident_id": incident.get("id"),
+        "started_at": started_at,
         "finished_at": utc_now(),
         "cancelled": False,
         "paths": paths,
