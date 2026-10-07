@@ -30,10 +30,13 @@ public static class NativeExecuteOpen {
 '@
 try {
     $before = Driver-Status
-    if ([int]$before.protocol -lt 2) { throw 'Native protocol v2+ is required.' }
+    if ([int]$before.protocol -lt 3) { throw 'Native protocol v3+ is required.' }
     if ([int]$before.coexistence_mode -ne 1) { throw 'CoexistenceMode must stay enabled during VM acceptance.' }
     if ([int]$before.max_pending -lt 1 -or [int]$before.max_pending -gt 4) {
         throw 'MaxPendingScans exceeds the four-worker native broker capacity.'
+    }
+    if ([long]$before.clean_cache_ttl_ms -lt 0 -or [long]$before.clean_cache_ttl_ms -gt 300000) {
+        throw 'CleanCacheTtlMs is outside the bounded production-safe range.'
     }
     if (-not [bool]$before.fail_open_on_incomplete) { throw 'Lab filter must not fail closed on incomplete verdicts.' }
     $enforce = $ExpectedMode -eq 'Enforce'
