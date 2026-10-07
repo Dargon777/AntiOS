@@ -75,7 +75,7 @@ def test_render_does_not_claim_primary_registration(monkeypatch):
     monkeypatch.setattr(protection, "defender_status", _active_defender)
     rendered = protection.render_protection_status(protection.collect_protection_status())
     assert "Primary Windows antivirus registration: not claimed" in rendered
-    assert "Coexistence mode: layered" in rendered
+    assert "Coexistence mode: defender-active-antios-incomplete" in rendered
     assert "Defender settings unchanged" in rendered
 
 
@@ -167,3 +167,16 @@ def test_native_coexistence_reports_operational_gaps_without_calling_them_timeou
     health = protection._native_coexistence_health(True, driver)
     assert health["state"] == "operational-with-gaps"
     assert health["attention_reasons"] == []
+
+
+
+def test_defender_alone_is_not_reported_as_layered(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(protection, "read_guard_state",
+                        lambda: {"running": False, "state": "not-running"})
+    monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    status = protection.collect_protection_status("clamd")
+    assert status["capabilities"]["defender_realtime_active"] is True
+    assert status["capabilities"]["layered_with_defender"] is False
+    assert status["coexistence"]["mode"] == "defender-active-antios-incomplete"
