@@ -131,6 +131,16 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     service = native.get("service", {})
     driver = native.get("driver", {})
     native_running = service.get("service_state") == 4 and service.get("exit_code") == 0
+    native_coexistence = bool(
+        native_running and
+        driver.get("driver_available") is True and
+        driver.get("coexistence_mode") == 1 and
+        driver.get("fail_open_on_incomplete") is True and
+        isinstance(driver.get("max_pending"), int) and
+        1 <= driver.get("max_pending") <= 16 and
+        isinstance(driver.get("pending"), int) and
+        driver.get("pending") <= driver.get("max_pending")
+    )
     pre_execution = bool(
         native_running and
         driver.get("driver_available") is True and
@@ -161,6 +171,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
             "standalone_detection_engine": engine_ready,
             "resident_post_write_detection": guard_running and engine_ready,
             "pre_execution_blocking": pre_execution and engine_ready,
+            "native_coexistence_ready": native_coexistence,
             "defender_dependency": False,
             "defender_realtime_active": defender.get("realtime_active") is True,
             "layered_with_defender": coexistence["layered_with_defender"],
@@ -188,6 +199,8 @@ def render_protection_status(status: dict) -> str:
         f"Managed runtime: {'healthy' if managed.get('healthy') else 'needs review'}",
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
+        f"Native coexistence: {'healthy' if caps.get('native_coexistence_ready') else 'inactive/not-validated'}",
+        f"Native max wait: {native.get('driver', {}).get('max_wait_ms', 'unknown')} ms",
         f"Pre-execution enforcement: {'active' if caps['pre_execution_blocking'] else 'inactive'}",
         f"Microsoft Defender: {'real-time active' if defender.get('realtime_active') else defender.get('running_mode', 'unavailable')}",
         f"Coexistence mode: {coexistence.get('mode', 'unknown')}",
