@@ -311,8 +311,28 @@ class Guard:
         next_notification_retry = 0.0
 
         def cancelled():
-            nonlocal last_heartbeat
+            nonlocal last_heartbeat, last_process_poll
             now = time.monotonic()
+
+            # run_scan_process invokes this callback while its worker is busy,
+            # so process correlation stays live even during a long file scan.
+            if self.process_sampler is not None and now - last_process_poll >= 0.5:
+                last_process_poll = now
+                try:
+                    for event in self.process_sampler.poll():
+                        self._queue_behavior_findings(self.behavior.observe_process(event))
+                except OSError as exc:
+                    previous_behavior = self.status.get('behavior', {})
+                    self._behavior_collector = 'file-correlation-only'
+                    self.process_sampler = None
+                    self.status['behavior'] = dict(
+                        self.behavior.status(),
+                        collector=self._behavior_collector,
+                        collector_errors=previous_behavior.get('collector_errors', 0) + 1,
+                        collector_detail=str(exc)[:500],
+                    )
+                    store.event('behavior-collector-error', {'error': str(exc)[:500]})
+
             if now - last_heartbeat >= 0.5:
                 last_heartbeat = now
                 previous_behavior = self.status.get('behavior', {})
@@ -334,23 +354,6 @@ class Guard:
         try:
             while not cancelled():
                 now = time.monotonic()
-
-                if self.process_sampler is not None and now - last_process_poll >= 0.5:
-                    last_process_poll = now
-                    try:
-                        for event in self.process_sampler.poll():
-                            self._queue_behavior_findings(self.behavior.observe_process(event))
-                    except OSError as exc:
-                        previous_behavior = self.status.get('behavior', {})
-                        self._behavior_collector = 'file-correlation-only'
-                        self.process_sampler = None
-                        self.status['behavior'] = dict(
-                            self.behavior.status(),
-                            collector=self._behavior_collector,
-                            collector_errors=previous_behavior.get('collector_errors', 0) + 1,
-                            collector_detail=str(exc)[:500],
-                        )
-                        store.event('behavior-collector-error', {'error': str(exc)[:500]})
 
                 while self._behavior_events:
                     store.event('behavior-alert', self._behavior_events.pop(0))
