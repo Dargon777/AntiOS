@@ -7,7 +7,7 @@ def test_native_coexistence_protocol_contract():
     assert "#define AO_BROKER_WORKERS 4u" in avlib
     for field in (
         "CoexistenceMode", "LocalScanTimeoutMs", "MaxPendingScans",
-        "PeakPendingScans", "BusyBypass", "DeliveryTimeouts",
+        "PeakPendingScans", "SectionConflicts", "BusyBypass", "DeliveryTimeouts",
         "CompletionTimeouts", "CancelledOpens", "TotalWait100ns", "MaxWait100ns",
     ):
         assert field in avlib
@@ -25,6 +25,7 @@ def test_native_coexistence_defaults_are_bounded_and_non_takeover():
     assert "independent-companion" in service
     assert "defender_configuration_changed" in service
     assert "fail_open_on_incomplete" in service
+    assert "section_conflicts" in service
 
 
 def test_native_coexistence_harness_requires_defender_to_remain_active():
