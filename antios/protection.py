@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 
 from .clamav import ClamAVScanner
+from .coexistence import collect_coexistence_status
 from .guard_state import read_guard_state
 from .windows_process import hidden_process_kwargs, system_executable
 
@@ -114,6 +115,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     guard = read_guard_state()
     managed = _managed_runtime_status()
     native = _native_status()
+    coexistence = collect_coexistence_status()
     peer_ok = (not engine.get("peer_verification_required") or
                engine.get("peer_verified") is True)
     engine_ready = bool(
@@ -135,6 +137,13 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         driver.get("exit_code") == 0
     )
 
+    defender_parallel = bool(
+        coexistence.get("coexistence", {}).get("defender_active_parallel")
+    )
+    amsi_registered = bool(
+        coexistence.get("coexistence", {}).get("amsi_provider_registered")
+    )
+
     blockers = []
     if not engine_ready:
         blockers.append("trusted-current-engine")
@@ -152,10 +161,14 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "guard": guard,
         "managed_runtime": managed,
         "native": native,
+        "coexistence": coexistence,
         "capabilities": {
             "standalone_detection_engine": engine_ready,
             "resident_post_write_detection": guard_running and engine_ready,
             "pre_execution_blocking": pre_execution and engine_ready,
+            "amsi_stream_scanning": amsi_registered and engine_ready,
+            "defender_active_parallel": defender_parallel,
+            "layered_coexistence": defender_parallel and engine_ready,
             "defender_dependency": False,
         },
         "production_primary_antivirus": False,
@@ -169,6 +182,9 @@ def render_protection_status(status: dict) -> str:
     guard = status["guard"]
     managed = status.get("managed_runtime", {})
     native = status["native"]
+    coexistence = status.get("coexistence", {})
+    coexist = coexistence.get("coexistence", {})
+    amsi = coexistence.get("antios_amsi", {})
     return "\n".join([
         "AntiOS protection status",
         f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
@@ -180,6 +196,9 @@ def render_protection_status(status: dict) -> str:
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
         f"Pre-execution enforcement: {'active' if caps['pre_execution_blocking'] else 'inactive'}",
+        f"Defender parallel protection: {'active' if caps.get('defender_active_parallel') else 'not confirmed'}",
+        f"Coexistence mode: {coexist.get('mode', 'unknown')}",
+        f"AMSI provider: {'registered' if amsi.get('registered') else 'not registered'}",
         "Primary Windows antivirus registration: not claimed",
         "Remaining gates: " + ", ".join(status["remaining_gates"]),
     ])
