@@ -219,3 +219,9 @@ a Filter Manager data-scan section. Such conflicts can occur while another filte
 or file owner is using the stream; they remain fail-open in the laboratory
 coexistence policy and must be interpreted together with busy-bypass, timeout and
 latency counters rather than treated as a malware verdict.
+
+
+The coexistence VM run additionally rejects AntiOS-related Microsoft Defender
+path/process exclusions and any AntiOS antivirus entry in Windows Security
+Center. This prevents a passing result from being manufactured by weakening the
+other protection layer.
