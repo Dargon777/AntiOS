@@ -58,3 +58,27 @@ def test_render_does_not_claim_primary_registration(monkeypatch):
     monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
     rendered = protection.render_protection_status(protection.collect_protection_status())
     assert "Primary Windows antivirus registration: not claimed" in rendered
+
+
+
+def test_layered_coexistence_capability(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(protection, "read_guard_state",
+                        lambda: {"running": True, "state": "monitoring"})
+    monkeypatch.setattr(protection, "_native_status", lambda: {
+        "service": {"service_state": 4, "exit_code": 0},
+        "driver": {"driver_available": True, "enforcement": 1, "exit_code": 0},
+    })
+    monkeypatch.setattr(protection, "collect_coexistence_status", lambda: {
+        "coexistence": {
+            "defender_active_parallel": True,
+            "amsi_provider_registered": True,
+            "mode": "layered-with-defender",
+        },
+        "antios_amsi": {"registered": True, "module_exists": True},
+    })
+    status = protection.collect_protection_status()
+    assert status["capabilities"]["defender_active_parallel"]
+    assert status["capabilities"]["layered_coexistence"]
+    assert status["capabilities"]["amsi_stream_scanning"]
+    assert status["production_primary_antivirus"] is False
