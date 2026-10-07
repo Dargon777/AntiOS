@@ -220,6 +220,16 @@ def test_real_tk_incident_viewer_renders_history_tree_and_details():
         details = viewer.details.get("1.0", "end")
         assert "PID: 500" in details
         assert "payload.exe" in details
+        # A process node without an explicit data.path must not guess a target
+        # from its display label.
+        assert str(viewer.reveal_button["state"]) == "disabled"
+
+        file_item = next(
+            iid for iid, row in viewer.rows.items()
+            if row["id"] == "file:payload"
+        )
+        viewer.chain.selection_set(file_item)
+        viewer._select_node()
         assert str(viewer.reveal_button["state"]) == "normal"
 
         incident_id = incident["id"]
