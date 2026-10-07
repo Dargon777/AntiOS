@@ -3331,7 +3331,7 @@ Return Value:
     status = ZwQueryValueKey(settingsKey, &valueName, KeyValuePartialInformation,
                              value, valueLength, &resultLength);
     if (NT_SUCCESS(status) && value->Type == REG_DWORD && value->DataLength == sizeof(ULONG) &&
-        *(PULONG)value->Data >= 1 && *(PULONG)value->Data <= 16) {
+        *(PULONG)value->Data >= 1 && *(PULONG)value->Data <= AO_BROKER_WORKERS) {
         Globals.MaxPendingScans = *(PULONG)value->Data;
     }
 
