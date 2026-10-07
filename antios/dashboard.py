@@ -304,6 +304,7 @@ class Dashboard:
         language: str | None = None,
         auto_refresh: bool = True,
         tray_enabled: bool = True,
+        background_services: bool = True,
     ) -> None:
         import tkinter as tk
         from tkinter import ttk
@@ -376,7 +377,8 @@ class Dashboard:
         self._build_pages()
         self.show_page("overview")
         self._initialize_tray()
-        self._start_background_services()
+        if background_services:
+            self._start_background_services()
         if auto_refresh:
             self.refresh()
 
@@ -3077,6 +3079,7 @@ def main(argv: list[str] | None = None) -> int:
             language=args.lang,
             auto_refresh=False,
             tray_enabled=False,
+            background_services=False,
         )
         dashboard.show_page("settings")
         root.update_idletasks()
