@@ -135,6 +135,7 @@ typedef struct _AV_SCANNER_GLOBAL_DATA {
     volatile LONGLONG Attempts, Incomplete, Detections, Blocked;
     volatile LONGLONG BusyBypass, DeliveryTimeouts, CompletionTimeouts, CancelledOpens;
     volatile LONGLONG CleanCacheHits, CleanCacheExpired, CleanCacheInvalidations;
+    volatile LONGLONG DatabaseGeneration, DatabaseGenerationChanges;
     volatile LONGLONG TotalWait100ns, MaxWait100ns;
 
     //
