@@ -491,3 +491,41 @@ for _locale, _texts in {
     ),
 }.items():
     MESSAGES[_locale].update(dict(zip(_AV_MODERN_KEYS, _texts)))
+
+
+# Verified companion-mode labels. These are shown only after AntiOS confirms both
+# its independent engine and Microsoft Defender real-time protection are active.
+for _locale, _texts in {
+    "en": (
+        "Microsoft Defender + AntiOS",
+        "Resident Guard is monitoring changes and Microsoft Defender real-time protection is active.",
+    ),
+    "ru": (
+        "Microsoft Defender + AntiOS",
+        "Resident Guard следит за изменениями, а защита Microsoft Defender в реальном времени также активна.",
+    ),
+    "es": (
+        "Microsoft Defender + AntiOS",
+        "Resident Guard supervisa los cambios y la protección en tiempo real de Microsoft Defender también está activa.",
+    ),
+    "zh-CN": (
+        "Microsoft Defender + AntiOS",
+        "Resident Guard 正在监视更改，同时 Microsoft Defender 实时保护也处于活动状态。",
+    ),
+    "fi": (
+        "Microsoft Defender + AntiOS",
+        "Resident Guard valvoo muutoksia ja Microsoft Defenderin reaaliaikainen suojaus on myös aktiivinen.",
+    ),
+    "pl": (
+        "Microsoft Defender + AntiOS",
+        "Resident Guard monitoruje zmiany, a ochrona Microsoft Defender w czasie rzeczywistym jest również aktywna.",
+    ),
+    "mn": (
+        "Microsoft Defender + AntiOS",
+        "Resident Guard өөрчлөлтийг хянаж байгаа бөгөөд Microsoft Defender-ийн бодит цагийн хамгаалалт мөн идэвхтэй байна.",
+    ),
+}.items():
+    MESSAGES[_locale].update(
+        layered_engine=_texts[0],
+        protection_layered_detail=_texts[1],
+    )
