@@ -151,7 +151,7 @@ class BehaviorEngine:
 
         if _user_writable_execution_path(event.path):
             findings += self._finding(
-                "user-writable-execution", "medium", 60,
+                "user-writable-execution", "low", 45,
                 "Executable or script started from Downloads/Temp", subject, now,
             )
 
