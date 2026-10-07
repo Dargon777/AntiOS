@@ -51,3 +51,10 @@ def test_native_admission_matches_broker_capacity():
     assert "<= AO_BROKER_WORKERS" in driver
     assert "four native broker workers" in installer
     assert "four-worker native broker capacity" in harness
+
+
+def test_altitude_generator_rejects_out_of_group_values():
+    script = Path("native/windows/New-DriverInf.ps1").read_text(encoding="utf-8")
+    assert "320000 <= altitude < 329999" in script
+    assert "$altitudeValue -lt [decimal]320000" in script
+    assert "$altitudeValue -ge [decimal]329999" in script
