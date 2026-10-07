@@ -95,13 +95,22 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
             "fail_open_on_incomplete": True,
             "max_pending": 4,
             "pending": 0,
+            "attempts": 10,
+            "incomplete": 0,
+            "busy_bypass": 0,
+            "section_conflicts": 0,
+            "delivery_timeouts": 0,
+            "completion_timeouts": 0,
+            "cancelled_opens": 0,
             "max_wait_ms": 120,
         },
     })
     status = protection.collect_protection_status("clamd")
     assert status["capabilities"]["native_coexistence_ready"] is True
+    assert status["capabilities"]["native_coexistence_observed_operational"] is True
+    assert status["native_coexistence"]["state"] == "operational"
     assert status["capabilities"]["pre_execution_blocking"] is False
-    assert "Native coexistence: healthy" in protection.render_protection_status(status)
+    assert "Native coexistence: operational" in protection.render_protection_status(status)
 
     broken = status["native"]["driver"].copy()
     broken["max_pending"] = 5
@@ -112,3 +121,49 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
     })
     status = protection.collect_protection_status("clamd")
     assert status["capabilities"]["native_coexistence_ready"] is False
+
+
+def test_native_coexistence_timeout_is_attention_not_healthy():
+    driver = {
+        "driver_available": True,
+        "exit_code": 0,
+        "coexistence_mode": 1,
+        "fail_open_on_incomplete": True,
+        "max_pending": 4,
+        "pending": 0,
+        "attempts": 20,
+        "incomplete": 1,
+        "busy_bypass": 0,
+        "section_conflicts": 0,
+        "delivery_timeouts": 1,
+        "completion_timeouts": 0,
+        "cancelled_opens": 0,
+        "max_wait_ms": 5000,
+    }
+    health = protection._native_coexistence_health(True, driver)
+    assert health["configured"] is True
+    assert health["observed"] is True
+    assert health["state"] == "attention"
+    assert "delivery-timeouts" in health["attention_reasons"]
+
+
+def test_native_coexistence_reports_operational_gaps_without_calling_them_timeouts():
+    driver = {
+        "driver_available": True,
+        "exit_code": 0,
+        "coexistence_mode": 1,
+        "fail_open_on_incomplete": True,
+        "max_pending": 4,
+        "pending": 0,
+        "attempts": 25,
+        "incomplete": 2,
+        "busy_bypass": 1,
+        "section_conflicts": 1,
+        "delivery_timeouts": 0,
+        "completion_timeouts": 0,
+        "cancelled_opens": 0,
+        "max_wait_ms": 800,
+    }
+    health = protection._native_coexistence_health(True, driver)
+    assert health["state"] == "operational-with-gaps"
+    assert health["attention_reasons"] == []
