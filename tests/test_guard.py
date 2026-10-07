@@ -1,3 +1,4 @@
+import errno
 import json
 from pathlib import Path
 import queue
@@ -498,3 +499,42 @@ def test_fast_path_never_claims_pre_execution_blocking(tmp_path):
     )
     assert instance.status['fast_path_seconds'] == pytest.approx(0.20)
     assert instance.status['pre_execution_blocking'] is False
+
+
+def test_transient_scan_conflict_is_deferred_then_recovers(tmp_path):
+    calls = []
+    def sometimes_busy(path, **options):
+        calls.append(path)
+        if len(calls) == 1:
+            raise OSError(errno.EBUSY, 'temporarily held by another scanner')
+        return scan(path, **options)
+
+    root, state, instance, stop, thread, failures = launch(tmp_path, scanner=sometimes_busy)
+    try:
+        (root / 'sample.exe').write_bytes(b'ordinary')
+        until(lambda: instance.status['transient_deferrals'] >= 1)
+        until(lambda: instance.status['scanned'] >= 1)
+        assert instance.status['errors'] == 0
+        assert not instance.failures
+        assert len(calls) >= 2
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_transient_scan_conflict_is_bounded(tmp_path):
+    def always_busy(path, **options):
+        raise OSError(errno.EBUSY, 'still held')
+
+    root, state, instance, stop, thread, failures = launch(tmp_path, scanner=always_busy)
+    try:
+        target = root / 'locked.exe'
+        target.write_bytes(b'ordinary')
+        until(lambda: instance.status['errors'] >= 1, seconds=10)
+        assert instance.status['transient_deferrals'] == guard._MAX_TRANSIENT_SCAN_RETRIES
+        assert target in instance.failures
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
