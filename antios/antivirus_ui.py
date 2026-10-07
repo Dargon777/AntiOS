@@ -118,7 +118,7 @@ class AntivirusPanel:
         self.hero_accent.grid(row=0, column=0, rowspan=2, sticky="ns")
 
         hero_text = tk.Frame(self.hero, bg=self.palette["surface"])
-        hero_text.grid(row=0, column=1, sticky="nsew", padx=20, pady=17)
+        hero_text.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=20, pady=17)
 
         kicker_row = tk.Frame(hero_text, bg=self.palette["surface"])
         kicker_row.pack(fill="x")
