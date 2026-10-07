@@ -194,8 +194,8 @@ private:
     volatile LONG refs_;
 };
 
-extern "C" __declspec(dllexport) HRESULT __stdcall DllGetClassObject(
-    REFCLSID clsid, REFIID iid, void **object
+STDAPI DllGetClassObject(
+    REFCLSID clsid, REFIID iid, LPVOID *object
 ) {
     if (!object) return E_POINTER;
     *object = nullptr;
@@ -207,7 +207,7 @@ extern "C" __declspec(dllexport) HRESULT __stdcall DllGetClassObject(
     return hr;
 }
 
-extern "C" __declspec(dllexport) HRESULT __stdcall DllCanUnloadNow(void) {
+STDAPI DllCanUnloadNow(void) {
     return (InterlockedCompareExchange(&g_objects, 0, 0) == 0 &&
             InterlockedCompareExchange(&g_locks, 0, 0) == 0) ? S_OK : S_FALSE;
 }
