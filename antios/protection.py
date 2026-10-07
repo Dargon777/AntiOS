@@ -8,6 +8,7 @@ import subprocess
 
 from .clamav import ClamAVScanner
 from .guard_state import read_guard_state
+from .windows_antivirus import coexistence_profile, defender_status
 from .windows_process import hidden_process_kwargs, system_executable
 
 
@@ -114,6 +115,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     guard = read_guard_state()
     managed = _managed_runtime_status()
     native = _native_status()
+    defender = defender_status()
+    coexistence = coexistence_profile(defender)
     peer_ok = (not engine.get("peer_verification_required") or
                engine.get("peer_verified") is True)
     engine_ready = bool(
@@ -152,11 +155,15 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "guard": guard,
         "managed_runtime": managed,
         "native": native,
+        "defender": defender,
+        "coexistence": coexistence,
         "capabilities": {
             "standalone_detection_engine": engine_ready,
             "resident_post_write_detection": guard_running and engine_ready,
             "pre_execution_blocking": pre_execution and engine_ready,
             "defender_dependency": False,
+            "defender_realtime_active": defender.get("realtime_active") is True,
+            "layered_with_defender": coexistence["layered_with_defender"],
         },
         "production_primary_antivirus": False,
         "remaining_gates": blockers,
@@ -169,6 +176,8 @@ def render_protection_status(status: dict) -> str:
     guard = status["guard"]
     managed = status.get("managed_runtime", {})
     native = status["native"]
+    defender = status.get("defender", {})
+    coexistence = status.get("coexistence", {})
     return "\n".join([
         "AntiOS protection status",
         f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
@@ -180,6 +189,9 @@ def render_protection_status(status: dict) -> str:
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
         f"Pre-execution enforcement: {'active' if caps['pre_execution_blocking'] else 'inactive'}",
+        f"Microsoft Defender: {'real-time active' if defender.get('realtime_active') else defender.get('running_mode', 'unavailable')}",
+        f"Coexistence mode: {coexistence.get('mode', 'unknown')}",
+        "AntiOS role: independent companion; Defender settings unchanged",
         "Primary Windows antivirus registration: not claimed",
         "Remaining gates: " + ", ".join(status["remaining_gates"]),
     ])
