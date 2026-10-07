@@ -106,7 +106,7 @@ an independent AntiOS protection path without weakening either product.**
 
 ## Native coexistence telemetry
 
-The experimental minifilter now uses native protocol v2 for coexistence diagnostics.
+The experimental minifilter now uses native protocol v3 for coexistence diagnostics.
 Its default INF remains audit/manual-start and sets:
 
 - `CoexistenceMode=1`;
@@ -173,3 +173,29 @@ registered there as a primary antivirus product.
 
 These checks are read-only. The harness never adds/removes exclusions and never
 changes Security Center registration.
+
+
+## Clean-verdict cache
+
+Protocol v3 adds a bounded clean-only cache to reduce duplicate work when
+Defender and AntiOS both observe the same executable activity.
+
+- The kernel stream context keeps `AvFileNotInfected` only until the monotonic
+  `CleanCacheTtlMs` deadline. The default is 30000 ms and the driver refuses
+  configuration above 300000 ms.
+- Modifying I/O clears the stream deadline before the next execute-open.
+- If the stream context is recreated, the broker can reuse a clean verdict only
+  when SHA-256 of the exact Filter Manager snapshot matches one of its fixed 128
+  entries and that entry has not expired.
+- Only `AO_CLEAR` produced with a current ClamAV database enters the broker
+  cache. Unknown, review, timeout, cancellation, stale-database and threat
+  results never become clean cache entries.
+- The legacy per-volume file-ID table is not trusted for cross-handle clean
+  reuse because it does not carry a bounded lifetime/database generation.
+- A ClamAV signature update can therefore leave a previously clean verdict
+  reusable only for the remaining cache TTL, at most five minutes by policy and
+  30 seconds by default.
+
+The disposable-VM harness reopens unchanged clean executables and requires
+cache-hit telemetry, then modifies the bytes and requires the next execute-open
+to miss the clean cache and re-enter the native scan path.
