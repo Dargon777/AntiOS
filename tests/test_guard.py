@@ -578,11 +578,14 @@ def test_guard_journals_behavior_findings_from_process_sampler(tmp_path):
         tmp_path, process_sampler=Sampler())
     try:
         until(lambda: instance.status.get('behavior', {}).get('highest_score', 0) >= 85)
+        until(lambda: any(
+            event['kind'] == 'behavior-alert'
+            for event in read_guard_state(state, history=True).get('events', [])
+        ))
         status = read_guard_state(state, history=True)
         assert status['behavior']['mode'] == 'detect-only'
         assert status['behavior']['collector'] == 'injected'
         alerts = [event for event in status['events'] if event['kind'] == 'behavior-alert']
-        assert alerts
         assert alerts[0]['data']['rule'] == 'document-spawns-interpreter'
         assert alerts[0]['data']['severity'] == 'high'
         assert instance.status['quarantined'] == 0
