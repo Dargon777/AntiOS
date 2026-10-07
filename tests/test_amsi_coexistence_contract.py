@@ -16,6 +16,7 @@ def test_amsi_provider_contract_is_secondary_and_signed_only():
     assert "valid Authenticode signature" in installer
     assert "AMSI\\Providers" in installer
     assert "FeatureBits" in installer
+    assert "RegistryView]::Registry64" in installer
     assert "unchanged" in installer
     assert "Set-MpPreference" not in installer
     assert "DisableRealtimeMonitoring" not in installer
