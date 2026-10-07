@@ -606,18 +606,18 @@ class AntivirusPanel:
 
     def _guard_start(self) -> None:
         from tkinter import messagebox
-        from .guard import launch_guard
 
-        path = self.app.antivirus_path
-        if path.is_file():
-            path = path.parent
         if messagebox.askyesno("AntiOS Guard", self.t("guard_confirm")):
-            self._run("guard-action", lambda: launch_guard(path))
+            self._run(
+                "guard-action",
+                lambda: self.app.set_resident_protection_enabled(True),
+            )
 
     def _guard_stop(self) -> None:
-        from .guard_state import read_guard_state
-
-        self._run("guard-action", lambda: read_guard_state(stop=True))
+        self._run(
+            "guard-action",
+            lambda: self.app.set_resident_protection_enabled(False),
+        )
 
     def _incident_history(self) -> None:
         from .guard_state import read_incident_history
