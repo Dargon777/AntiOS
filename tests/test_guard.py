@@ -9,6 +9,7 @@ import pytest
 
 from antios import guard
 from antios.antivirus import scan_files
+from antios.behavior import ProcessEvent
 from antios.clamav import ScanOutcome
 from antios.guard_notifications import ChangeBatch, PollNotifications
 from antios.guard_state import GuardState, read_guard_state
@@ -534,6 +535,39 @@ def test_transient_scan_conflict_is_bounded(tmp_path):
         until(lambda: instance.status['errors'] >= 1, seconds=10)
         assert instance.status['transient_deferrals'] == guard._MAX_TRANSIENT_SCAN_RETRIES
         assert target in instance.failures
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+
+def test_guard_journals_behavior_findings_from_process_sampler(tmp_path):
+    class Sampler:
+        def __init__(self):
+            self.sent = False
+        def poll(self):
+            if self.sent:
+                return []
+            self.sent = True
+            return [ProcessEvent(
+                pid=200, ppid=100, image='powershell.exe',
+                path=r'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+                parent_image='WINWORD.EXE',
+            )]
+
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path, process_sampler=Sampler())
+    try:
+        until(lambda: instance.status.get('behavior', {}).get('highest_score', 0) >= 85)
+        status = read_guard_state(state, history=True)
+        assert status['behavior']['mode'] == 'detect-only'
+        assert status['behavior']['collector'] == 'injected'
+        alerts = [event for event in status['events'] if event['kind'] == 'behavior-alert']
+        assert alerts
+        assert alerts[0]['data']['rule'] == 'document-spawns-interpreter'
+        assert alerts[0]['data']['severity'] == 'high'
+        assert instance.status['quarantined'] == 0
     finally:
         stop.set()
         thread.join(3)
