@@ -93,3 +93,13 @@ It does not:
 - change RiskContext decisions.
 
 Closing the viewer has no effect on the running Guard or Incident Graph.
+
+
+## Response Center
+
+The viewer also exposes a conservative
+[Incident Response Center](INCIDENT_RESPONSE.md) for rescanning linked paths,
+opening their location, exporting a local report and isolating only freshly
+confirmed scanner threats.
+
+Behavior/Incident Graph severity alone never enables isolation.
