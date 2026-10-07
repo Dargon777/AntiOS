@@ -98,7 +98,7 @@ int ao_engine_peer_socket(uintptr_t socket_value, void *context) {
 struct ao_outcome ao_engine_scan(const wchar_t *service_name, const void *data, size_t size,
                                 unsigned timeout, ao_cancel_fn cancel, void *context) {
     struct ao_engine_peer peer;
-    struct ao_outcome outcome = {AO_UNKNOWN, 0, "", "trusted engine service unavailable"};
+    struct ao_outcome outcome = {AO_UNKNOWN, 0, 0, "", "trusted engine service unavailable"};
     ULONGLONG started = GetTickCount64(), elapsed;
     if (!ao_engine_peer_open(&peer, service_name)) return outcome;
     elapsed = GetTickCount64() - started;
@@ -107,10 +107,33 @@ struct ao_outcome ao_engine_scan(const wchar_t *service_name, const void *data, 
                                        cancel, context, ao_engine_peer_socket, &peer);
         if (!ao_engine_peer_valid(&peer) || GetTickCount64() - started >= timeout ||
             (cancel && cancel(context))) {
-            struct ao_outcome unknown = {AO_UNKNOWN, 0, "", "engine identity or scan deadline no longer valid"};
+            struct ao_outcome unknown = {AO_UNKNOWN, 0, 0, "", "engine identity or scan deadline no longer valid"};
             outcome = unknown;
         }
     }
     ao_engine_peer_close(&peer);
     return outcome;
+}
+
+
+uint64_t ao_engine_generation(const wchar_t *service_name, unsigned timeout,
+                              ao_cancel_fn cancel, void *context, int *database_current) {
+    struct ao_engine_peer peer;
+    uint64_t generation = 0;
+    ULONGLONG started = GetTickCount64(), elapsed;
+    if (database_current) *database_current = 0;
+    if (!ao_engine_peer_open(&peer, service_name)) return 0;
+    elapsed = GetTickCount64() - started;
+    if (elapsed < timeout) {
+        generation = ao_clam_generation_verified(
+            3310, timeout - (unsigned)elapsed, cancel, context,
+            ao_engine_peer_socket, &peer, database_current);
+        if (!ao_engine_peer_valid(&peer) || GetTickCount64() - started >= timeout ||
+            (cancel && cancel(context))) {
+            generation = 0;
+            if (database_current) *database_current = 0;
+        }
+    }
+    ao_engine_peer_close(&peer);
+    return generation;
 }
