@@ -871,29 +871,46 @@ Return Value:
             if (ScanContext->IsFileInTxWriter) {
 
                 InterlockedCompareExchange( &StreamContext->TxState, AvFileInfected, AvFileScanning );
+                InterlockedExchange64(&StreamContext->TxCleanValidUntil100ns, 0);
 
             } else {
 
                 InterlockedCompareExchange( &StreamContext->State, AvFileInfected, AvFileScanning );
+                InterlockedExchange64(&StreamContext->CleanValidUntil100ns, 0);
             }
             break;
         case AvScanResultClean:
-
-            //
-            //  If after the scan and before setting this file as clean, the file gets modified,
-            //  then we have to leave it as modified.
-            //
-
-            if (ScanContext->IsFileInTxWriter) {
-
-                InterlockedCompareExchange( &StreamContext->TxState, AvFileModified, AvFileScanning );
-
-            } else {
-
-                InterlockedCompareExchange( &StreamContext->State, AvFileModified, AvFileScanning );
+        {
+            LONGLONG validUntil = 0;
+            if (Globals.CleanCacheTtlMs) {
+                validUntil = (LONGLONG)KeQueryInterruptTime() +
+                             ((LONGLONG)Globals.CleanCacheTtlMs * 10000);
             }
 
+            //
+            // If after the scan and before setting this file as clean, the file gets modified,
+            // leave it modified. A successful transition records only a bounded
+            // monotonic clean lifetime; modifying I/O clears the deadline.
+            //
+            if (ScanContext->IsFileInTxWriter) {
+                LONG previous = InterlockedCompareExchange(
+                    &StreamContext->TxState, AvFileNotInfected, AvFileScanning);
+                if (previous == AvFileScanning) {
+                    InterlockedExchange64(&StreamContext->TxCleanValidUntil100ns, validUntil);
+                } else {
+                    InterlockedExchange64(&StreamContext->TxCleanValidUntil100ns, 0);
+                }
+            } else {
+                LONG previous = InterlockedCompareExchange(
+                    &StreamContext->State, AvFileNotInfected, AvFileScanning);
+                if (previous == AvFileScanning) {
+                    InterlockedExchange64(&StreamContext->CleanValidUntil100ns, validUntil);
+                } else {
+                    InterlockedExchange64(&StreamContext->CleanValidUntil100ns, 0);
+                }
+            }
             break;
+        }
         default:
             FLT_ASSERTMSG( "No such scan result.\n", FALSE);
             break;
@@ -1153,6 +1170,7 @@ AvMessageNotifyCallback (
         state.Enforcement = Globals.Enforcement;
         state.CoexistenceMode = Globals.CoexistenceMode;
         state.LocalScanTimeoutMs = (ULONG)Globals.LocalScanTimeout;
+        state.CleanCacheTtlMs = Globals.CleanCacheTtlMs;
         state.MaxPendingScans = Globals.MaxPendingScans;
         state.PendingScans = InterlockedCompareExchange(&Globals.PendingScans, 0, 0);
         state.PeakPendingScans = InterlockedCompareExchange(&Globals.PeakPendingScans, 0, 0);
@@ -1165,6 +1183,9 @@ AvMessageNotifyCallback (
         state.DeliveryTimeouts = InterlockedCompareExchange64(&Globals.DeliveryTimeouts, 0, 0);
         state.CompletionTimeouts = InterlockedCompareExchange64(&Globals.CompletionTimeouts, 0, 0);
         state.CancelledOpens = InterlockedCompareExchange64(&Globals.CancelledOpens, 0, 0);
+        state.CleanCacheHits = InterlockedCompareExchange64(&Globals.CleanCacheHits, 0, 0);
+        state.CleanCacheExpired = InterlockedCompareExchange64(&Globals.CleanCacheExpired, 0, 0);
+        state.CleanCacheInvalidations = InterlockedCompareExchange64(&Globals.CleanCacheInvalidations, 0, 0);
         state.TotalWait100ns = InterlockedCompareExchange64(&Globals.TotalWait100ns, 0, 0);
         state.MaxWait100ns = InterlockedCompareExchange64(&Globals.MaxWait100ns, 0, 0);
         __try {
