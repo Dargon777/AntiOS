@@ -1,24 +1,41 @@
-# AntiOS v2.0.0 alpha 21
+# AntiOS v2.0.0 alpha 22
 
-Alpha 21 turns the antivirus work into one layered protection stack.
+Alpha 22 fixes the installed resident-protection lifecycle and makes application
+updates usable from the desktop UI.
 
-Microsoft Defender can stay active while AntiOS runs its own managed ClamAV
-engine, Resident Guard and optional native protection. The new x64 AntiOS AMSI
-provider adds an independent AMSI scanning layer without taking the Windows
-Security primary-antivirus slot or changing Defender settings.
+## Resident protection starts with Windows
 
-Resident Guard now combines fast handling for executable/script writes with
-detect-only behavior correlation, RiskContext fusion and a bounded Incident
-Graph. Incident Viewer and Response Center make those chains inspectable and let
-the user rescan linked files, open their location, export a report and isolate
-only freshly confirmed scanner threats after explicit confirmation.
+The Antivirus Guard control now manages the persistent per-user scheduled task
+instead of launching a one-off folder monitor. When resident protection is
+enabled, an installed AntiOS self-checks the managed ClamAV runtime at startup,
+repairs a stopped or stale repairable engine, refreshes signatures when needed,
+and restores the Resident Guard task.
 
-The experimental native minifilter gained bounded coexistence telemetry,
-clean-verdict caching tied to the current ClamAV database generation and a
-Defender-active stress harness. It remains lab-only until Microsoft-assigned
-altitude, production driver signing, HVCI/Driver Verifier and disposable-VM
-acceptance are complete.
+Stopping Resident Guard from the Antivirus page now also disables its persistent
+logon task. Starting it again recreates the task and starts protection
+immediately. The advanced Antivirus panel also exposes an explicit
+**Repair protection** action.
 
-The Setup/release path can stage and register the AMSI provider only when the DLL
-has a valid Authenticode signature. No Defender exclusions, Security Center
-spoofing, AMSI policy weakening or test-signing bypasses are introduced.
+This remains layered companion protection: Microsoft Defender is not disabled or
+reconfigured, and AntiOS still does not claim the primary Windows Security
+Center antivirus slot.
+
+## Desktop updater
+
+Settings now contains an Updates section with:
+
+- automatic GitHub release checking and download for installed builds;
+- a manual **Check for updates** action;
+- a manual **Download update** action;
+- persistent automatic-update preference;
+- a per-release local update cache.
+
+Downloaded Setup files are checked against the release checksum and GitHub asset
+digest. On Windows AntiOS also inspects Authenticode. Unattended installation is
+scheduled only when the Setup signature is valid; unsigned builds may be
+downloaded and verified but are not silently installed.
+
+## Reliability
+
+Alpha 22 adds regression coverage for persistent Resident Guard configuration,
+resident preference persistence and repeated updater-cache downloads.
