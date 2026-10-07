@@ -147,11 +147,13 @@ static int driver_status_json(void) {
         printf("{\"driver_available\":true,\"protocol\":%lu,\"enforcement\":%lu,"
                "\"coexistence_mode\":%lu,\"fail_open_on_incomplete\":true,"
                "\"local_scan_timeout_ms\":%lu,\"max_pending\":%lu,\"pending\":%ld,\"peak_pending\":%ld,"
+               "\"section_conflicts\":%lu,"
                "\"attempts\":%lld,\"incomplete\":%lld,\"detections\":%lld,\"blocked\":%lld,"
                "\"busy_bypass\":%lld,\"delivery_timeouts\":%lld,\"completion_timeouts\":%lld,"
                "\"cancelled_opens\":%lld,\"total_wait_ms\":%llu,\"average_wait_ms\":%llu,\"max_wait_ms\":%llu}\n",
                state.ProtocolVersion, state.Enforcement, state.CoexistenceMode,
                state.LocalScanTimeoutMs, state.MaxPendingScans, state.PendingScans, state.PeakPendingScans,
+               state.SectionConflicts,
                (long long)state.Attempts, (long long)state.Incomplete, (long long)state.Detections,
                (long long)state.Blocked, (long long)state.BusyBypass, (long long)state.DeliveryTimeouts,
                (long long)state.CompletionTimeouts, (long long)state.CancelledOpens,
