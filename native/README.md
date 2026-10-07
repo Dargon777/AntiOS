@@ -208,3 +208,13 @@ Technical references:
 - [Minifilter INF requirements](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/creating-an-inf-file-for-a-minifilter-driver)
 - [Altitude request](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/minifilter-altitude-request)
 - [Protected anti-malware services](https://learn.microsoft.com/en-us/windows/win32/services/protecting-anti-malware-services-)
+
+
+### Coexistence diagnostics
+
+`--driver-status` reports `section_conflicts` separately from generic incomplete
+coverage. This counter records `STATUS_FILE_LOCK_CONFLICT` returned while creating
+a Filter Manager data-scan section. Such conflicts can occur while another filter
+or file owner is using the stream; they remain fail-open in the laboratory
+coexistence policy and must be interpreted together with busy-bypass, timeout and
+latency counters rather than treated as a malware verdict.
