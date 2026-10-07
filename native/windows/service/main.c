@@ -146,17 +146,22 @@ static int driver_status_json(void) {
         unsigned long long average_ms = state.Attempts ? total_ms / (unsigned long long)state.Attempts : 0;
         printf("{\"driver_available\":true,\"protocol\":%lu,\"enforcement\":%lu,"
                "\"coexistence_mode\":%lu,\"fail_open_on_incomplete\":true,"
-               "\"local_scan_timeout_ms\":%lu,\"max_pending\":%lu,\"pending\":%ld,\"peak_pending\":%ld,"
+               "\"local_scan_timeout_ms\":%lu,\"clean_cache_ttl_ms\":%lu,"
+               "\"max_pending\":%lu,\"pending\":%ld,\"peak_pending\":%ld,"
                "\"section_conflicts\":%lu,"
                "\"attempts\":%lld,\"incomplete\":%lld,\"detections\":%lld,\"blocked\":%lld,"
                "\"busy_bypass\":%lld,\"delivery_timeouts\":%lld,\"completion_timeouts\":%lld,"
-               "\"cancelled_opens\":%lld,\"total_wait_ms\":%llu,\"average_wait_ms\":%llu,\"max_wait_ms\":%llu}\n",
+               "\"cancelled_opens\":%lld,\"cache_hits\":%lld,\"cache_expired\":%lld,"
+               "\"cache_invalidations\":%lld,\"total_wait_ms\":%llu,\"average_wait_ms\":%llu,\"max_wait_ms\":%llu}\n",
                state.ProtocolVersion, state.Enforcement, state.CoexistenceMode,
-               state.LocalScanTimeoutMs, state.MaxPendingScans, state.PendingScans, state.PeakPendingScans,
+               state.LocalScanTimeoutMs, state.CleanCacheTtlMs,
+               state.MaxPendingScans, state.PendingScans, state.PeakPendingScans,
                state.SectionConflicts,
                (long long)state.Attempts, (long long)state.Incomplete, (long long)state.Detections,
                (long long)state.Blocked, (long long)state.BusyBypass, (long long)state.DeliveryTimeouts,
                (long long)state.CompletionTimeouts, (long long)state.CancelledOpens,
+               (long long)state.CleanCacheHits, (long long)state.CleanCacheExpired,
+               (long long)state.CleanCacheInvalidations,
                total_ms, average_ms, max_ms);
     }
     return 0;
