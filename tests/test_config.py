@@ -5,7 +5,9 @@ import pytest
 from antios.config import (
     AppConfig,
     CleanupConfig,
+    ProtectionConfig,
     UIConfig,
+    UpdateConfig,
     load_config,
     render_default_config,
     save_config,
@@ -30,6 +32,8 @@ def test_write_and_load_default_config(tmp_path):
     assert config.logging.level == "INFO"
     assert config.ui == UIConfig()
     assert config.cleanup == CleanupConfig()
+    assert config.protection == ProtectionConfig()
+    assert config.updates == UpdateConfig()
 
 
 def test_config_rejects_invalid_color(tmp_path):
@@ -73,6 +77,8 @@ def test_save_and_load_ui_preferences(tmp_path):
             remember_folder=True,
             last_path=r"C:\Users\Example\Downloads",
         ),
+        protection=ProtectionConfig(resident_enabled=False),
+        updates=UpdateConfig(auto_update=False),
     )
 
     save_config(config, path)
@@ -85,6 +91,8 @@ def test_save_and_load_ui_preferences(tmp_path):
     assert loaded.cleanup.duplicate_min_mb == 2
     assert loaded.cleanup.remember_folder is True
     assert loaded.cleanup.last_path == r"C:\Users\Example\Downloads"
+    assert loaded.protection.resident_enabled is False
+    assert loaded.updates.auto_update is False
 
 
 def test_config_rejects_invalid_theme(tmp_path):
