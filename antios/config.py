@@ -44,11 +44,23 @@ class CleanupConfig:
 
 
 @dataclass(frozen=True)
+class ProtectionConfig:
+    resident_enabled: bool = True
+
+
+@dataclass(frozen=True)
+class UpdateConfig:
+    auto_update: bool = True
+
+
+@dataclass(frozen=True)
 class AppConfig:
     general: GeneralConfig = GeneralConfig()
     logging: LoggingConfig = LoggingConfig()
     ui: UIConfig = UIConfig()
     cleanup: CleanupConfig = CleanupConfig()
+    protection: ProtectionConfig = ProtectionConfig()
+    updates: UpdateConfig = UpdateConfig()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +68,8 @@ class AppConfig:
             "logging": asdict(self.logging),
             "ui": asdict(self.ui),
             "cleanup": asdict(self.cleanup),
+            "protection": asdict(self.protection),
+            "updates": asdict(self.updates),
         }
 
 
@@ -120,6 +134,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     logging_data = data.get("logging") or {}
     ui = data.get("ui") or {}
     cleanup = data.get("cleanup") or {}
+    protection = data.get("protection") or {}
+    updates = data.get("updates") or {}
 
     prefix = str(general.get("computer_name_prefix", "LAB")).strip() or "LAB"
     if len(prefix) > 6:
@@ -193,6 +209,12 @@ large_mb = {config.cleanup.large_mb}
 duplicate_min_mb = {config.cleanup.duplicate_min_mb}
 remember_folder = {str(config.cleanup.remember_folder).lower()}
 last_path = {_toml_string(config.cleanup.last_path)}
+
+[protection]
+resident_enabled = {str(config.protection.resident_enabled).lower()}
+
+[updates]
+auto_update = {str(config.updates.auto_update).lower()}
 """
 
 
