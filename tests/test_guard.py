@@ -431,8 +431,15 @@ def test_repeated_root_rescans_do_not_starve_files_beyond_queue_capacity(tmp_pat
         visited.add(path)
         watcher.events.put(ChangeBatch(reset_roots=(root,)))
         return result
-    root, state, instance, stop, thread, failures = launch(tmp_path, scanner=busy_scan, max_queue=2,
-                                                        watcher_factory=lambda roots: watcher)
+    # This is a queue-fairness test, not an integration test for external
+    # Windows process/native probes. Keep its timing deterministic on shared CI.
+    silent_sampler = type("SilentSampler", (), {"poll": lambda self: []})()
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path, scanner=busy_scan, max_queue=2,
+        watcher_factory=lambda roots: watcher,
+        process_sampler=silent_sampler,
+        native_probe=lambda: None,
+    )
     try:
         until(lambda: len(visited) == 6)
         assert len(instance.pending) <= 2
