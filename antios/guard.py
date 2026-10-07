@@ -18,6 +18,7 @@ import uuid
 from .antivirus import checked_path, fingerprint, is_link
 from .behavior import BehaviorEngine
 from .clamav import ClamAVScanner
+from .incident import IncidentGraph
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
 from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
@@ -135,7 +136,7 @@ class Guard:
     def __init__(self, policy, state_dir=None, *, scanner=None,
                  probe=None, quarantine_factory=Quarantine, watcher_factory=None,
                  status_observer=None, behavior_engine=None, process_sampler=None,
-                 native_probe=None):
+                 native_probe=None, incident_graph=None):
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
@@ -170,6 +171,7 @@ class Guard:
             behavior_collector = 'file-correlation-only'
         self._behavior_events = []
         self._behavior_collector = behavior_collector
+        self.incidents = incident_graph or IncidentGraph()
         if native_probe is not None:
             self.native_probe = native_probe
         elif os.name == 'nt':
@@ -202,7 +204,8 @@ class Guard:
                                         collector_errors=0),
                        'risk': {'mode': 'fusion', 'evaluations': 0, 'highest_score': 0,
                                 'last': None, 'native_pre_execution': 'unknown',
-                                'native_probe_errors': 0}}
+                                'native_probe_errors': 0},
+                       'incidents': self.incidents.status()}
 
     def _queue_behavior_findings(self, findings):
         for finding in findings:
@@ -215,6 +218,11 @@ class Guard:
             collector=self._behavior_collector,
             collector_errors=previous.get('collector_errors', 0),
         )
+
+    def _publish_incidents(self, store: GuardState):
+        self.status['incidents'] = self.incidents.status()
+        for update in self.incidents.drain_updates():
+            store.event('incident-update', update)
 
     def _native_state(self, now: float) -> bool | None:
         if now - self._native_checked_at < 15:
@@ -247,6 +255,8 @@ class Guard:
             native_probe_errors=self._native_probe_errors,
         )
         self.status['risk'] = risk
+        self.incidents.observe_risk(context)
+        self._publish_incidents(store)
         # Keep the bounded journal useful: clean/low contexts stay in status,
         # while decisions needing review or confirmed remediation are persisted.
         if context['score'] >= 40 or context['confirmed_threat'] or not context['scanner_complete']:
@@ -282,8 +292,14 @@ class Guard:
         if not affected:
             return False
         if batch.paths:
-            self._queue_behavior_findings(
-                self.behavior.observe_many_file_changes(str(path) for path in batch.paths)
+            behavior_findings = self.behavior.observe_many_file_changes(
+                str(path) for path in batch.paths
+            )
+            self._queue_behavior_findings(behavior_findings)
+            for path in batch.paths:
+                self.incidents.observe_file_change(str(path))
+            self.incidents.observe_behavior_findings(
+                finding.to_dict() for finding in behavior_findings
             )
         def matches(path):
             return path in affected or not affected.isdisjoint(path.parents)
@@ -320,7 +336,12 @@ class Guard:
                 last_process_poll = now
                 try:
                     for event in self.process_sampler.poll():
-                        self._queue_behavior_findings(self.behavior.observe_process(event))
+                        behavior_findings = self.behavior.observe_process(event)
+                        self._queue_behavior_findings(behavior_findings)
+                        self.incidents.observe_process(
+                            event,
+                            behavior_findings=(finding.to_dict() for finding in behavior_findings),
+                        )
                 except OSError as exc:
                     previous_behavior = self.status.get('behavior', {})
                     self._behavior_collector = 'file-correlation-only'
@@ -343,6 +364,7 @@ class Guard:
                 )
                 self.status.update(heartbeat=time.time(), pending=len(self.pending),
                                    unresolved=len(self.failures), active_threats=len(self.threats))
+                self._publish_incidents(store)
                 store.publish(self.status)
                 if store.stopped(self.status['run_id']):
                     stop.set()
@@ -512,9 +534,10 @@ class Guard:
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
                             self.status['engine'].get('database_freshness') != 'current')
                 behavior_attention = self.status.get('behavior', {}).get('state') in {'attention', 'alert'}
+                incident_attention = self.status.get('incidents', {}).get('state') in {'attention', 'alert'}
                 self.status['state'] = (
                     'degraded' if degraded else
-                    'attention' if self.threats or behavior_attention else
+                    'attention' if self.threats or behavior_attention or incident_attention else
                     'monitoring'
                 )
                 self._notify_status()
