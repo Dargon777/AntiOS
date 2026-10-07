@@ -873,11 +873,23 @@ class AntivirusPanel:
         self.protection_title.configure(text=title)
         self.protection_detail.configure(text=detail)
         self.guard_state_label.configure(text=short, fg=color)
+        behavior = value.get("behavior") if isinstance(value.get("behavior"), dict) else {}
+        behavior_state = str(behavior.get("state") or "unavailable")
+        behavior_label = self.t(
+            "behavior_" + behavior_state
+            if behavior_state in {"normal", "attention", "alert"}
+            else "behavior_unavailable"
+        )
         self.guard_status.configure(
             text=self.t(
                 "guard_status",
                 state=self.t("guard_state_" + state),
                 count=value.get("detections", 0),
+            ) + "\n" + self.t(
+                "behavior_status",
+                state=behavior_label,
+                score=behavior.get("highest_score", 0),
+                count=behavior.get("recent_findings", 0),
             )
         )
 
