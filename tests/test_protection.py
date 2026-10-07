@@ -90,7 +90,7 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
         "driver": {
             "driver_available": True,
             "exit_code": 0,
-            "protocol": 3,
+            "protocol": 4,
             "enforcement": 0,
             "coexistence_mode": 1,
             "fail_open_on_incomplete": True,
@@ -107,6 +107,8 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
             "cache_hits": 7,
             "cache_expired": 1,
             "cache_invalidations": 2,
+            "database_generation": 28123,
+            "database_generation_changes": 3,
             "max_wait_ms": 120,
         },
     })
@@ -117,7 +119,7 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
     assert status["capabilities"]["pre_execution_blocking"] is False
     rendered = protection.render_protection_status(status)
     assert "Native coexistence: operational" in rendered
-    assert "Native clean cache: ttl=30000 ms, hits=7, expired=1, invalidations=2" in rendered
+    assert "Native clean cache: ttl=30000 ms, hits=7, expired=1, invalidations=2, db-gen=28123, db-changes=3" in rendered
 
     broken = status["native"]["driver"].copy()
     broken["max_pending"] = 5
@@ -134,12 +136,14 @@ def test_native_coexistence_timeout_is_attention_not_healthy():
     driver = {
         "driver_available": True,
         "exit_code": 0,
-        "protocol": 3,
+        "protocol": 4,
         "coexistence_mode": 1,
         "fail_open_on_incomplete": True,
         "max_pending": 4,
         "pending": 0,
         "clean_cache_ttl_ms": 30000,
+        "database_generation": 28123,
+        "database_generation_changes": 1,
         "attempts": 20,
         "incomplete": 1,
         "busy_bypass": 0,
@@ -160,12 +164,14 @@ def test_native_coexistence_reports_operational_gaps_without_calling_them_timeou
     driver = {
         "driver_available": True,
         "exit_code": 0,
-        "protocol": 3,
+        "protocol": 4,
         "coexistence_mode": 1,
         "fail_open_on_incomplete": True,
         "max_pending": 4,
         "pending": 0,
         "clean_cache_ttl_ms": 30000,
+        "database_generation": 28123,
+        "database_generation_changes": 1,
         "attempts": 25,
         "incomplete": 2,
         "busy_bypass": 1,
@@ -198,12 +204,14 @@ def test_native_coexistence_rejects_unbounded_clean_cache():
     driver = {
         "driver_available": True,
         "exit_code": 0,
-        "protocol": 3,
+        "protocol": 4,
         "coexistence_mode": 1,
         "fail_open_on_incomplete": True,
         "max_pending": 4,
         "pending": 0,
         "clean_cache_ttl_ms": 300001,
+        "database_generation": 28123,
+        "database_generation_changes": 1,
     }
     health = protection._native_coexistence_health(True, driver)
     assert health["configured"] is False
