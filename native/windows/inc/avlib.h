@@ -189,15 +189,25 @@ typedef struct _AV_CONNECTION_CONTEXT {
 typedef struct _AO_DRIVER_STATUS {
     ULONG ProtocolVersion;
     ULONG Enforcement;
+    ULONG CoexistenceMode;
+    ULONG LocalScanTimeoutMs;
+    ULONG MaxPendingScans;
     LONG PendingScans;
+    LONG PeakPendingScans;
     ULONG Reserved;
     LONGLONG Attempts;
     LONGLONG Incomplete;
     LONGLONG Detections;
     LONGLONG Blocked;
+    LONGLONG BusyBypass;
+    LONGLONG DeliveryTimeouts;
+    LONGLONG CompletionTimeouts;
+    LONGLONG CancelledOpens;
+    LONGLONG TotalWait100ns;
+    LONGLONG MaxWait100ns;
 } AO_DRIVER_STATUS;
 
-#define AO_PROTOCOL_VERSION 1u
+#define AO_PROTOCOL_VERSION 2u
 #define AO_MAX_SECTION_BYTES (32u * 1024u * 1024u)
 typedef struct _AO_SECTION_REPLY {
     HANDLE SectionHandle;
@@ -210,7 +220,7 @@ C_ASSERT(sizeof(AV_CONNECTION_CONTEXT) == 8);
 C_ASSERT(sizeof(COMMAND_MESSAGE) == 32);
 C_ASSERT(sizeof(AV_SCANNER_NOTIFICATION) == 24);
 C_ASSERT(sizeof(AO_SECTION_REPLY) == 16);
-C_ASSERT(sizeof(AO_DRIVER_STATUS) == 48);
+C_ASSERT(sizeof(AO_DRIVER_STATUS) == 112);
 
 #if defined(_MSC_VER)
 #if (_MSC_VER >= 1200)
