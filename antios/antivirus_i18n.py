@@ -570,3 +570,22 @@ for _locale, _texts in {
         "risk_confirmed-threat": _texts[6],
         "risk_unavailable": _texts[7],
     })
+
+
+# Bounded Incident Graph summary shown below RiskContext.
+for _locale, _texts in {
+    "en": ("Incidents: {state} · active {count} · score {score} · graph {nodes}/{edges}", "normal", "attention", "alert", "unavailable"),
+    "ru": ("Инциденты: {state} · активных {count} · оценка {score} · граф {nodes}/{edges}", "норма", "внимание", "тревога", "недоступно"),
+    "es": ("Incidentes: {state} · activos {count} · puntuación {score} · grafo {nodes}/{edges}", "normal", "atención", "alerta", "no disponible"),
+    "zh-CN": ("事件图：{state} · 活跃 {count} · 评分 {score} · 图 {nodes}/{edges}", "正常", "注意", "警报", "不可用"),
+    "fi": ("Tapahtumat: {state} · aktiivisia {count} · pisteet {score} · graafi {nodes}/{edges}", "normaali", "huomio", "hälytys", "ei käytettävissä"),
+    "pl": ("Incydenty: {state} · aktywne {count} · wynik {score} · graf {nodes}/{edges}", "normalnie", "uwaga", "alarm", "niedostępne"),
+    "mn": ("Инцидент: {state} · идэвхтэй {count} · оноо {score} · граф {nodes}/{edges}", "хэвийн", "анхаарах", "түгшүүр", "боломжгүй"),
+}.items():
+    MESSAGES[_locale].update({
+        "incident_status": _texts[0],
+        "incident_normal": _texts[1],
+        "incident_attention": _texts[2],
+        "incident_alert": _texts[3],
+        "incident_unavailable": _texts[4],
+    })
