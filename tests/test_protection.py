@@ -77,3 +77,38 @@ def test_render_does_not_claim_primary_registration(monkeypatch):
     assert "Primary Windows antivirus registration: not claimed" in rendered
     assert "Coexistence mode: layered" in rendered
     assert "Defender settings unchanged" in rendered
+
+
+def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(protection, "read_guard_state",
+                        lambda: {"running": True, "state": "monitoring"})
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    monkeypatch.setattr(protection, "_native_status", lambda: {
+        "available": True,
+        "service": {"service_state": 4, "exit_code": 0},
+        "driver": {
+            "driver_available": True,
+            "exit_code": 0,
+            "enforcement": 0,
+            "coexistence_mode": 1,
+            "fail_open_on_incomplete": True,
+            "max_pending": 4,
+            "pending": 0,
+            "max_wait_ms": 120,
+        },
+    })
+    status = protection.collect_protection_status("clamd")
+    assert status["capabilities"]["native_coexistence_ready"] is True
+    assert status["capabilities"]["pre_execution_blocking"] is False
+    assert "Native coexistence: healthy" in protection.render_protection_status(status)
+
+    broken = status["native"]["driver"].copy()
+    broken["max_pending"] = 99
+    monkeypatch.setattr(protection, "_native_status", lambda: {
+        "available": True,
+        "service": {"service_state": 4, "exit_code": 0},
+        "driver": broken,
+    })
+    status = protection.collect_protection_status("clamd")
+    assert status["capabilities"]["native_coexistence_ready"] is False
