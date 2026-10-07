@@ -30,11 +30,11 @@ def test_configure_resident_guard_uses_persistent_task(monkeypatch, tmp_path):
     exe.write_bytes(b"x")
     monkeypatch.setattr(resident, "_guard_executable", lambda: exe)
     captured = {}
-    monkeypatch.setattr(
-        resident,
-        "_run_startup_script",
-        lambda *args, **kwargs: captured.setdefault("args", args) or {"exit_code": 0},
-    )
+    def fake_startup(*args, **kwargs):
+        captured["args"] = args
+        return {"exit_code": 0}
+
+    monkeypatch.setattr(resident, "_run_startup_script", fake_startup)
     root = tmp_path / "Downloads"
     root.mkdir()
     result = resident.configure_resident_guard(roots=(root,))
