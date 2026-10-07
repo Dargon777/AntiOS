@@ -130,6 +130,7 @@ typedef struct _AV_SCANNER_GLOBAL_DATA {
     ULONG MaxPendingScans;
     volatile LONG PendingScans;
     volatile LONG PeakPendingScans;
+    volatile LONG SectionConflicts;
     volatile LONGLONG Attempts, Incomplete, Detections, Blocked;
     volatile LONGLONG BusyBypass, DeliveryTimeouts, CompletionTimeouts, CancelledOpens;
     volatile LONGLONG TotalWait100ns, MaxWait100ns;
