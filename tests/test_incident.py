@@ -236,3 +236,28 @@ def test_repeated_updates_for_one_incident_are_coalesced():
     updates = incidents.drain_updates()
     assert len(updates) == 1
     assert updates[0]["incident"]["edge_count"] >= 2
+
+
+
+def test_child_process_inherits_existing_incident_by_parent_pid():
+    incidents, clock = graph()
+    payload = r"C:\Users\A\Downloads\payload.exe"
+    incidents.observe_file_change(payload)
+    first = incidents.observe_process(ProcessEvent(
+        pid=500, ppid=100, image="payload.exe", path=payload,
+        parent_image="explorer.exe",
+    ))[0]
+    clock.advance(0.2)
+    child = incidents.observe_process(ProcessEvent(
+        pid=501, ppid=500, image="powershell.exe",
+        path=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        parent_image="payload.exe", parent_path=payload,
+    ))[0]
+    assert child["id"] == first["id"]
+    assert any(
+        edge["source"] == "process:500"
+        and edge["target"] == "process:501"
+        and edge["relation"] == "spawned"
+        for edge in child["edges"]
+    )
+    assert incidents.status()["active_incidents"] == 1
