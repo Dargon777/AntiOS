@@ -201,6 +201,15 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         driver.get("enforcement") == 1 and
         driver.get("exit_code") == 0
     )
+    antios_resident = bool(engine_ready and (guard_running or pre_execution))
+    defender_realtime = defender.get("realtime_active") is True
+    layered_active = bool(defender_realtime and antios_resident)
+    coexistence = dict(coexistence)
+    coexistence["layered_with_defender"] = layered_active
+    if layered_active:
+        coexistence["mode"] = "layered"
+    elif defender_realtime:
+        coexistence["mode"] = "defender-active-antios-incomplete"
 
     blockers = []
     if not engine_ready:
@@ -231,8 +240,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
                 native_health["state"] in {"operational", "operational-with-gaps"}
             ),
             "defender_dependency": False,
-            "defender_realtime_active": defender.get("realtime_active") is True,
-            "layered_with_defender": coexistence["layered_with_defender"],
+            "defender_realtime_active": defender_realtime,
+            "layered_with_defender": layered_active,
         },
         "production_primary_antivirus": False,
         "remaining_gates": blockers,
