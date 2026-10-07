@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import ntpath
 from pathlib import Path
+import re
 from typing import Callable, Iterable
 
 from .quarantine import Quarantine
@@ -131,7 +132,15 @@ def confirmed_findings(response_scan: dict | None) -> list[dict]:
                 continue
             path = finding.get("path")
             digest = finding.get("sha256")
-            if not isinstance(path, str) or not isinstance(digest, str):
+            fingerprint = finding.get("fingerprint")
+            if (
+                not isinstance(path, str)
+                or not isinstance(digest, str)
+                or re.fullmatch(r"[a-fA-F0-9]{64}", digest) is None
+                or not isinstance(fingerprint, (list, tuple))
+                or len(fingerprint) != 4
+                or not all(isinstance(value, int) for value in fingerprint)
+            ):
                 continue
             key = (ntpath.normcase(ntpath.normpath(path)), digest.lower())
             if key in seen:
