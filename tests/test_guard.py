@@ -635,6 +635,10 @@ def test_guard_fuses_scan_behavior_origin_and_native_state(tmp_path):
         assert context["native_pre_execution"] == "active"
         assert context["automatic_enforcement_eligible"] is False
         assert context["classification"] in {"high", "critical-behavior"}
+        until(lambda: any(
+            event["kind"] == "risk-context"
+            for event in read_guard_state(state, history=True).get("events", [])
+        ))
         history = read_guard_state(state, history=True)
         assert any(event["kind"] == "risk-context" for event in history["events"])
     finally:
