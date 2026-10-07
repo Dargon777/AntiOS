@@ -102,12 +102,16 @@ def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
         native_running and
         driver.get("driver_available") is True and
         driver.get("exit_code") == 0 and
+        isinstance(driver.get("protocol"), int) and
+        driver.get("protocol") >= 3 and
         driver.get("coexistence_mode") == 1 and
         driver.get("fail_open_on_incomplete") is True and
         isinstance(driver.get("max_pending"), int) and
         1 <= driver.get("max_pending") <= 4 and
         isinstance(driver.get("pending"), int) and
-        0 <= driver.get("pending") <= driver.get("max_pending")
+        0 <= driver.get("pending") <= driver.get("max_pending") and
+        isinstance(driver.get("clean_cache_ttl_ms"), int) and
+        0 <= driver.get("clean_cache_ttl_ms") <= 300000
     )
     if not configured:
         return {
@@ -121,6 +125,7 @@ def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
     for key in (
         "attempts", "incomplete", "busy_bypass", "section_conflicts",
         "delivery_timeouts", "completion_timeouts", "cancelled_opens", "max_wait_ms",
+        "cache_hits", "cache_expired", "cache_invalidations",
     ):
         value = driver.get(key)
         counters[key] = value if isinstance(value, int) and value >= 0 else None
@@ -270,6 +275,11 @@ def render_protection_status(status: dict) -> str:
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
         f"Native coexistence: {native_health.get('state', 'inactive/not-validated')}",
         f"Native max wait: {native.get('driver', {}).get('max_wait_ms', 'unknown')} ms",
+        "Native clean cache: "
+        f"ttl={native.get('driver', {}).get('clean_cache_ttl_ms', 'unknown')} ms, "
+        f"hits={telemetry.get('cache_hits', 'unknown')}, "
+        f"expired={telemetry.get('cache_expired', 'unknown')}, "
+        f"invalidations={telemetry.get('cache_invalidations', 'unknown')}",
         "Native gaps: "
         f"busy={telemetry.get('busy_bypass', 'unknown')}, "
         f"section-conflicts={telemetry.get('section_conflicts', 'unknown')}, "
