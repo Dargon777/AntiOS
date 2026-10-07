@@ -144,12 +144,14 @@ try {
     $attemptDelta = [long]$after.attempts - [long]$before.attempts
     $blockDelta = [long]$after.blocked - [long]$before.blocked
     $busyDelta = [long]$after.busy_bypass - [long]$before.busy_bypass
+    $sectionConflictDelta = [long]$after.section_conflicts - [long]$before.section_conflicts
     $deliveryTimeoutDelta = [long]$after.delivery_timeouts - [long]$before.delivery_timeouts
     $completionTimeoutDelta = [long]$after.completion_timeouts - [long]$before.completion_timeouts
     $report.delta = [ordered]@{
         attempts = $attemptDelta
         blocked = $blockDelta
         busyBypass = $busyDelta
+        sectionConflicts = $sectionConflictDelta
         deliveryTimeouts = $deliveryTimeoutDelta
         completionTimeouts = $completionTimeoutDelta
     }
