@@ -960,7 +960,7 @@ class AntivirusPanel:
 
         if (
             sys.platform == "win32"
-            and time.monotonic() - self.last_coexistence_probe >= 15
+            and time.monotonic() - self.last_coexistence_probe >= 60
             and not self.coexistence_probe_busy
         ):
             self.last_coexistence_probe = time.monotonic()
