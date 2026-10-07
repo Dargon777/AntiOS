@@ -90,11 +90,13 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
         "driver": {
             "driver_available": True,
             "exit_code": 0,
+            "protocol": 3,
             "enforcement": 0,
             "coexistence_mode": 1,
             "fail_open_on_incomplete": True,
             "max_pending": 4,
             "pending": 0,
+            "clean_cache_ttl_ms": 30000,
             "attempts": 10,
             "incomplete": 0,
             "busy_bypass": 0,
@@ -102,6 +104,9 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
             "delivery_timeouts": 0,
             "completion_timeouts": 0,
             "cancelled_opens": 0,
+            "cache_hits": 7,
+            "cache_expired": 1,
+            "cache_invalidations": 2,
             "max_wait_ms": 120,
         },
     })
@@ -110,7 +115,9 @@ def test_native_coexistence_health_requires_bounded_policy(monkeypatch):
     assert status["capabilities"]["native_coexistence_observed_operational"] is True
     assert status["native_coexistence"]["state"] == "operational"
     assert status["capabilities"]["pre_execution_blocking"] is False
-    assert "Native coexistence: operational" in protection.render_protection_status(status)
+    rendered = protection.render_protection_status(status)
+    assert "Native coexistence: operational" in rendered
+    assert "Native clean cache: ttl=30000 ms, hits=7, expired=1, invalidations=2" in rendered
 
     broken = status["native"]["driver"].copy()
     broken["max_pending"] = 5
@@ -127,10 +134,12 @@ def test_native_coexistence_timeout_is_attention_not_healthy():
     driver = {
         "driver_available": True,
         "exit_code": 0,
+        "protocol": 3,
         "coexistence_mode": 1,
         "fail_open_on_incomplete": True,
         "max_pending": 4,
         "pending": 0,
+        "clean_cache_ttl_ms": 30000,
         "attempts": 20,
         "incomplete": 1,
         "busy_bypass": 0,
@@ -151,10 +160,12 @@ def test_native_coexistence_reports_operational_gaps_without_calling_them_timeou
     driver = {
         "driver_available": True,
         "exit_code": 0,
+        "protocol": 3,
         "coexistence_mode": 1,
         "fail_open_on_incomplete": True,
         "max_pending": 4,
         "pending": 0,
+        "clean_cache_ttl_ms": 30000,
         "attempts": 25,
         "incomplete": 2,
         "busy_bypass": 1,
@@ -180,3 +191,20 @@ def test_defender_alone_is_not_reported_as_layered(monkeypatch):
     assert status["capabilities"]["defender_realtime_active"] is True
     assert status["capabilities"]["layered_with_defender"] is False
     assert status["coexistence"]["mode"] == "defender-active-antios-incomplete"
+
+
+
+def test_native_coexistence_rejects_unbounded_clean_cache():
+    driver = {
+        "driver_available": True,
+        "exit_code": 0,
+        "protocol": 3,
+        "coexistence_mode": 1,
+        "fail_open_on_incomplete": True,
+        "max_pending": 4,
+        "pending": 0,
+        "clean_cache_ttl_ms": 300001,
+    }
+    health = protection._native_coexistence_health(True, driver)
+    assert health["configured"] is False
+    assert health["state"] == "inactive/not-validated"
