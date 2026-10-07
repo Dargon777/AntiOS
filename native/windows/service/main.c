@@ -114,8 +114,9 @@ static int status_json(void) {
     }
     printf("{\"installed\":true,\"service_state\":%lu,\"pid\":%lu,\"configured_protection_known\":%s,"
            "\"configured_protection\":%lu,\"actual_protection_known\":%s,\"actual_protection\":%lu,"
-           "\"primary_antivirus\":false,\"role\":\"independent-companion\","
-           "\"defender_configuration_changed\":false,\"engine_readiness\":\"not_measured\"}\n",
+           "\"primary_antivirus\":false,\"windows_security_registration\":false,"
+           "\"role\":\"independent-companion\",\"defender_configuration_changed\":false,"
+           "\"coexistence_mode_name\":\"parallel-secondary\",\"engine_readiness\":\"not_measured\"}\n",
            state.dwCurrentState, state.dwProcessId, config_known ? "true" : "false", configured.dwLaunchProtected,
            actual_known ? "true" : "false", actual.ProtectionLevel);
     CloseServiceHandle(service); CloseServiceHandle(manager);
