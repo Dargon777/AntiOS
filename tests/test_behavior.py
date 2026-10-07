@@ -46,7 +46,9 @@ def test_execution_from_downloads_is_detected_without_calling_it_malware():
         parent_image="explorer.exe",
     ))
     assert findings[0].rule == "user-writable-execution"
-    assert findings[0].severity == "medium"
+    assert findings[0].severity == "low"
+    assert findings[0].score == 45
+    assert behavior.status()["state"] == "normal"
 
 
 def test_recently_changed_file_then_execution_correlates():
