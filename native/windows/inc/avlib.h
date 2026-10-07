@@ -109,6 +109,9 @@ typedef struct _COMMAND_MESSAGE {
 
     ULONG  ScanThreadId;
 
+    // Result metadata from the trusted broker. Must be zero for non-close commands.
+    ULONG  ResultFlags;
+
     union {
 
         //
@@ -213,6 +216,7 @@ typedef struct _AO_DRIVER_STATUS {
 
 #define AO_PROTOCOL_VERSION 3u
 #define AO_BROKER_WORKERS 4u
+#define AO_SCAN_FLAG_CLEAN_CACHE_HIT 0x00000001u
 #define AO_MAX_SECTION_BYTES (32u * 1024u * 1024u)
 typedef struct _AO_SECTION_REPLY {
     HANDLE SectionHandle;
