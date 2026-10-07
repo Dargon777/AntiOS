@@ -1,7 +1,7 @@
 # Unsigned experimental builds only. No installation, signing or Windows policy changes.
 [CmdletBinding()]
 param(
-    [ValidateSet('Service','Driver','All')][string]$Target = 'All',
+    [ValidateSet('Service','Driver','Amsi','All')][string]$Target = 'All',
     [string]$Packages = "$PSScriptRoot\..\..\build\native\packages",
     [switch]$Restore
 )
@@ -43,6 +43,23 @@ try {
             '/Fe:AntiOS-Service.exe','/link','service.res','fltlib.lib','ws2_32.lib','iphlpapi.lib','advapi32.lib','/DYNAMICBASE','/NXCOMPAT','/guard:cf')
         Invoke-Checked -Program 'cl.exe' -Arguments @('/nologo','/TC','/W4','/WX','/O2','/MT',"$PSScriptRoot\..\tests\inert_program.c",'/Fe:Native-Inert.exe')
     }
+    if ($Target -in @('Amsi','All')) {
+        Invoke-Checked -Program 'cl.exe' -Arguments @('/nologo','/TP','/c','/EHsc','/std:c++17','/W4','/WX','/O2','/MT','/guard:cf',
+            '/DUNICODE','/D_UNICODE','/D_WIN32_WINNT=0x0A00',
+            "$PSScriptRoot\amsi\provider.cpp",'/Fo:amsi-provider.obj')
+        Invoke-Checked -Program 'cl.exe' -Arguments @('/nologo','/TC','/c','/W4','/WX','/O2','/MT','/guard:cf',
+            '/DUNICODE','/D_UNICODE','/D_WIN32_WINNT=0x0A00','/D_CRT_SECURE_NO_WARNINGS',
+            "$PSScriptRoot\service\engine_peer.c",'/Fo:amsi-engine-peer.obj')
+        Invoke-Checked -Program 'cl.exe' -Arguments @('/nologo','/TC','/c','/W4','/WX','/O2','/MT','/guard:cf',
+            '/D_WIN32_WINNT=0x0A00','/D_CRT_SECURE_NO_WARNINGS',
+            "$PSScriptRoot\engine\protocol.c",'/Fo:amsi-protocol.obj')
+        Invoke-Checked -Program 'cl.exe' -Arguments @('/nologo','/TC','/c','/W4','/WX','/O2','/MT','/guard:cf',
+            '/D_WIN32_WINNT=0x0A00','/D_CRT_SECURE_NO_WARNINGS',
+            "$PSScriptRoot\engine\clamd.c",'/Fo:amsi-clamd.obj')
+        Invoke-Checked -Program 'link.exe' -Arguments @('/nologo','/dll','/out:AntiOS-AmsiProvider.dll',
+            'amsi-provider.obj','amsi-engine-peer.obj','amsi-protocol.obj','amsi-clamd.obj',
+            'ws2_32.lib','iphlpapi.lib','advapi32.lib','ole32.lib','/DYNAMICBASE','/NXCOMPAT','/guard:cf')
+    }
     if ($Target -in @('Driver','All')) {
         $wdk = Join-Path $Packages "Microsoft.Windows.WDK.x64.$version\c"
         $sdk = Join-Path $Packages "Microsoft.Windows.SDK.CPP.$version\c"
@@ -62,6 +79,6 @@ try {
             "/libpath:$wdk\Lib\$kit\km\x64",'ntoskrnl.lib','fltMgr.lib','hal.lib','bufferoverflowfastfailk.lib') + $objects)
     }
     Copy-Item "$PSScriptRoot\LICENSE.microsoft" $out -Force
-    'EXPERIMENTAL / UNSIGNED. Not an installable antivirus or a Defender replacement.' |
+    'EXPERIMENTAL / UNSIGNED. Driver/service/AMSI outputs require the documented signing and deployment gates; Defender remains unchanged.' |
         Set-Content -Encoding utf8 (Join-Path $out 'EXPERIMENTAL.txt')
 } finally { Pop-Location }
