@@ -158,3 +158,13 @@ revalidated against the file identity and a changing file is queued again. The
 separately signed native minifilter remains AntiOS's only pre-execution blocking
 path, and it must stay out of normal deployment until the documented Windows VM,
 signing, altitude, Driver Verifier and HVCI gates pass.
+
+## Microsoft Defender coexistence
+
+When Defender is present, Guard does not recursively enumerate Defender-owned
+protected stores below `%ProgramData%\Microsoft\Windows Defender` and
+`%ProgramData%\Microsoft\Windows Defender Advanced Threat Protection`.
+This exclusion exists only inside AntiOS. Guard never writes Microsoft Defender
+exclusions, stops Defender services or changes Windows Security registration.
+
+For the full layered model, see [COEXISTENCE.md](COEXISTENCE.md).
