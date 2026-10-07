@@ -97,6 +97,24 @@ def _native_status() -> dict:
     return result
 
 
+def native_pre_execution_active(native: dict | None = None) -> bool | None:
+    """Return truthful native pre-exec state, or None when it cannot be determined."""
+    state = _native_status() if native is None else native
+    if not isinstance(state, dict) or state.get("available") is False:
+        return None
+    service = state.get("service") if isinstance(state.get("service"), dict) else {}
+    driver = state.get("driver") if isinstance(state.get("driver"), dict) else {}
+    if "error" in service or "error" in driver:
+        return None
+    return bool(
+        service.get("service_state") == 4 and
+        service.get("exit_code") == 0 and
+        driver.get("driver_available") is True and
+        driver.get("exit_code") == 0 and
+        driver.get("enforcement") == 1
+    )
+
+
 def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
     configured = bool(
         native_running and
@@ -210,12 +228,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     native_running = service.get("service_state") == 4 and service.get("exit_code") == 0
     native_health = _native_coexistence_health(native_running, driver)
     native_coexistence = native_health["configured"]
-    pre_execution = bool(
-        native_running and
-        driver.get("driver_available") is True and
-        driver.get("enforcement") == 1 and
-        driver.get("exit_code") == 0
-    )
+    pre_execution = native_pre_execution_active(native) is True
     antios_resident = bool(engine_ready and (guard_running or pre_execution))
     defender_realtime = defender.get("realtime_active") is True
     layered_active = bool(defender_realtime and antios_resident)
