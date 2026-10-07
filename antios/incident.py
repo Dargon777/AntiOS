@@ -100,6 +100,7 @@ class IncidentGraph:
         self.path_index: dict[str, str] = {}
         self.pid_index: dict[int, str] = {}
         self.pending_updates = deque(maxlen=100)
+        self._pending_incidents: set[str] = set()
         self.total_created = 0
         self._counter = 0
         self.latest_id: str | None = None
@@ -179,9 +180,19 @@ class IncidentGraph:
 
     def _queue_update(self, incident: _Incident, reason: str) -> None:
         self.latest_id = incident.id
+        if incident.id in self._pending_incidents:
+            # Keep one journal candidate per incident between Guard heartbeats.
+            # The snapshot itself is rebuilt on drain, so it still contains the
+            # newest nodes/edges and highest severity.
+            for item in reversed(self.pending_updates):
+                if item["incident_id"] == incident.id:
+                    item["reason"] = reason
+                    break
+            return
+        self._pending_incidents.add(incident.id)
         self.pending_updates.append({
             "reason": reason,
-            "incident": self.snapshot(incident.id),
+            "incident_id": incident.id,
         })
 
     def _recent_change(self, normalized: str, now: float) -> float | None:
@@ -442,8 +453,16 @@ class IncidentGraph:
         }
 
     def drain_updates(self) -> list[dict]:
-        updates = list(self.pending_updates)
+        updates = []
+        for item in self.pending_updates:
+            incident_id = item["incident_id"]
+            if incident_id in self.incidents:
+                updates.append({
+                    "reason": item["reason"],
+                    "incident": self.snapshot(incident_id),
+                })
         self.pending_updates.clear()
+        self._pending_incidents.clear()
         return updates
 
     def status(self) -> dict:
