@@ -1147,11 +1147,21 @@ AvMessageNotifyCallback (
             !OutputBuffer || OutputBufferSize != sizeof(state)) return STATUS_INVALID_PARAMETER;
         state.ProtocolVersion = AO_PROTOCOL_VERSION;
         state.Enforcement = Globals.Enforcement;
+        state.CoexistenceMode = Globals.CoexistenceMode;
+        state.LocalScanTimeoutMs = (ULONG)Globals.LocalScanTimeout;
+        state.MaxPendingScans = Globals.MaxPendingScans;
         state.PendingScans = InterlockedCompareExchange(&Globals.PendingScans, 0, 0);
+        state.PeakPendingScans = InterlockedCompareExchange(&Globals.PeakPendingScans, 0, 0);
         state.Attempts = InterlockedCompareExchange64(&Globals.Attempts, 0, 0);
         state.Incomplete = InterlockedCompareExchange64(&Globals.Incomplete, 0, 0);
         state.Detections = InterlockedCompareExchange64(&Globals.Detections, 0, 0);
         state.Blocked = InterlockedCompareExchange64(&Globals.Blocked, 0, 0);
+        state.BusyBypass = InterlockedCompareExchange64(&Globals.BusyBypass, 0, 0);
+        state.DeliveryTimeouts = InterlockedCompareExchange64(&Globals.DeliveryTimeouts, 0, 0);
+        state.CompletionTimeouts = InterlockedCompareExchange64(&Globals.CompletionTimeouts, 0, 0);
+        state.CancelledOpens = InterlockedCompareExchange64(&Globals.CancelledOpens, 0, 0);
+        state.TotalWait100ns = InterlockedCompareExchange64(&Globals.TotalWait100ns, 0, 0);
+        state.MaxWait100ns = InterlockedCompareExchange64(&Globals.MaxWait100ns, 0, 0);
         __try {
             RtlCopyMemory(OutputBuffer, &state, sizeof(state));
             *ReturnOutputBufferLength = sizeof(state);
