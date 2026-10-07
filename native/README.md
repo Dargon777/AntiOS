@@ -34,7 +34,10 @@ antivirus, a certified driver, or a ready-to-install Defender replacement.
   the filter after rule removal to clear a previous positive in this prototype.
 - `--status` reports SCM state and configured/actual Windows process protection
   separately. `--driver-status` reads loaded policy and counters; it does not infer
-  protection from a registry setting. `--scan-file PATH` is a bounded diagnostic.
+  protection from a registry setting. Protocol v2 also reports CoexistenceMode,
+  bounded scan admission, peak pending work, overload bypasses, delivery/completion
+  timeouts, cancellations and total/average/max kernel wait latency. `--scan-file PATH`
+  is a bounded diagnostic.
   Diagnostic exits: 0 clean, 1 confirmed signature, 2 incomplete/review/error.
 
 ## Explicit limitations
@@ -139,7 +142,20 @@ There is deliberately no test-signing or signature-bypass installer.
    to DWORD 1, then reload/restart. Verify the **loaded** policy with driver status.
    Run the same test with `-ExpectedMode Enforce`. It must observe Windows error
    225 for the marked execute/process/image-section paths and no marked-fixture process execution; clean execution must still work.
-6. Before considering deployment, also test the matrix below. Revert to audit or
+6. With Microsoft Defender real-time protection still enabled, run the dedicated
+   coexistence stress harness against the harmless clean fixture:
+
+   ```powershell
+   .\\native\\windows\\Test-NativeCoexistence.ps1 \
+     -ServiceExecutable <installed-exe> \
+     -CleanFixture <fixtures>\\clean.exe \
+     -ReportPath <coexistence.json>
+   ```
+
+   The test requires both `WdFilter` and `AntiOS-Filter` to be loaded, opens many
+   distinct clean executables concurrently with `FILE_EXECUTE`, verifies bounded
+   admission/latency and refuses any configuration that disables coexistence.
+7. Before considering deployment, also test the matrix below. Revert to audit or
    restore the VM snapshot if any criterion fails. Never label a failed/skipped
    VM test as protection readiness.
 
@@ -153,6 +169,7 @@ There is deliberately no test-signing or signature-bypass installer.
 | Ordinary-user malformed/duplicate IPC and handle passing | Cannot connect to scan/abort ports or forge a verdict |
 | Sleep/resume, low memory, disk fault, reboot | Driver Verifier clean, recovery path works, no boot failure |
 | HVCI/Memory Integrity + other antivirus filters | Signed package loads and coexists under normal security settings |
+| Defender real-time + AntiOS concurrent execute opens | `Test-NativeCoexistence.ps1` passes with WdFilter loaded, queue drains, peak pending stays bounded, clean opens are never blocked, and latency remains below the documented ceiling |
 | False positives, latency, corpus effectiveness | Published representative measurements, not just EICAR/inert tests |
 | Service upgrades/removal | Stop succeeds, handles drain, signed files cannot be replaced by a standard user |
 
