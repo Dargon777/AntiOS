@@ -1,6 +1,7 @@
 """Persistent Resident Guard lifecycle for installed Windows builds."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -113,8 +114,8 @@ def configure_resident_guard(*, roots: tuple[Path, ...] | None = None) -> dict:
     args = [
         "-Executable",
         str(executable),
-        "-Roots",
-        *[str(path) for path in selected],
+        "-RootsJson",
+        json.dumps([str(path) for path in selected], ensure_ascii=False),
         "-Mode",
         "notify",
         "-EngineServiceName",
