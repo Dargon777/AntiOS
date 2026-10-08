@@ -523,6 +523,11 @@ class AntivirusPanel:
         # Defender is intentionally not the primary antivirus status anymore.
         if not self.app.antivirus_result:
             self.provider_status.configure(text=self.t("managed_engine"))
+        if hasattr(self, "engine_component_status") and not self.app.antivirus_result:
+            self.engine_component_status.configure(
+                text="AntiOS Engine · ClamAV",
+                fg=self.palette["muted"],
+            )
 
     def _choose(self, folder: bool) -> None:
         from tkinter import filedialog
@@ -943,6 +948,36 @@ class AntivirusPanel:
             )
         )
 
+        if hasattr(self, "protection_score"):
+            if healthy:
+                score = 100 if self.layered_active else 92
+            elif state == "starting":
+                score = 72
+            elif state == "attention":
+                score = 48
+            else:
+                score = 18
+            self.protection_score.configure(text=str(score), fg=color)
+
+        if hasattr(self, "behavior_component_status"):
+            behavior_color = (
+                self.palette["ok"] if behavior_state == "normal"
+                else self.palette["warn"] if behavior_state in {"attention", "alert"}
+                else self.palette["muted"]
+            )
+            self.behavior_component_status.configure(text=behavior_label, fg=behavior_color)
+        if hasattr(self, "file_component_status"):
+            file_text = (
+                "Мониторинг активен" if healthy and self.app.language == "ru"
+                else "Monitoring active" if healthy
+                else "Ожидает Guard" if self.app.language == "ru"
+                else "Waiting for Guard"
+            )
+            self.file_component_status.configure(
+                text=file_text,
+                fg=self.palette["ok"] if healthy else self.palette["muted"],
+            )
+
         running = state in _ACTIVE_GUARD_STATES
         self.guard_start_button.configure(
             text=self.t("guard_stop") if running else self.t("guard_start")
@@ -965,6 +1000,18 @@ class AntivirusPanel:
             text=self.t("layered_engine") if layered else self.t("managed_engine"),
             fg=self.palette["ok"] if layered else self.palette["muted"],
         )
+        if hasattr(self, "engine_component_status"):
+            self.engine_component_status.configure(
+                text=(
+                    "Готов · рядом с Defender" if layered and self.app.language == "ru"
+                    else "Ready · alongside Defender" if layered
+                    else "Движок доступен" if caps.get("standalone_detection_engine") and self.app.language == "ru"
+                    else "Engine available" if caps.get("standalone_detection_engine")
+                    else "Требует проверки" if self.app.language == "ru"
+                    else "Needs review"
+                ),
+                fg=self.palette["ok"] if caps.get("standalone_detection_engine") else self.palette["review"],
+            )
         if self.guard_state in _HEALTHY_GUARD_STATES:
             self.protection_detail.configure(
                 text=self.t("protection_layered_detail") if layered
