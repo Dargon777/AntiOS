@@ -157,10 +157,15 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -Re
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existing) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $state = $existing.State
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Milliseconds 100
-        $state = (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State
+        $currentTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        $state = if ($currentTask) { $currentTask.State } else { $null }
         if ($state -ne 'Running') { break }
+    }
+    if ($state -eq 'Running') {
+        throw "Existing Resident Guard task did not stop before reconfiguration."
     }
 }
 
