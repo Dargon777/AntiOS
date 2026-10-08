@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -97,3 +99,30 @@ def test_ensure_resident_guard_rejects_stale_unresponsive_state(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="state=unresponsive"):
         resident.ensure_resident_guard(wait_seconds=0)
+
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows scheduled-task script")
+def test_guard_startup_uninstall_does_not_require_executable():
+    powershell = resident.system_executable("WindowsPowerShell/v1.0/powershell.exe")
+    script = Path("scripts") / "guard-startup.ps1"
+    completed = subprocess.run(
+        [
+            str(powershell),
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            "-Uninstall",
+            "-Apply",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
