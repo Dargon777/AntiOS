@@ -165,7 +165,7 @@ class AntivirusPanel:
             text=self.t("protection_off"),
             bg=self.palette["surface"],
             fg=self.palette["text"],
-            font=("Segoe UI Variable Display", 24, "bold"),
+            font=("Segoe UI", 24, "bold"),
             anchor="w",
         )
         self.protection_title.pack(fill="x", pady=(6, 4))
@@ -208,7 +208,7 @@ class AntivirusPanel:
             text="—",
             bg=self.palette["surface_soft"],
             fg=self.palette["warn"],
-            font=("Segoe UI Variable Display", 31, "bold"),
+            font=("Segoe UI", 31, "bold"),
         )
         self.protection_score.pack()
         self.engine_chip = tk.Label(
