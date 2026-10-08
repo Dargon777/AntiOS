@@ -18,7 +18,7 @@ The native filter no longer depends on the newer `IoOpenDriverRegistryKey` decla
 
 ## Compatibility validation
 
-CI adds a legacy Windows API proxy job on the older Windows Server 2019 runner. This is intentionally **not** presented as Windows 10 certification; it is an extra regression check against accidentally introducing newer Win32 dependencies.
+CI adds a Windows 10-era API proxy job on the Windows Server 2022 runner. This is intentionally **not** presented as Windows 10 certification; it is an extra regression check against accidentally introducing newer Win32 dependencies.
 
 A real Windows 10 22H2 build 19045 VM or physical-machine acceptance run is still required before calling Windows 10 field-validated.
 
