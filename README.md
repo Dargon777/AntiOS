@@ -4,6 +4,8 @@
 
 **Resident protection, independent antivirus scanning, encrypted quarantine and Windows Health diagnostics.**
 
+**Supported Windows target:** Windows 10 22H2 x64 (build 19045) and newer Windows 11 builds. Older Windows 10 releases and 32-bit Windows are unsupported.
+
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
 > **Pre-release:** 2.0.0 alpha 24
