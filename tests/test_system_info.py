@@ -94,3 +94,22 @@ def test_human_report_contains_key_sections():
     assert "26100.1234" in report
     assert "Secure Boot   : yes" in report
     assert "TPM present   : yes" in report
+
+
+
+def test_windows_10_22h2_x64_is_supported():
+    status = system_info.windows_support_status("Windows 10", "19045", "AMD64")
+    assert status["supported"] is True
+    assert status["minimum_build"] == 19045
+
+
+def test_older_windows_10_build_is_not_supported():
+    status = system_info.windows_support_status("Windows 10", "19044", "AMD64")
+    assert status["supported"] is False
+    assert status["reason"] == "windows-build-too-old"
+
+
+def test_windows_x86_is_not_supported():
+    status = system_info.windows_support_status("Windows 10", "19045", "x86")
+    assert status["supported"] is False
+    assert status["reason"] == "x64-required"

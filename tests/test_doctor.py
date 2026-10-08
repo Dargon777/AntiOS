@@ -53,3 +53,33 @@ def test_doctor_registry_read_error_warns():
 
     assert result["exit_code"] == 1
     assert any(item["id"] == "registry-read" and item["level"] == "warn" for item in result["checks"])
+
+
+
+def test_doctor_accepts_supported_windows_10():
+    data = _scan(generation="Windows 10")
+    data["system"]["windows"]["full_build"] = "19045.5000"
+    data["system"]["windows"]["support"] = {
+        "supported": True,
+        "minimum": "Windows 10 22H2 x64 (build 19045)",
+    }
+    result = diagnose(data)
+    assert any(
+        item["id"] == "windows-version" and item["level"] == "ok"
+        for item in result["checks"]
+    )
+
+
+def test_doctor_warns_for_older_windows_10():
+    data = _scan(generation="Windows 10")
+    data["system"]["windows"]["full_build"] = "19044.1"
+    data["system"]["windows"]["support"] = {
+        "supported": False,
+        "minimum": "Windows 10 22H2 x64 (build 19045)",
+    }
+    result = diagnose(data)
+    assert result["exit_code"] == 1
+    assert any(
+        item["id"] == "windows-version" and item["level"] == "warn"
+        for item in result["checks"]
+    )

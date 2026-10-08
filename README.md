@@ -4,9 +4,11 @@
 
 **Resident protection, independent antivirus scanning, encrypted quarantine and Windows Health diagnostics.**
 
+**Supported Windows target:** Windows 10 22H2 x64 (build 19045) and newer Windows 11 builds. Older Windows 10 releases and 32-bit Windows are unsupported.
+
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 24
+> **Pre-release:** 2.0.0 alpha 25
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -279,7 +281,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a24-py3-none-any.whl
+python -m pip install .\antios-2.0.0a25-py3-none-any.whl
 antios-gui
 ```
 

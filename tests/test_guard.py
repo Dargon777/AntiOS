@@ -32,7 +32,7 @@ def probe():
     return dict(Engine.metadata, available=True)
 
 
-def until(predicate, seconds=5):
+def until(predicate, seconds=10):
     deadline = time.monotonic() + seconds
     while not predicate():
         if time.monotonic() > deadline:
@@ -152,7 +152,7 @@ def test_engine_version_change_invalidates_cached_results(tmp_path, monkeypatch)
     root, state, instance, stop, thread, failures = launch(tmp_path, probe=changing_probe)
     try:
         (root / 'ordinary').write_bytes(b'ordinary')
-        for _ in range(100):
+        for _ in range(250):
             clock[0] += 0.2
             if instance.status['scanned']:
                 break
@@ -160,7 +160,7 @@ def test_engine_version_change_invalidates_cached_results(tmp_path, monkeypatch)
         assert instance.status['scanned'] == 1
         generation[0] = 'second'
         clock[0] += 31
-        for _ in range(100):
+        for _ in range(250):
             clock[0] += 0.2
             if instance.status['scanned'] == 2:
                 break

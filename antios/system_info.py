@@ -14,6 +14,45 @@ from .windows_process import hidden_process_kwargs, system_executable
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
+MIN_SUPPORTED_WINDOWS_BUILD = 19045
+SUPPORTED_WINDOWS_BASELINE = "Windows 10 22H2 x64 (build 19045)"
+
+
+def windows_support_status(
+    generation: str | None,
+    build: str | int | None,
+    architecture: str | None,
+) -> dict[str, Any]:
+    """Return the explicit desktop Windows support boundary for AntiOS."""
+    try:
+        build_number = int(str(build)) if build is not None else None
+    except (TypeError, ValueError):
+        build_number = None
+
+    arch = str(architecture or "").strip()
+    x64 = arch.casefold() in {"amd64", "x86_64"}
+    desktop = generation in {"Windows 10", "Windows 11"}
+
+    if not desktop:
+        reason = "desktop-windows-required"
+    elif not x64:
+        reason = "x64-required"
+    elif build_number is None:
+        reason = "build-unknown"
+    elif build_number < MIN_SUPPORTED_WINDOWS_BUILD:
+        reason = "windows-build-too-old"
+    else:
+        reason = None
+
+    return {
+        "supported": reason is None,
+        "reason": reason,
+        "minimum": SUPPORTED_WINDOWS_BASELINE,
+        "minimum_build": MIN_SUPPORTED_WINDOWS_BUILD,
+        "build": build_number,
+        "architecture": arch or None,
+    }
+
 
 def _registry_map(backend: RegistryBackend) -> dict[str, Any]:
     result: dict[str, Any] = {}
@@ -138,15 +177,18 @@ def collect_system_info(
     if full_build and ubr is not None:
         full_build = f"{full_build}.{ubr}"
 
+    architecture = platform.machine() or None
+    generation = infer_windows_generation(reg.get("ProductName"), build)
+
     return {
         "host": {
             "computer_name": socket.gethostname(),
             "user": getpass.getuser(),
-            "architecture": platform.machine() or None,
+            "architecture": architecture,
             "processor": platform.processor() or None,
         },
         "windows": {
-            "generation": infer_windows_generation(reg.get("ProductName"), build),
+            "generation": generation,
             "product_name": reg.get("ProductName"),
             "edition_id": reg.get("EditionID"),
             "display_version": reg.get("DisplayVersion"),
@@ -157,6 +199,7 @@ def collect_system_info(
             "registered_owner": reg.get("RegisteredOwner"),
             "platform_release": platform.release(),
             "platform_version": platform.version(),
+            "support": windows_support_status(generation, build, architecture),
         },
         "security": {
             "secure_boot": secure_boot_status(runner=runner),
