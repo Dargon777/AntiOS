@@ -16,7 +16,8 @@ Alpha 24 now:
 - terminates only an orphaned `AntiOS-Guard.exe` whose full image path matches
   the managed installation;
 - fails explicitly if the previous Guard task cannot be stopped;
-- verifies that the replacement task actually remains running.
+- verifies that the replacement task actually remains running;
+- makes the manual **Start Guard** action repair/bootstrap the managed ClamAV engine before starting resident protection.
 
 ## Upgrade cleanup
 
