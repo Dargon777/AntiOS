@@ -157,3 +157,29 @@ def test_window_close_exits_if_tray_is_unavailable():
 
     Dashboard._close(dashboard)
     assert calls == ["exit"]
+
+
+
+def test_manual_guard_enable_repairs_engine_before_resident_start(monkeypatch):
+    from antios.config import AppConfig
+    from antios.dashboard import Dashboard
+    from antios import resident
+
+    calls = []
+    dashboard = Dashboard.__new__(Dashboard)
+    dashboard.config = AppConfig()
+    dashboard._persist_config = lambda: calls.append("persist")
+    dashboard._heal_managed_engine = lambda: calls.append("engine") or {"action": "ready"}
+    monkeypatch.setattr(
+        resident,
+        "ensure_resident_guard",
+        lambda: calls.append("guard") or {"state": "monitoring", "running": True},
+    )
+
+    result = Dashboard.set_resident_protection_enabled(dashboard, True)
+
+    assert calls == ["persist", "engine", "guard"]
+    assert result["enabled"] is True
+    assert result["engine"]["action"] == "ready"
+    assert result["guard"]["state"] == "monitoring"
+    assert dashboard.config.protection.resident_enabled is True
