@@ -1,42 +1,25 @@
-# AntiOS v2.0.0 alpha 24
+# AntiOS v2.0.0 alpha 25
 
-Alpha 24 fixes a Resident Guard lifecycle deadlock that could survive upgrades.
+Alpha 25 defines the supported desktop Windows baseline down to Windows 10 22H2 x64.
 
-## Stale Guard recovery
+## Windows 10 support target
 
-A Guard with a stale heartbeat can still be alive and hold `guard.lock`.
-Previous builds marked that state as `unresponsive` / `running=false` before
-processing a stop request, so the old run could remain alive while every new
-Guard instance failed with an already-running lock.
+AntiOS now treats **Windows 10 22H2 x64, build 19045** as the minimum supported desktop Windows version. Windows 11 remains supported. Older Windows 10 builds and 32-bit Windows are outside the supported target.
 
-Alpha 24 now:
+System inventory now records an explicit compatibility result, and `doctor` reports unsupported Windows builds instead of merely identifying the Windows generation.
 
-- preserves the stale run identity long enough to send a cooperative stop request;
-- stops an existing Scheduled Task before replacing its definition;
-- terminates only an orphaned `AntiOS-Guard.exe` whose full image path matches
-  the managed installation;
-- fails explicitly if the previous Guard task cannot be stopped;
-- verifies that the replacement task actually remains running;
-- makes the manual **Start Guard** action repair/bootstrap the managed ClamAV engine before starting resident protection.
+## Packaging alignment
 
-## Upgrade cleanup
+The Microsoft Store package minimum version is aligned to Windows 10 build 19045.
 
-The Windows installer now removes the previous Resident Guard startup task
-before replacing binaries and normalizes the task again with the newly
-installed script. This is intended to recover machines upgraded from builds
-where Guard stop/uninstall was incomplete.
+The experimental native filter INF is also aligned to build 19045+ instead of being restricted to build 26100. The native filter is compiled against the base Windows 10 API contract so accidental dependencies on newer Windows-only declarations are caught by the native build.
 
-## Startup diagnostics
+The native filter remains experimental and still requires its existing production signing, altitude and validation gates.
 
-If Guard fails before it can publish a heartbeat, it writes a bounded
-`startup-error.json` in the Guard state directory. Resident startup surfaces a
-recent error instead of leaving the UI with only a generic inactive state.
+## Compatibility validation
 
-## Release validation
+CI adds a legacy Windows API proxy job on the older Windows Server 2019 runner. This is intentionally **not** presented as Windows 10 certification; it is an extra regression check against accidentally introducing newer Win32 dependencies.
 
-The Windows release workflow now starts the packaged
-`AntiOS-Guard.exe run --policy`, waits for a live heartbeat, sends a real stop
-request and verifies a clean exit. This covers the resident executable path that
-previous release smoke tests did not exercise.
+A real Windows 10 22H2 build 19045 VM or physical-machine acceptance run is still required before calling Windows 10 field-validated.
 
 Microsoft Defender configuration remains unchanged.
