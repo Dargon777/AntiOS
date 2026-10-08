@@ -31,9 +31,9 @@ jobs:
         run: python -m pytest tests/test_clamav_integration.py -v
 
 
-  legacy-windows-api-proxy:
-    name: legacy Windows API proxy (not Win10 certification)
-    runs-on: windows-2019
+  windows10-api-proxy:
+    name: Windows 10-era API proxy (not Win10 certification)
+    runs-on: windows-2022
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Show runner version
+      - name: Show proxy runner version
         shell: pwsh
         run: |
           Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsBuildNumber | Format-List
