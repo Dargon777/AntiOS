@@ -126,3 +126,34 @@ def test_guard_startup_uninstall_does_not_require_executable():
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+
+def test_recent_guard_startup_error_is_reported(tmp_path, monkeypatch):
+    local = tmp_path / "Local"
+    error = local / "AntiOS" / "Guard" / "startup-error.json"
+    error.parent.mkdir(parents=True)
+    error.write_text(json.dumps({
+        "schema": 1,
+        "kind": "antios-guard-startup-error",
+        "at": resident.time.time(),
+        "error_type": "ValueError",
+        "error": "broken policy",
+    }), encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    assert resident._read_recent_startup_error() == "ValueError: broken policy"
+
+
+def test_old_guard_startup_error_is_ignored(tmp_path, monkeypatch):
+    local = tmp_path / "Local"
+    error = local / "AntiOS" / "Guard" / "startup-error.json"
+    error.parent.mkdir(parents=True)
+    error.write_text(json.dumps({
+        "schema": 1,
+        "kind": "antios-guard-startup-error",
+        "at": resident.time.time() - 1000,
+        "error_type": "RuntimeError",
+        "error": "old failure",
+    }), encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    assert resident._read_recent_startup_error() is None
