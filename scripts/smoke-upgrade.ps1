@@ -79,33 +79,34 @@ try {
     Assert-Version -Executable $cli -Expected $ExpectedPreviousVersion
 
     New-Item -ItemType Directory -Force $configDir | Out-Null
-    @'
-[general]
-computer_name_prefix = "LAB"
-backup_path = "antios-backup.json"
-color = "auto"
-
-[logging]
-level = "INFO"
-file = ""
-
-[ui]
-language = "pl"
-theme = "light"
-
-[cleanup]
-old_days = 91
-large_mb = 321
-duplicate_min_mb = 7
-remember_folder = false
-last_path = ""
-
-[protection]
-resident_enabled = false
-
-[updates]
-auto_update = false
-'@ | Set-Content -LiteralPath $configPath -Encoding utf8NoBOM
+    $configLines = @(
+        '[general]',
+        'computer_name_prefix = "LAB"',
+        'backup_path = "antios-backup.json"',
+        'color = "auto"',
+        '',
+        '[logging]',
+        'level = "INFO"',
+        'file = ""',
+        '',
+        '[ui]',
+        'language = "pl"',
+        'theme = "light"',
+        '',
+        '[cleanup]',
+        'old_days = 91',
+        'large_mb = 321',
+        'duplicate_min_mb = 7',
+        'remember_folder = false',
+        'last_path = ""',
+        '',
+        '[protection]',
+        'resident_enabled = false',
+        '',
+        '[updates]',
+        'auto_update = false'
+    )
+    [string]::Join([Environment]::NewLine, $configLines) | Set-Content -LiteralPath $configPath -Encoding utf8NoBOM
 
     $configHashBefore = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
 
