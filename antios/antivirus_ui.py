@@ -105,38 +105,58 @@ class AntivirusPanel:
         except Exception:
             pass
 
+
     def _build(self) -> None:
         tk, outer = self.app.tk, self.parent
         outer.grid_columnconfigure(0, weight=1)
-        outer.grid_rowconfigure(2, weight=1, minsize=210)
+        outer.grid_rowconfigure(3, weight=1, minsize=230)
 
-        # Protection hero.
+        # Large protection hero. The orbit uses a restrained phi-like sequence
+        # of radii to echo the Overview without turning status into decoration.
         self.hero = self._card(outer)
         self.hero.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        self.hero.grid_columnconfigure(1, weight=1)
+        self.hero.grid_columnconfigure(2, weight=1)
+        self.hero.grid_columnconfigure(3, minsize=235)
 
         self.hero_accent = tk.Frame(self.hero, bg=self.palette["warn"], width=4)
-        self.hero_accent.grid(row=0, column=0, rowspan=2, sticky="ns")
+        self.hero_accent.grid(row=0, column=0, sticky="ns")
+
+        visual = tk.Canvas(
+            self.hero,
+            width=190,
+            height=175,
+            bg=self.palette["surface"],
+            highlightthickness=0,
+            bd=0,
+        )
+        visual.grid(row=0, column=1, padx=(18, 8), pady=14)
+        for box, start, extent, width in [
+            ((12, 8, 178, 174), 205, 268, 3),
+            ((29, 25, 161, 157), 18, 245, 2),
+            ((48, 44, 142, 138), 215, 215, 2),
+            ((64, 60, 126, 122), 45, 175, 1),
+        ]:
+            visual.create_arc(*box, start=start, extent=extent, style="arc",
+                              outline=self.palette["accent"], width=width)
+        visual.create_oval(58, 54, 132, 128, fill=self.palette["accent_soft"],
+                           outline=self.palette["accent"], width=2)
+        visual.create_text(95, 91, text="✓", fill=self.palette["accent"],
+                           font=("Segoe UI", 30, "bold"))
 
         hero_text = tk.Frame(self.hero, bg=self.palette["surface"])
-        hero_text.grid(row=0, column=1, sticky="nsew", padx=20, pady=17)
+        hero_text.grid(row=0, column=2, sticky="nsew", padx=(10, 18), pady=24)
 
         kicker_row = tk.Frame(hero_text, bg=self.palette["surface"])
         kicker_row.pack(fill="x")
         self.protection_dot = tk.Label(
-            kicker_row,
-            text="●",
-            bg=self.palette["surface"],
-            fg=self.palette["warn"],
-            font=("Segoe UI", 10, "bold"),
+            kicker_row, text="●", bg=self.palette["surface"],
+            fg=self.palette["warn"], font=("Segoe UI", 9, "bold")
         )
         self.protection_dot.pack(side="left", padx=(0, 7))
         self.protection_kicker = tk.Label(
-            kicker_row,
-            text=self.t("resident_title"),
-            bg=self.palette["surface"],
-            fg=self.palette["muted_2"],
-            font=("Segoe UI Semibold", 8),
+            kicker_row, text=self.t("resident_title"),
+            bg=self.palette["surface"], fg=self.palette["muted_2"],
+            font=("Segoe UI Semibold", 8)
         )
         self.protection_kicker.pack(side="left")
 
@@ -145,10 +165,10 @@ class AntivirusPanel:
             text=self.t("protection_off"),
             bg=self.palette["surface"],
             fg=self.palette["text"],
-            font=("Segoe UI", 19, "bold"),
+            font=("Segoe UI Variable Display", 24, "bold"),
             anchor="w",
         )
-        self.protection_title.pack(fill="x", pady=(4, 3))
+        self.protection_title.pack(fill="x", pady=(6, 4))
         self.protection_detail = tk.Label(
             hero_text,
             text=self.t("protection_off_detail"),
@@ -157,31 +177,106 @@ class AntivirusPanel:
             font=("Segoe UI", 9),
             anchor="w",
             justify="left",
+            wraplength=600,
         )
         self.protection_detail.pack(fill="x")
 
-        self.engine_chip = tk.Label(
-            self.hero,
-            text=self.t("managed_engine"),
-            bg=self.palette["surface_alt"],
-            fg=self.palette["muted"],
-            font=("Segoe UI Semibold", 8),
-            padx=12,
-            pady=7,
+        hero_actions = tk.Frame(hero_text, bg=self.palette["surface"])
+        hero_actions.pack(fill="x", pady=(16, 0))
+        self.guard_start_button = self.app._button(
+            hero_actions, self.t("guard_start"), self._guard_toggle, kind="primary"
         )
-        self.engine_chip.grid(row=0, column=2, sticky="ne", padx=18, pady=18)
+        self.guard_start_button.pack(side="left")
+        self.incident_button = self.app._button(
+            hero_actions, self.t("incident_viewer_button"), self._incident_history, kind="secondary"
+        )
+        self.incident_button.pack(side="left", padx=(8, 0))
+        self.guard_history_button = self.incident_button
+        self.buttons.extend((self.guard_start_button, self.incident_button))
 
-        # Primary work cards.
-        primary = tk.Frame(outer, bg=self.palette["bg"])
-        primary.grid(row=1, column=0, sticky="ew", pady=(0, 12))
-        primary.grid_columnconfigure(0, weight=3, uniform="av-primary")
-        primary.grid_columnconfigure(1, weight=2, uniform="av-primary")
+        score = tk.Frame(self.hero, bg=self.palette["surface_soft"])
+        score.grid(row=0, column=3, sticky="nsew", padx=(0, 18), pady=18)
+        tk.Label(
+            score,
+            text="УРОВЕНЬ ЗАЩИТЫ" if self.app.language == "ru" else "PROTECTION LEVEL",
+            bg=self.palette["surface_soft"],
+            fg=self.palette["muted_2"],
+            font=("Segoe UI Semibold", 8),
+        ).pack(pady=(20, 7))
+        self.protection_score = tk.Label(
+            score,
+            text="—",
+            bg=self.palette["surface_soft"],
+            fg=self.palette["warn"],
+            font=("Segoe UI Variable Display", 31, "bold"),
+        )
+        self.protection_score.pack()
+        self.engine_chip = tk.Label(
+            score,
+            text=self.t("managed_engine"),
+            bg=self.palette["surface_soft"],
+            fg=self.palette["muted"],
+            font=("Segoe UI", 8),
+            padx=10,
+            pady=6,
+        )
+        self.engine_chip.pack(pady=(8, 16))
 
-        scan_card = self._card(primary)
+        # Four truthful protection component cards.
+        components = tk.Frame(outer, bg=self.palette["bg"])
+        components.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        for col in range(4):
+            components.grid_columnconfigure(col, weight=1, uniform="av-component")
+
+        cards = [
+            ("◇", "Guard" if self.app.language != "ru" else "Guard · защита",
+             self.t("resident_hint"), "guard_component_status"),
+            ("⌁", "Behavior analysis" if self.app.language != "ru" else "Анализ поведения",
+             "Detect-only behavioral correlation" if self.app.language != "ru" else "Корреляция поведения без скрытых действий", "behavior_component_status"),
+            ("⌕", "File monitoring" if self.app.language != "ru" else "Проверка файлов",
+             self.t("scan_hint"), "file_component_status"),
+            ("◈", "Engine & signatures" if self.app.language != "ru" else "Движок и сигнатуры",
+             "Managed ClamAV runtime" if self.app.language != "ru" else "Управляемый движок ClamAV", "engine_component_status"),
+        ]
+        for col, (icon, title, detail, attr) in enumerate(cards):
+            card = self._card(components)
+            card.grid(row=0, column=col, sticky="nsew",
+                      padx=(0 if col == 0 else 5, 0 if col == 3 else 5))
+            tk.Label(
+                card, text=icon, bg=self.palette["surface"],
+                fg=self.palette["accent"] if col < 2 else self.palette["info"],
+                font=("Segoe UI", 16, "bold")
+            ).pack(anchor="w", padx=15, pady=(14, 7))
+            tk.Label(
+                card, text=title, bg=self.palette["surface"], fg=self.palette["text"],
+                font=("Segoe UI Semibold", 9)
+            ).pack(anchor="w", padx=15)
+            status_label = tk.Label(
+                card,
+                text="Проверяем…" if self.app.language == "ru" else "Checking…",
+                bg=self.palette["surface"],
+                fg=self.palette["muted"],
+                font=("Segoe UI", 8),
+            )
+            status_label.pack(anchor="w", padx=15, pady=(4, 5))
+            tk.Label(
+                card, text=detail, bg=self.palette["surface"], fg=self.palette["muted_2"],
+                font=("Segoe UI", 8), justify="left", wraplength=240
+            ).pack(anchor="w", padx=15, pady=(0, 14))
+            setattr(self, attr, status_label)
+
+        self.guard_state_label = self.guard_component_status
+
+        # Scan + engine/workflow row.
+        work = tk.Frame(outer, bg=self.palette["bg"])
+        work.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        work.grid_columnconfigure(0, weight=3, uniform="av-work")
+        work.grid_columnconfigure(1, weight=2, uniform="av-work")
+
+        scan_card = self._card(work)
         scan_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         scan_body = tk.Frame(scan_card, bg=self.palette["surface"])
-        scan_body.pack(fill="both", expand=True, padx=18, pady=15)
-
+        scan_body.pack(fill="both", expand=True, padx=17, pady=15)
         tk.Label(
             scan_body,
             text=self.t("scan_title"),
@@ -194,31 +289,24 @@ class AntivirusPanel:
             text=self.t("scan_hint"),
             bg=self.palette["surface"],
             fg=self.palette["muted"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 11))
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(2, 10))
 
         target = tk.Frame(scan_body, bg=self.palette["surface_alt"])
         target.pack(fill="x", pady=(0, 10))
         target_left = tk.Frame(target, bg=self.palette["surface_alt"])
         target_left.pack(side="left", fill="x", expand=True, padx=12, pady=9)
         tk.Label(
-            target_left,
-            text=self.t("scan_target"),
-            bg=self.palette["surface_alt"],
-            fg=self.palette["muted_2"],
-            font=("Segoe UI Semibold", 8),
+            target_left, text=self.t("scan_target"),
+            bg=self.palette["surface_alt"], fg=self.palette["muted_2"],
+            font=("Segoe UI Semibold", 8)
         ).pack(anchor="w")
         self.scan_path_label = tk.Label(
-            target_left,
-            text=str(self.app.antivirus_path),
-            bg=self.palette["surface_alt"],
-            fg=self.palette["text"],
-            font=("Segoe UI", 9),
-            anchor="w",
-            justify="left",
+            target_left, text=str(self.app.antivirus_path),
+            bg=self.palette["surface_alt"], fg=self.palette["text"],
+            font=("Segoe UI", 8), anchor="w", justify="left"
         )
         self.scan_path_label.pack(fill="x", pady=(2, 0))
-        # Backward-compatible alias used by older tests/integrations.
         self._path_text = self.scan_path_label
 
         choose = tk.Frame(scan_body, bg=self.palette["surface"])
@@ -231,87 +319,47 @@ class AntivirusPanel:
             choose, self.t("folder"), lambda: self._choose(True), kind="secondary"
         )
         folder_button.pack(side="left", padx=(7, 0))
-        self.scan_button = self.app._button(
-            choose, self.t("scan"), self._scan, kind="primary"
-        )
+        self.scan_button = self.app._button(choose, self.t("scan"), self._scan, kind="primary")
         self.scan_button.pack(side="right")
-        self.cancel_button = self.app._button(
-            choose, self.t("stop"), self._cancel, kind="danger"
-        )
+        self.cancel_button = self.app._button(choose, self.t("stop"), self._cancel, kind="danger")
         self.cancel_button.pack(side="right", padx=(0, 7))
         self.buttons.extend((file_button, folder_button, self.scan_button))
 
         self.status = tk.Label(
-            scan_body,
-            text=self.t("ready"),
-            bg=self.palette["surface"],
-            fg=self.palette["muted"],
-            font=("Segoe UI", 8),
-            anchor="w",
-            justify="left",
+            scan_body, text=self.t("ready"),
+            bg=self.palette["surface"], fg=self.palette["muted"],
+            font=("Segoe UI", 8), anchor="w", justify="left"
         )
         self.status.pack(fill="x", pady=(10, 0))
 
-        guard_card = self._card(primary)
-        guard_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        guard_body = tk.Frame(guard_card, bg=self.palette["surface"])
-        guard_body.pack(fill="both", expand=True, padx=18, pady=15)
-
+        state_card = self._card(work)
+        state_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        state_body = tk.Frame(state_card, bg=self.palette["surface"])
+        state_body.pack(fill="both", expand=True, padx=17, pady=15)
         tk.Label(
-            guard_body,
-            text=self.t("resident_title"),
-            bg=self.palette["surface"],
-            fg=self.palette["text"],
-            font=("Segoe UI", 12, "bold"),
+            state_body,
+            text="Состояние компонентов" if self.app.language == "ru" else "Component status",
+            bg=self.palette["surface"], fg=self.palette["text"],
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor="w")
-        tk.Label(
-            guard_body,
-            text=self.t("resident_hint"),
-            bg=self.palette["surface"],
-            fg=self.palette["muted"],
-            font=("Segoe UI", 9),
-            justify="left",
-        ).pack(anchor="w", pady=(2, 12))
-
-        self.guard_state_label = tk.Label(
-            guard_body,
-            text=self.t("guard_inactive_short"),
-            bg=self.palette["surface"],
-            fg=self.palette["warn"],
-            font=("Segoe UI Semibold", 10),
-            anchor="w",
-        )
-        self.guard_state_label.pack(fill="x", pady=(0, 10))
-
-        guard_actions = tk.Frame(guard_body, bg=self.palette["surface"])
-        guard_actions.pack(fill="x")
-        self.guard_start_button = self.app._button(
-            guard_actions, self.t("guard_start"), self._guard_toggle, kind="primary"
-        )
-        self.guard_start_button.pack(side="left")
-        self.incident_button = self.app._button(
-            guard_actions, self.t("incident_viewer_button"), self._incident_history,
-            kind="secondary"
-        )
-        self.incident_button.pack(side="left", padx=(7, 0))
-        # Backward-compatible alias for integrations that referenced the old
-        # Guard history button directly.
-        self.guard_history_button = self.incident_button
-        self.buttons.extend((self.guard_start_button, self.incident_button))
-
         self.guard_status = tk.Label(
-            guard_body,
+            state_body,
             text=self.t("guard_status", state="…", count=0),
-            bg=self.palette["surface"],
-            fg=self.palette["muted_2"],
-            font=("Segoe UI", 8),
-            anchor="w",
+            bg=self.palette["surface"], fg=self.palette["muted"],
+            font=("Segoe UI", 8), anchor="nw", justify="left", wraplength=430
         )
-        self.guard_status.pack(fill="x", pady=(10, 0))
+        self.guard_status.pack(fill="x", pady=(8, 10))
+        self.provider_status = tk.Label(
+            state_body,
+            text=self.t("managed_engine"),
+            bg=self.palette["surface_alt"], fg=self.palette["text"],
+            font=("Segoe UI Semibold", 8), anchor="w", padx=10, pady=8
+        )
+        self.provider_status.pack(fill="x")
 
-        # Results.
+        # Results and quarantine.
         results = self._card(outer)
-        results.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
+        results.grid(row=3, column=0, sticky="nsew", pady=(0, 10))
         results.grid_rowconfigure(1, weight=1)
         results.grid_columnconfigure(0, weight=1)
 
@@ -319,7 +367,6 @@ class AntivirusPanel:
         results_header.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 8))
         tabs = tk.Frame(results_header, bg=self.palette["surface"])
         tabs.pack(side="left")
-
         self.findings_tab = self.app._button(
             tabs, self.t("findings"), lambda: self._show("findings"), kind="secondary"
         )
@@ -328,14 +375,10 @@ class AntivirusPanel:
             tabs, self.t("vault"), lambda: self._show("vault"), kind="secondary"
         )
         self.vault_tab.pack(side="left", padx=(6, 0))
-
         self.results_hint = tk.Label(
-            results_header,
-            text=self.t("results_empty"),
-            bg=self.palette["surface"],
-            fg=self.palette["muted_2"],
-            font=("Segoe UI", 8),
-            anchor="e",
+            results_header, text=self.t("results_empty"),
+            bg=self.palette["surface"], fg=self.palette["muted_2"],
+            font=("Segoe UI", 8), anchor="e"
         )
         self.results_hint.pack(side="right")
 
@@ -347,7 +390,7 @@ class AntivirusPanel:
             table,
             columns=("kind", "name", "path"),
             show="headings",
-            height=8,
+            height=7,
             selectmode="browse",
             style="AntiOS.Treeview",
         )
@@ -364,8 +407,7 @@ class AntivirusPanel:
         self.tree.bind("<Double-1>", lambda _event: self._details())
 
         actions = tk.Frame(outer, bg=self.palette["bg"])
-        actions.grid(row=3, column=0, sticky="ew")
-
+        actions.grid(row=4, column=0, sticky="ew")
         self.quarantine_button = self.app._button(
             actions, self.t("quarantine"), self._quarantine, kind="secondary"
         )
@@ -374,99 +416,62 @@ class AntivirusPanel:
             actions, self.t("restore"), self._restore, kind="secondary"
         )
         self.restore_button.pack(side="left", padx=(7, 0))
-
         self.advanced_button = self.app._button(
             actions, self.t("advanced"), self._toggle_advanced, kind="secondary"
         )
         self.advanced_button.pack(side="right")
         self.export_button = self.app._button(
-            actions, self.t("export"), self._export, kind="secondary"
+            actions, self.t("export"), self._export, kind="ghost"
         )
         self.export_button.pack(side="right", padx=(0, 7))
 
-        # Hidden advanced area.
+        # Advanced diagnostics stay available but visually secondary.
         self.advanced_frame = self._card(outer)
         advanced = tk.Frame(self.advanced_frame, bg=self.palette["surface"])
         advanced.pack(fill="both", expand=True, padx=18, pady=14)
-
         advanced_header = tk.Frame(advanced, bg=self.palette["surface"])
         advanced_header.pack(fill="x")
         advanced_text = tk.Frame(advanced_header, bg=self.palette["surface"])
         advanced_text.pack(side="left", fill="x", expand=True)
         tk.Label(
-            advanced_text,
-            text=self.t("advanced_title"),
-            bg=self.palette["surface"],
-            fg=self.palette["text"],
-            font=("Segoe UI", 11, "bold"),
+            advanced_text, text=self.t("advanced_title"),
+            bg=self.palette["surface"], fg=self.palette["text"],
+            font=("Segoe UI", 11, "bold")
         ).pack(anchor="w")
         tk.Label(
-            advanced_text,
-            text=self.t("advanced_hint"),
-            bg=self.palette["surface"],
-            fg=self.palette["muted"],
-            font=("Segoe UI", 8),
+            advanced_text, text=self.t("advanced_hint"),
+            bg=self.palette["surface"], fg=self.palette["muted"],
+            font=("Segoe UI", 8)
         ).pack(anchor="w", pady=(2, 10))
-        close_advanced = self.app._button(
-            advanced_header,
-            self.t("advanced_hide"),
-            self._toggle_advanced,
-            kind="secondary",
-        )
-        close_advanced.pack(side="right", padx=(12, 0))
+        self.app._button(
+            advanced_header, self.t("advanced_hide"), self._toggle_advanced, kind="ghost"
+        ).pack(side="right", padx=(12, 0))
 
         engine_row = tk.Frame(advanced, bg=self.palette["surface"])
         engine_row.pack(fill="x", pady=(0, 8))
         tk.Label(
-            engine_row,
-            text=self.t("engine"),
-            bg=self.palette["surface"],
-            fg=self.palette["muted_2"],
-            font=("Segoe UI Semibold", 8),
-            width=18,
-            anchor="w",
+            engine_row, text=self.t("engine"),
+            bg=self.palette["surface"], fg=self.palette["muted_2"],
+            font=("Segoe UI Semibold", 8), width=18, anchor="w"
         ).pack(side="left")
-        self.provider_status = tk.Label(
-            engine_row,
-            text=self.t("managed_engine"),
-            bg=self.palette["surface"],
-            fg=self.palette["text"],
-            font=("Segoe UI", 9),
-            anchor="w",
-        )
-        self.provider_status.pack(side="left", fill="x", expand=True)
         repair_button = self.app._button(
-            engine_row,
-            self.t("repair_protection"),
-            self._repair_protection,
-            kind="secondary",
+            engine_row, self.t("repair_protection"), self._repair_protection, kind="secondary"
         )
-        repair_button.pack(side="right", padx=(10, 0))
+        repair_button.pack(side="right")
         self.buttons.append(repair_button)
 
         signature_row = tk.Frame(advanced, bg=self.palette["surface"])
         signature_row.pack(fill="x", pady=(0, 8))
         tk.Label(
-            signature_row,
-            text=self.t("signature_title"),
-            bg=self.palette["surface"],
-            fg=self.palette["muted_2"],
-            font=("Segoe UI Semibold", 8),
-            width=18,
-            anchor="w",
+            signature_row, text=self.t("signature_title"),
+            bg=self.palette["surface"], fg=self.palette["muted_2"],
+            font=("Segoe UI Semibold", 8), width=18, anchor="w"
         ).pack(side="left")
         self.path_label = tk.Label(
             signature_row,
-            text=(
-                str(self.app.antivirus_signatures)
-                if self.app.antivirus_signatures
-                else self.t("signatures_builtin")
-            ),
-            bg=self.palette["surface"],
-            fg=self.palette["text"],
-            font=("Segoe UI", 8),
-            anchor="w",
-            justify="left",
+            text=str(self.app.antivirus_signatures) if self.app.antivirus_signatures else self.t("signatures_builtin"),
+            bg=self.palette["surface"], fg=self.palette["text"],
+            font=("Segoe UI", 8), anchor="w", justify="left"
         )
         self.path_label.pack(side="left", fill="x", expand=True)
         signature_button = self.app._button(
@@ -478,13 +483,9 @@ class AntivirusPanel:
         defender_row = tk.Frame(advanced, bg=self.palette["surface"])
         defender_row.pack(fill="x")
         tk.Label(
-            defender_row,
-            text=self.t("defender_tools"),
-            bg=self.palette["surface"],
-            fg=self.palette["muted_2"],
-            font=("Segoe UI Semibold", 8),
-            width=18,
-            anchor="w",
+            defender_row, text=self.t("defender_tools"),
+            bg=self.palette["surface"], fg=self.palette["muted_2"],
+            font=("Segoe UI Semibold", 8), width=18, anchor="w"
         ).pack(side="left")
         defender_buttons = tk.Frame(defender_row, bg=self.palette["surface"])
         defender_buttons.pack(side="left")
