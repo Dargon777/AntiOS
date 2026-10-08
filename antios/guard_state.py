@@ -104,9 +104,13 @@ def read_guard_state(folder=None, *, history=False, stop=False):
         heartbeat = status.get("heartbeat", 0)
         if not isinstance(heartbeat, (int, float)) or not math.isfinite(heartbeat):
             raise ValueError("Invalid Guard heartbeat")
-        if status.get("running") and abs(time.time() - heartbeat) > 90:
+        published_running = status.get("running") is True
+        if published_running and abs(time.time() - heartbeat) > 90:
             status.update(state="unresponsive", running=False)
-        if stop and status.get("running"):
+        # A stale heartbeat does not prove that the process is gone. It may be
+        # hung while still holding guard.lock, so preserve the published run
+        # identity for a cooperative stop request before reporting it stopped.
+        if stop and published_running:
             if not isinstance(status.get("run_id"), str) or not status["run_id"]:
                 raise ValueError("Invalid Guard run identity")
             db.execute("INSERT OR REPLACE INTO control VALUES(1, ?)", (status["run_id"],))
