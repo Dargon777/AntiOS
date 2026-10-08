@@ -14,7 +14,7 @@ The Microsoft Store package minimum version is aligned to Windows 10 build 19045
 
 The experimental native filter INF is also aligned to build 19045+ instead of being restricted to build 26100. The native filter is compiled against the base Windows 10 API contract so accidental dependencies on newer Windows-only declarations are caught by the native build.
 
-The native filter remains experimental and still requires its existing production signing, altitude and validation gates.
+The native filter no longer depends on the newer `IoOpenDriverRegistryKey` declaration for configuration access; it uses the Windows 10-compatible DriverEntry registry path with `ZwOpenKey`. The native filter remains experimental and still requires its existing production signing, altitude and validation gates.
 
 ## Compatibility validation
 
