@@ -151,6 +151,37 @@ $action = New-ScheduledTaskAction -Execute $exe -Argument ('run --policy "{0}"' 
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
 $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+# Reconfiguring resident protection must never leave an old task instance
+# holding guard.lock. Stop the existing task first, then replace its definition.
+$existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($existing) {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        $state = (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State
+        if ($state -ne 'Running') { break }
+    }
+}
+
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AntiOS selected-folder post-write monitoring with trusted ClamD binding; no pre-execution blocking.' -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
+
+# The Guard is long-lived. If the task immediately returns to Ready, capture the
+# Task Scheduler result now instead of leaving the GUI with a stale heartbeat.
+$observedRunning = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    Start-Sleep -Milliseconds 200
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task -and $task.State -eq 'Running') {
+        $observedRunning = $true
+        break
+    }
+}
+if (-not $observedRunning) {
+    $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+    $last = if ($info) { $info.LastTaskResult } else { '(unavailable)' }
+    throw "Resident Guard task exited during startup. LastTaskResult=$last"
+}
+
 Write-Output "Started '$taskName'. Stop: AntiOS-Guard.exe stop. Remove startup: guard-startup.ps1 -Uninstall -Apply."
