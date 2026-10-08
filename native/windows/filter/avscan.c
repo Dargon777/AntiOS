@@ -36,24 +36,9 @@ DriverEntry (
     _In_ PUNICODE_STRING RegistryPath
     );
 
-typedef
-NTSTATUS
-(*PFN_IoOpenDriverRegistryKey) (
-    PDRIVER_OBJECT     DriverObject,
-    DRIVER_REGKEY_TYPE RegKeyType,
-    ACCESS_MASK        DesiredAccess,
-    ULONG              Flags,
-    PHANDLE            DriverRegKey
-    );
-
-PFN_IoOpenDriverRegistryKey
-AvGetIoOpenDriverRegistryKey (
-    VOID
-    );
-
 NTSTATUS
 AvOpenServiceParametersKey (
-    _In_ PDRIVER_OBJECT DriverObject,
+    _Unreferenced_parameter_ PDRIVER_OBJECT DriverObject,
     _In_ PUNICODE_STRING ServiceRegistryPath,
     _Out_ PHANDLE ServiceParametersKey
     );
@@ -233,7 +218,6 @@ AvSendUnloadingToUser (
 
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text(INIT, DriverEntry)
-#pragma alloc_text(INIT, AvGetIoOpenDriverRegistryKey)
 #pragma alloc_text(INIT, AvOpenServiceParametersKey)
 #pragma alloc_text(INIT, AvSetConfiguration)
 #pragma alloc_text(PAGE, AvUnload)
@@ -3145,24 +3129,6 @@ Return Value:
     return STATUS_SUCCESS;
 }
 
-PFN_IoOpenDriverRegistryKey
-AvGetIoOpenDriverRegistryKey (
-    VOID
-    )
-{
-    static PFN_IoOpenDriverRegistryKey pIoOpenDriverRegistryKey = NULL;
-    UNICODE_STRING FunctionName = {0};
-
-    if (pIoOpenDriverRegistryKey == NULL) {
-
-        RtlInitUnicodeString(&FunctionName, L"IoOpenDriverRegistryKey");
-
-        pIoOpenDriverRegistryKey = (PFN_IoOpenDriverRegistryKey)MmGetSystemRoutineAddress(&FunctionName);
-    }
-
-    return pIoOpenDriverRegistryKey;
-}
-
 NTSTATUS
 AvOpenServiceParametersKey (
     _In_ PDRIVER_OBJECT DriverObject,
@@ -3193,77 +3159,48 @@ Return Value:
 --*/
 {
     NTSTATUS Status;
-    PFN_IoOpenDriverRegistryKey pIoOpenDriverRegistryKey;
     UNICODE_STRING Subkey;
     HANDLE ParametersKey = NULL;
     HANDLE ServiceRegKey = NULL;
     OBJECT_ATTRIBUTES Attributes;
 
     //
-    //  Open the parameters key to read values from the INF, using the API to
-    //  open the key if possible
+    //  Use the DriverEntry registry path supplied by the kernel. This path is
+    //  available on the Windows 10 baseline and avoids a hard dependency on
+    //  IoOpenDriverRegistryKey / DRIVER_REGKEY_TYPE, which were introduced
+    //  after the oldest Windows versions AntiOS targets.
     //
 
-    pIoOpenDriverRegistryKey = AvGetIoOpenDriverRegistryKey();
+    InitializeObjectAttributes( &Attributes,
+                                ServiceRegistryPath,
+                                OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+                                NULL,
+                                NULL );
 
-    if (pIoOpenDriverRegistryKey != NULL) {
+    Status = ZwOpenKey( &ServiceRegKey,
+                        KEY_READ,
+                        &Attributes );
 
-        //
-        //  Open the parameters key using the API
-        //
+    if (!NT_SUCCESS( Status )) {
 
-        Status = pIoOpenDriverRegistryKey( DriverObject,
-                                           DriverRegKeyParameters,
-                                           KEY_READ,
-                                           0,
-                                           &ParametersKey );
+        goto OpenServiceParametersKeyCleanup;
+    }
 
-        if (!NT_SUCCESS( Status )) {
+    RtlInitUnicodeString( &Subkey, L"Parameters" );
 
-            goto OpenServiceParametersKeyCleanup;
-        }
+    InitializeObjectAttributes( &Attributes,
+                                &Subkey,
+                                OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+                                ServiceRegKey,
+                                NULL );
 
-    } else {
+    Status = ZwOpenKey( &ParametersKey,
+                        KEY_READ,
+                        &Attributes );
 
-        //
-        //  Open specified service root key
-        //
+    if (!NT_SUCCESS( Status )) {
 
-        InitializeObjectAttributes( &Attributes,
-                                    ServiceRegistryPath,
-                                    OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
-                                    NULL,
-                                    NULL );
-
-        Status = ZwOpenKey( &ServiceRegKey,
-                            KEY_READ,
-                            &Attributes );
-
-        if (!NT_SUCCESS( Status )) {
-
-            goto OpenServiceParametersKeyCleanup;
-        }
-
-        //
-        //  Open the parameters key relative to service key path
-        //
-
-        RtlInitUnicodeString( &Subkey, L"Parameters" );
-
-        InitializeObjectAttributes( &Attributes,
-                                    &Subkey,
-                                    OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
-                                    ServiceRegKey,
-                                    NULL );
-
-        Status = ZwOpenKey( &ParametersKey,
-                            KEY_READ,
-                            &Attributes );
-
-        if (!NT_SUCCESS( Status )) {
-
-            goto OpenServiceParametersKeyCleanup;
-        }
+        goto OpenServiceParametersKeyCleanup;
     }
 
     //
