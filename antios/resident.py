@@ -137,6 +137,20 @@ def disable_resident_guard() -> dict:
     return dict(result, configured=False, previous=current)
 
 
+def _read_recent_startup_error(max_age: float = 120.0) -> str | None:
+    path = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "AntiOS" / "Guard" / "startup-error.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        at = float(payload.get("at", 0))
+        if time.time() - at > max_age:
+            return None
+        error = str(payload.get("error") or "").strip()
+        kind = str(payload.get("error_type") or "").strip()
+        return f"{kind}: {error}" if kind and error else error or None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
 def ensure_resident_guard(*, wait_seconds: float = 6.0) -> dict:
     """Self-heal persistent Guard startup for an installed build."""
     current = read_guard_state()
@@ -154,7 +168,12 @@ def ensure_resident_guard(*, wait_seconds: float = 6.0) -> dict:
     if not latest.get("running") or str(latest.get("state")) not in _ACTIVE_STATES:
         state = str(latest.get("state") or "unknown")
         engine = latest.get("engine") if isinstance(latest.get("engine"), dict) else {}
-        detail = latest.get("last_error") or latest.get("detail") or engine.get("detail")
+        detail = (
+            latest.get("last_error")
+            or latest.get("detail")
+            or engine.get("detail")
+            or _read_recent_startup_error()
+        )
         message = f"Resident Guard did not start successfully (state={state})"
         if detail:
             message += f": {str(detail)[:500]}"
