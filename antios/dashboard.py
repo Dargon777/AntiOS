@@ -2483,14 +2483,22 @@ class Dashboard:
                 fg=THEME["ok"],
             )
 
-    def _create_nav_button(self, key: str, text: str) -> None:
+
+    def _create_nav_button(self, key: str, text: str, parent: Any | None = None) -> None:
+        host = parent or self.sidebar
+        holder = self.tk.Frame(host, bg=THEME["sidebar"])
+        holder.pack(fill="x", pady=2)
+        stripe = self.tk.Frame(holder, bg=THEME["sidebar"], width=3)
+        stripe.pack(side="left", fill="y")
+        stripe.pack_propagate(False)
+
         button = self.tk.Button(
-            self.sidebar,
+            holder,
             text=text,
             command=lambda: self.show_page(key),
             anchor="w",
-            padx=22,
-            pady=11,
+            padx=14,
+            pady=12,
             bg=THEME["sidebar"],
             fg=THEME["muted"],
             activebackground=THEME["surface_hover"],
@@ -2500,24 +2508,25 @@ class Dashboard:
             cursor="hand2",
             font=("Segoe UI Semibold", 10),
         )
+        button.pack(side="left", fill="x", expand=True)
         button.bind(
             "<Enter>",
             lambda _event, widget=button, nav_key=key: (
                 widget.configure(bg=THEME["surface_hover"])
-                if self.active_page != nav_key
-                else None
+                if self.active_page != nav_key else None
             ),
         )
         button.bind(
             "<Leave>",
-            lambda _event, widget=button, nav_key=key: widget.configure(
-                bg=THEME["surface_alt"]
-                if self.active_page == nav_key
-                else THEME["sidebar"]
+            lambda _event, widget=button, nav_key=key: (
+                widget.configure(
+                    bg=THEME["accent_soft"] if self.active_page == nav_key else THEME["sidebar"]
+                )
             ),
         )
-        button.pack(fill="x", padx=8, pady=1)
         self.nav_buttons[key] = button
+        self.nav_frames[key] = (holder, stripe)
+
 
     def _button(
         self,
@@ -2535,8 +2544,13 @@ class Dashboard:
         elif kind == "danger":
             bg = THEME["warn"]
             fg = "#FFFFFF"
-            active_bg = THEME["warn"]
+            active_bg = "#FA7B87"
             border = THEME["warn"]
+        elif kind == "ghost":
+            bg = THEME["surface"]
+            fg = THEME["info"]
+            active_bg = THEME["surface_hover"]
+            border = THEME["surface"]
         else:
             bg = THEME["surface_alt"]
             fg = THEME["text"]
@@ -2547,7 +2561,7 @@ class Dashboard:
             parent,
             text=text,
             command=command,
-            padx=14,
+            padx=16,
             pady=9,
             bg=bg,
             fg=fg,
@@ -2556,7 +2570,7 @@ class Dashboard:
             disabledforeground=THEME["muted_2"],
             bd=0,
             relief="flat",
-            highlightthickness=1,
+            highlightthickness=1 if kind != "ghost" else 0,
             highlightbackground=border,
             highlightcolor=border,
             cursor="hand2",
@@ -2567,19 +2581,49 @@ class Dashboard:
             "<Enter>",
             lambda _event, widget=button, color=active_bg: (
                 widget.configure(bg=color)
-                if str(widget.cget("state")) != "disabled"
-                else None
+                if str(widget.cget("state")) != "disabled" else None
             ),
         )
         button.bind(
             "<Leave>",
             lambda _event, widget=button, color=bg: (
                 widget.configure(bg=color)
-                if str(widget.cget("state")) != "disabled"
-                else None
+                if str(widget.cget("state")) != "disabled" else None
             ),
         )
         return button
+
+
+    def _overview_status_row(self, parent: Any, icon: str, title: str, status: str) -> Any:
+        row = self.tk.Frame(parent, bg=THEME["surface"])
+        row.pack(fill="x", padx=16, pady=0)
+        self.tk.Label(
+            row,
+            text=icon,
+            bg=THEME["surface"],
+            fg=THEME["info"],
+            font=("Segoe UI", 12, "bold"),
+            width=2,
+        ).pack(side="left", pady=11)
+        text = self.tk.Frame(row, bg=THEME["surface"])
+        text.pack(side="left", fill="x", expand=True, padx=(8, 8), pady=9)
+        self.tk.Label(
+            text,
+            text=title,
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            font=("Segoe UI Semibold", 9),
+        ).pack(anchor="w")
+        value = self.tk.Label(
+            text,
+            text=status,
+            bg=THEME["surface"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 8),
+        )
+        value.pack(anchor="w", pady=(2, 0))
+        self.tk.Frame(parent, bg=THEME["border_soft"], height=1).pack(fill="x", padx=16)
+        return value
 
     def _text_link(
         self,
@@ -2601,6 +2645,7 @@ class Dashboard:
             font=("Segoe UI", 8),
         )
 
+
     def _metric_card(
         self,
         parent: Any,
@@ -2610,33 +2655,28 @@ class Dashboard:
         multiline: bool = False,
     ) -> dict[str, Any]:
         tk = self.tk
-
         frame = tk.Frame(
             parent,
             bg=THEME["surface"],
             highlightthickness=1,
             highlightbackground=THEME["border"],
         )
-
         header = tk.Frame(frame, bg=THEME["surface"])
-        header.pack(fill="x", padx=20, pady=(18, 8))
-
+        header.pack(fill="x", padx=18, pady=(16, 6))
         tk.Label(
             header,
             text=title,
             bg=THEME["surface"],
             fg=THEME["text"],
-            font=("Segoe UI", 13, "bold"),
+            font=("Segoe UI Semibold", 11),
         ).pack(anchor="w")
-
         tk.Label(
             header,
             text=subtitle,
             bg=THEME["surface"],
             fg=THEME["muted"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 0))
-
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(3, 0))
         value = tk.Label(
             frame,
             text="Checking…",
@@ -2644,10 +2684,9 @@ class Dashboard:
             anchor="nw",
             bg=THEME["surface"],
             fg=THEME["text"],
-            font=("Segoe UI", 15 if not multiline else 11, "bold" if not multiline else "normal"),
+            font=("Segoe UI Variable Display", 16 if not multiline else 10, "bold" if not multiline else "normal"),
         )
-        value.pack(fill="both", expand=True, padx=20, pady=(8, 6))
-
+        value.pack(fill="both", expand=True, padx=18, pady=(8, 5))
         detail = tk.Label(
             frame,
             text="",
@@ -2655,16 +2694,11 @@ class Dashboard:
             anchor="nw",
             bg=THEME["surface"],
             fg=THEME["muted"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 8),
             wraplength=360,
         )
-        detail.pack(fill="x", padx=20, pady=(0, 18))
-
-        return {
-            "frame": frame,
-            "value": value,
-            "detail": detail,
-        }
+        detail.pack(fill="x", padx=18, pady=(0, 16))
+        return {"frame": frame, "value": value, "detail": detail}
 
     def _status_card(
         self,
