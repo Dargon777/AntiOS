@@ -225,3 +225,11 @@ def test_layered_chip_requires_verified_defender_and_antios_engine():
     assert panel.engine_chip.values["text"] == "AntiOS Engine · ClamAV"
     assert panel.engine_chip.values["fg"] == "muted"
     assert panel.protection_detail.values["text"] == "antios-detail"
+
+
+
+def test_unresponsive_guard_is_not_treated_as_active():
+    from antios.antivirus_ui import _ACTIVE_GUARD_STATES
+
+    assert "unresponsive" not in _ACTIVE_GUARD_STATES
+    assert "monitoring" in _ACTIVE_GUARD_STATES

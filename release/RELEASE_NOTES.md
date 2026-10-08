@@ -1,41 +1,26 @@
-# AntiOS v2.0.0 alpha 22
+# AntiOS v2.0.0 alpha 23
 
-Alpha 22 fixes the installed resident-protection lifecycle and makes application
-updates usable from the desktop UI.
+Alpha 23 is a Guard lifecycle hotfix for installed Windows builds.
 
-## Resident protection starts with Windows
+## Guard state is now truthful
 
-The Antivirus Guard control now manages the persistent per-user scheduled task
-instead of launching a one-off folder monitor. When resident protection is
-enabled, an installed AntiOS self-checks the managed ClamAV runtime at startup,
-repairs a stopped or stale repairable engine, refreshes signatures when needed,
-and restores the Resident Guard task.
+A stale Guard heartbeat marked as `unresponsive` is no longer treated as an
+active running Guard by the Antivirus UI. The action changes back to
+**Start Guard** instead of offering to stop a process that is already gone.
 
-Stopping Resident Guard from the Antivirus page now also disables its persistent
-logon task. Starting it again recreates the task and starts protection
-immediately. The advanced Antivirus panel also exposes an explicit
-**Repair protection** action.
+After AntiOS requests Resident Guard startup, it now verifies that the Guard
+actually becomes active and starts publishing a live heartbeat. If startup does
+not succeed, AntiOS reports a startup failure instead of leaving the UI in a
+permanent `unresponsive` state.
 
-This remains layered companion protection: Microsoft Defender is not disabled or
-reconfigured, and AntiOS still does not claim the primary Windows Security
-Center antivirus slot.
+## Stop/uninstall fix
 
-## Desktop updater
+The installed `guard-startup.ps1` no longer evaluates the default
+`AntiOS-Guard.exe` path before processing `-Uninstall`. This fixes the
+PowerShell `Join-Path` / empty `$PSScriptRoot` failure seen when disabling a
+stale Resident Guard.
 
-Settings now contains an Updates section with:
+A Windows regression test now executes the uninstall path without
+`-Executable` so this exact failure is covered by CI.
 
-- automatic GitHub release checking and download for installed builds;
-- a manual **Check for updates** action;
-- a manual **Download update** action;
-- persistent automatic-update preference;
-- a per-release local update cache.
-
-Downloaded Setup files are checked against the release checksum and GitHub asset
-digest. On Windows AntiOS also inspects Authenticode. Unattended installation is
-scheduled only when the Setup signature is valid; unsigned builds may be
-downloaded and verified but are not silently installed.
-
-## Reliability
-
-Alpha 22 adds regression coverage for persistent Resident Guard configuration,
-resident preference persistence and repeated updater-cache downloads.
+Microsoft Defender configuration is unchanged.

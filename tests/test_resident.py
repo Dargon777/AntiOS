@@ -1,6 +1,10 @@
 import json
+import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from antios import resident
 
@@ -79,3 +83,46 @@ def test_disable_resident_guard_stops_and_unregisters(monkeypatch):
     result = resident.disable_resident_guard()
     assert result["configured"] is False
     assert result["previous"]["stop"] is True
+
+
+
+def test_ensure_resident_guard_rejects_stale_unresponsive_state(monkeypatch):
+    states = iter([
+        {"state": "not-running", "running": False},
+        {"state": "unresponsive", "running": False, "detail": "heartbeat stale"},
+    ])
+    monkeypatch.setattr(resident, "read_guard_state", lambda **kwargs: next(states))
+    monkeypatch.setattr(
+        resident,
+        "configure_resident_guard",
+        lambda **kwargs: {"configured": True, "roots": [r"C:\\Users\\Test\\Downloads"]},
+    )
+    with pytest.raises(RuntimeError, match="state=unresponsive"):
+        resident.ensure_resident_guard(wait_seconds=0)
+
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows scheduled-task script")
+def test_guard_startup_uninstall_does_not_require_executable():
+    powershell = resident.system_executable("WindowsPowerShell/v1.0/powershell.exe")
+    script = Path("scripts") / "guard-startup.ps1"
+    completed = subprocess.run(
+        [
+            str(powershell),
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            "-Uninstall",
+            "-Apply",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
