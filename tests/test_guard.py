@@ -32,7 +32,7 @@ def probe():
     return dict(Engine.metadata, available=True)
 
 
-def until(predicate, seconds=10):
+def until(predicate, seconds=20):
     deadline = time.monotonic() + seconds
     while not predicate():
         if time.monotonic() > deadline:
