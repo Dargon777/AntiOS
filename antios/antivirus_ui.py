@@ -26,7 +26,6 @@ _ACTIVE_GUARD_STATES = {
     "monitoring",
     "degraded",
     "attention",
-    "unresponsive",
 }
 _HEALTHY_GUARD_STATES = {"monitoring", "scanning"}
 
