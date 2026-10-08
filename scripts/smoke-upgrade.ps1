@@ -10,7 +10,21 @@ $ErrorActionPreference = "Stop"
 if (-not $ExpectedCurrentVersion) {
     $ExpectedCurrentVersion = (Get-Content ".\release\VERSION" -Raw).Trim()
 }
-if ($ExpectedCurrentVersion -notmatch '^2\.0\.0a(\d+)
+if ($ExpectedCurrentVersion -notmatch '^2\.0\.0a(\d+)$') {
+    throw "Unexpected current alpha version: $ExpectedCurrentVersion"
+}
+$currentAlpha = [int]$Matches[1]
+if ($currentAlpha -le 1) {
+    throw "Upgrade smoke requires a previous alpha release."
+}
+$previousAlpha = $currentAlpha - 1
+if (-not $ExpectedPreviousVersion) {
+    $ExpectedPreviousVersion = "2.0.0a$previousAlpha"
+}
+if (-not $PreviousTag) {
+    $PreviousTag = "v2.0.0-alpha.$previousAlpha"
+}
+
 function Invoke-Setup {
     param(
         [Parameter(Mandatory = $true)][string]$Setup,
