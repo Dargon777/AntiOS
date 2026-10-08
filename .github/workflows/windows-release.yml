@@ -320,6 +320,45 @@ jobs:
         run: |
           .\dist\AntiOS-Guard\AntiOS-Guard.exe status | ConvertFrom-Json | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # Exercise the real packaged resident path, not only the status CLI.
+          $guardSmoke = Join-Path $env:RUNNER_TEMP "AntiOS-Guard-Smoke"
+          Remove-Item -Recurse -Force $guardSmoke -ErrorAction SilentlyContinue
+          $watchRoot = Join-Path $guardSmoke "watched"
+          $stateRoot = Join-Path $guardSmoke "state"
+          New-Item -ItemType Directory -Force $watchRoot, $stateRoot | Out-Null
+          $policyPath = Join-Path $guardSmoke "policy.json"
+          @{ schema = 1; roots = @($watchRoot); auto_quarantine = $false } | ConvertTo-Json | Set-Content -LiteralPath $policyPath -Encoding utf8
+
+          $guardProcess = Start-Process -FilePath ".\dist\AntiOS-Guard\AntiOS-Guard.exe" -ArgumentList @("run", "--policy", $policyPath, "--state-dir", $stateRoot) -WindowStyle Hidden -PassThru
+          $running = $false
+          for ($attempt = 0; $attempt -lt 75; $attempt++) {
+            Start-Sleep -Milliseconds 200
+            if ($guardProcess.HasExited) { break }
+            $raw = & ".\dist\AntiOS-Guard\AntiOS-Guard.exe" status --state-dir $stateRoot
+            if ($LASTEXITCODE -eq 0) {
+              try {
+                $status = $raw | ConvertFrom-Json
+                if ($status.running -eq $true -and $status.state -in @("starting", "monitoring", "degraded", "attention", "scanning")) {
+                  $running = $true
+                  break
+                }
+              } catch {}
+            }
+          }
+          if (-not $running) {
+            if (-not $guardProcess.HasExited) { Stop-Process -Id $guardProcess.Id -Force -ErrorAction SilentlyContinue }
+            throw "Packaged AntiOS-Guard.exe did not publish a live heartbeat."
+          }
+
+          & ".\dist\AntiOS-Guard\AntiOS-Guard.exe" stop --state-dir $stateRoot | ConvertFrom-Json | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $guardProcess.WaitForExit(10000)) {
+            Stop-Process -Id $guardProcess.Id -Force -ErrorAction SilentlyContinue
+            throw "Packaged AntiOS-Guard.exe did not stop after the control request."
+          }
+          if ($guardProcess.ExitCode -ne 0) { throw "Packaged AntiOS-Guard.exe exited with code $($guardProcess.ExitCode)." }
+
           .\dist\AntiOS\AntiOS.exe --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\dist\AntiOS\AntiOS.exe version --json | ConvertFrom-Json | Out-Null
