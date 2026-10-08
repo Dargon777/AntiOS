@@ -215,7 +215,10 @@ def test_journal_has_exclusive_owner_bounded_history_and_stale_status(tmp_path):
         assert state.db.execute('SELECT COUNT(*) FROM events').fetchone()[0] == 1000
         state.publish({'state': 'monitoring', 'running': True, 'heartbeat': time.time()-100, 'run_id': 'old'})
         assert read_guard_state(state.folder)['state'] == 'unresponsive'
-        assert not read_guard_state(state.folder, stop=True).get('stop_requested')
+        stopped = read_guard_state(state.folder, stop=True)
+        assert stopped['state'] == 'unresponsive'
+        assert stopped['running'] is False
+        assert stopped['stop_requested'] is True
     finally:
         other.close()
         state.close()
@@ -795,3 +798,26 @@ def test_guard_builds_incident_graph_from_write_execute_and_scan(tmp_path):
         stop.set()
         thread.join(3)
     assert not failures
+
+
+
+def test_guard_cli_persists_startup_error_before_heartbeat(tmp_path):
+    policy = tmp_path / "broken-policy.json"
+    policy.write_text(json.dumps({
+        "schema": 1,
+        "roots": [str(tmp_path)],
+        "unexpected": True,
+    }), encoding="utf-8")
+    state = tmp_path / "state"
+
+    assert guard.main([
+        "run",
+        "--policy", str(policy),
+        "--state-dir", str(state),
+    ]) == 2
+
+    error_path = state / "startup-error.json"
+    payload = json.loads(error_path.read_text(encoding="utf-8"))
+    assert payload["kind"] == "antios-guard-startup-error"
+    assert payload["error_type"] == "ValueError"
+    assert "Unknown guard policy field" in payload["error"]

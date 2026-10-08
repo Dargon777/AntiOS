@@ -484,7 +484,9 @@ class Dashboard:
         self._persist_config()
         if enabled:
             from .resident import ensure_resident_guard
-            return ensure_resident_guard()
+            engine = self._heal_managed_engine()
+            guard = ensure_resident_guard()
+            return {"enabled": True, "engine": engine, "guard": guard}
         from .resident import disable_resident_guard
         return disable_resident_guard()
 

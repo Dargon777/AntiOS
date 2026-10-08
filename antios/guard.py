@@ -615,6 +615,36 @@ def load_policy(path):
                        engine_service=engine_service)
 
 
+def _startup_error_file(state_dir=None):
+    return Path(state_dir or default_guard_path()).absolute() / "startup-error.json"
+
+
+def _write_startup_error(state_dir, exc):
+    try:
+        path = _startup_error_file(state_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema": 1,
+            "kind": "antios-guard-startup-error",
+            "at": time.time(),
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:2000],
+            "pid": os.getpid(),
+        }
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        temp.replace(path)
+    except OSError:
+        pass
+
+
+def _clear_startup_error(state_dir):
+    try:
+        _startup_error_file(state_dir).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='antios guard', description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -652,11 +682,14 @@ def main(argv=None):
                 observer = tray.set_state
             except Exception:
                 tray = None
+        _clear_startup_error(args.state_dir)
         Guard(policy, args.state_dir, status_observer=observer).run()
         return 0
     except KeyboardInterrupt:
         return 130
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+        state_dir = getattr(args, "state_dir", None) if "args" in locals() else None
+        _write_startup_error(state_dir, exc)
         print(f'AntiOS Guard: {exc}', file=sys.stderr)
         return 2
     finally:
