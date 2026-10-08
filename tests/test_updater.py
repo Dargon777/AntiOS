@@ -10,18 +10,18 @@ def test_latest_alpha_selects_highest_non_draft(monkeypatch):
         {"tag_name": "v2.0.0-alpha.14", "draft": False, "assets": []},
         {"tag_name": "v2.0.0-alpha.99", "draft": True, "assets": []},
         {
-            "tag_name": "v2.0.0-alpha.25",
+            "tag_name": "v2.0.0-alpha.26",
             "draft": False,
             "published_at": "2026-10-04T00:00:00Z",
             "html_url": "https://example.invalid/release",
             "assets": [
-                {"name": "AntiOS-Setup.exe", "browser_download_url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.25/AntiOS-Setup.exe", "size": 5, "digest": None},
+                {"name": "AntiOS-Setup.exe", "browser_download_url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.26/AntiOS-Setup.exe", "size": 5, "digest": None},
             ],
         },
     ])
     result = updater.latest_alpha()
-    assert result["latest_alpha"] == 25
-    assert result["latest_version"] == "2.0.0a25"
+    assert result["latest_alpha"] == 26
+    assert result["latest_version"] == "2.0.0a26"
     assert result["update_available"] is True
 
 
@@ -114,20 +114,20 @@ def test_download_update_can_replace_cached_files(tmp_path, monkeypatch):
     release = {
         "current_version": "2.0.0a21",
         "current_alpha": 21,
-        "latest_alpha": 25,
-        "latest_version": "2.0.0a25",
-        "tag": "v2.0.0-alpha.25",
+        "latest_alpha": 26,
+        "latest_version": "2.0.0a26",
+        "tag": "v2.0.0-alpha.26",
         "published_at": None,
         "html_url": None,
         "update_available": True,
         "assets": {
             "AntiOS-Setup.exe": {
-                "url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.25/AntiOS-Setup.exe",
+                "url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.26/AntiOS-Setup.exe",
                 "size": len(setup_bytes),
                 "digest": f"sha256:{digest}",
             },
             "AntiOS-Setup.exe.sha256": {
-                "url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.25/AntiOS-Setup.exe.sha256",
+                "url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.26/AntiOS-Setup.exe.sha256",
                 "size": 90,
                 "digest": None,
             },
