@@ -969,3 +969,21 @@ _RESPONSE_CENTER_TEXTS = {
 }
 for _locale, _values in _RESPONSE_CENTER_TEXTS.items():
     MESSAGES[_locale].update(_values)
+
+
+# Protection repair action added for installed builds. Other locales fall back
+# to the English catalog until translated.
+MESSAGES["en"]["repair_protection"] = "Repair protection"
+MESSAGES["ru"]["repair_protection"] = "Восстановить защиту"
+
+
+for _language, _label in {
+    "en": "Repair protection",
+    "ru": "Восстановить защиту",
+    "es": "Reparar protección",
+    "zh-CN": "修复防护",
+    "fi": "Korjaa suojaus",
+    "pl": "Napraw ochronę",
+    "mn": "Хамгаалалтыг засах",
+}.items():
+    MESSAGES[_language]["repair_protection"] = _label

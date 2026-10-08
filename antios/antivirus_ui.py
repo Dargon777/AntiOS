@@ -436,6 +436,14 @@ class AntivirusPanel:
             anchor="w",
         )
         self.provider_status.pack(side="left", fill="x", expand=True)
+        repair_button = self.app._button(
+            engine_row,
+            self.t("repair_protection"),
+            self._repair_protection,
+            kind="secondary",
+        )
+        repair_button.pack(side="right", padx=(10, 0))
+        self.buttons.append(repair_button)
 
         signature_row = tk.Frame(advanced, bg=self.palette["surface"])
         signature_row.pack(fill="x", pady=(0, 8))
@@ -606,18 +614,18 @@ class AntivirusPanel:
 
     def _guard_start(self) -> None:
         from tkinter import messagebox
-        from .guard import launch_guard
 
-        path = self.app.antivirus_path
-        if path.is_file():
-            path = path.parent
         if messagebox.askyesno("AntiOS Guard", self.t("guard_confirm")):
-            self._run("guard-action", lambda: launch_guard(path))
+            self._run(
+                "guard-action",
+                lambda: self.app.set_resident_protection_enabled(True),
+            )
 
     def _guard_stop(self) -> None:
-        from .guard_state import read_guard_state
-
-        self._run("guard-action", lambda: read_guard_state(stop=True))
+        self._run(
+            "guard-action",
+            lambda: self.app.set_resident_protection_enabled(False),
+        )
 
     def _incident_history(self) -> None:
         from .guard_state import read_incident_history
@@ -628,6 +636,9 @@ class AntivirusPanel:
         # Compatibility alias: the old raw JSON popup is now the structured
         # Incident Viewer.
         self._incident_history()
+
+    def _repair_protection(self) -> None:
+        self._run("guard-action", self.app.repair_protection)
 
     def _defender(self, action: str) -> None:
         from tkinter import messagebox

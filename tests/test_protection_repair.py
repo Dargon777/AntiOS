@@ -54,3 +54,35 @@ def test_repair_wrapper_apply_and_update_flags(monkeypatch, tmp_path):
     assert result["dry_run"] is False
     assert "-Apply" in captured["command"]
     assert "-UpdateSignatures" in captured["command"]
+
+
+
+def test_bootstrap_wrapper_uses_pinned_manifest(monkeypatch, tmp_path):
+    script = tmp_path / "protection-bootstrap.ps1"
+    manifest = tmp_path / "clamav-windows.json"
+    script.write_text("# fixture")
+    manifest.write_text('{"schema":1}')
+    monkeypatch.setattr(protection_repair, "_bootstrap_script_path", lambda: script)
+    monkeypatch.setattr(protection_repair, "_bootstrap_manifest_path", lambda: manifest)
+    monkeypatch.setattr(protection_repair, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        protection_repair,
+        "system_executable",
+        lambda _relative: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"kind":"antios-protection-bootstrap","dry_run":false,"action":"installed"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(protection_repair.subprocess, "run", fake_run)
+    result = protection_repair.run_protection_bootstrap()
+    assert result["action"] == "installed"
+    assert "-Apply" in captured["command"]
+    assert "-ManifestPath" in captured["command"]
+    assert str(manifest) in captured["command"]

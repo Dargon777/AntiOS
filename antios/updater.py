@@ -116,15 +116,19 @@ def _authenticode(path: Path) -> dict:
     if os.name != "nt":
         raise OSError("Authenticode verification requires Windows")
     powershell = system_executable("WindowsPowerShell/v1.0/powershell.exe")
+    escaped = str(path).replace("'", "''")
     command = (
-        "$s=Get-AuthenticodeSignature -LiteralPath $args[0];"
+        "$ErrorActionPreference='Stop';"
+        "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop;"
+        f"$p='{escaped}';"
+        "$s=Get-AuthenticodeSignature -LiteralPath $p;"
         "[pscustomobject]@{Status=[string]$s.Status;"
         "Subject=if($s.SignerCertificate){$s.SignerCertificate.Subject}else{$null};"
         "Thumbprint=if($s.SignerCertificate){$s.SignerCertificate.Thumbprint}else{$null}}"
         "|ConvertTo-Json -Compress"
     )
     result = subprocess.run(
-        [str(powershell), "-NoProfile", "-NonInteractive", "-Command", command, str(path)],
+        [str(powershell), "-NoProfile", "-NonInteractive", "-Command", command],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -138,7 +142,24 @@ def _authenticode(path: Path) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def download_update(directory: str | Path | None = None, *, require_signature: bool = True) -> dict:
+def default_update_directory(tag: str | None = None) -> Path:
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        root = base / "AntiOS" / "Updates"
+    else:
+        root = Path(tempfile.gettempdir()) / "AntiOS-Updates"
+    if tag:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", tag)
+        root = root / safe
+    return root
+
+
+def download_update(
+    directory: str | Path | None = None,
+    *,
+    require_signature: bool = True,
+    replace_existing: bool = False,
+) -> dict:
     release = latest_alpha()
     if not release["update_available"]:
         return dict(release, downloaded=False)
@@ -153,7 +174,10 @@ def download_update(directory: str | Path | None = None, *, require_signature: b
     setup_path = target_dir / "AntiOS-Setup.exe"
     checksum_path = target_dir / "AntiOS-Setup.exe.sha256"
     if setup_path.exists() or checksum_path.exists():
-        raise FileExistsError("Update destination already contains AntiOS update files")
+        if not replace_existing:
+            raise FileExistsError("Update destination already contains AntiOS update files")
+        setup_path.unlink(missing_ok=True)
+        checksum_path.unlink(missing_ok=True)
 
     try:
         _download(str(checksum["url"]), checksum_path, MAX_CHECKSUM_BYTES)
@@ -167,9 +191,19 @@ def download_update(directory: str | Path | None = None, *, require_signature: b
             raise RuntimeError("GitHub asset digest does not match downloaded Setup")
 
         signature = None
-        if require_signature:
-            signature = _authenticode(setup_path)
-            if signature.get("Status") != "Valid":
+        if require_signature or os.name == "nt":
+            try:
+                signature = _authenticode(setup_path)
+            except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+                if require_signature:
+                    raise
+                signature = {
+                    "Status": "Unavailable",
+                    "Subject": None,
+                    "Thumbprint": None,
+                    "Error": str(exc)[:1000],
+                }
+            if require_signature and signature.get("Status") != "Valid":
                 raise RuntimeError(
                     "Downloaded Setup is not Authenticode-signed with a valid trusted certificate; "
                     "automatic installation is refused"
@@ -182,6 +216,7 @@ def download_update(directory: str | Path | None = None, *, require_signature: b
             signature=signature,
             signature_required_for_install=True,
             install_ready=bool(signature and signature.get("Status") == "Valid"),
+            download_directory=str(target_dir),
         )
     except Exception:
         setup_path.unlink(missing_ok=True)
