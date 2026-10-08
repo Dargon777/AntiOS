@@ -43,6 +43,17 @@ jobs:
           python scripts/build-icons.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Validate hardened build script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path ".\scripts\build-hardened-windows.ps1"), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
       - name: Build hardened binaries
         shell: pwsh
         run: |
