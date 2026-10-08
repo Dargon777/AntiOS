@@ -9,3 +9,9 @@ antios-backup*.json
 
 installer-stage/
 installer-output/
+
+# Never commit commercial/private AntiOS engine source to the public repository.
+proprietary/
+private/
+antios/proprietary/
+antios/private/
