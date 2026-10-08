@@ -1933,3 +1933,19 @@ _UPDATE_SETTINGS = {
 }
 for _language, _messages in _UPDATE_SETTINGS.items():
     TRANSLATIONS[_language].update(_messages)
+
+
+# Alpha 26 premium UI copy. Keep the top-level product language aligned with
+# the endpoint-security positioning instead of the legacy read-only dashboard.
+TRANSLATIONS["en"].update({
+    "brand.subtitle": "Endpoint protection",
+    "page.overview.subtitle": "Protection status, system health and the actions that matter now.",
+    "page.security.subtitle": "Windows security controls and their current protection state.",
+    "page.settings.subtitle": "Tune AntiOS appearance, protection behavior and update delivery.",
+})
+TRANSLATIONS["ru"].update({
+    "brand.subtitle": "Защита устройства",
+    "page.overview.subtitle": "Состояние защиты, системы и важные действия — в одном месте.",
+    "page.security.subtitle": "Защитные механизмы Windows и их текущее состояние.",
+    "page.settings.subtitle": "Настройте внешний вид, поведение защиты и обновления AntiOS.",
+})
