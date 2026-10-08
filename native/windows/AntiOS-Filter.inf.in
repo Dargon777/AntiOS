@@ -11,10 +11,10 @@ PnpLockdown=1
 [DestinationDirs]
 DriverFiles=13
 
-[DefaultInstall.NTamd64.10.0...26100]
+[DefaultInstall.NTamd64.10.0...19045]
 CopyFiles=DriverFiles
 
-[DefaultInstall.NTamd64.10.0...26100.Services]
+[DefaultInstall.NTamd64.10.0...19045.Services]
 AddService=AntiOS-Filter,,DriverService
 
 [DriverService]
