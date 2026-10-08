@@ -179,7 +179,10 @@ def test_real_tk_incident_viewer_renders_history_tree_and_details():
 
     from antios.antivirus_i18n import MESSAGES
 
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Native Tk runtime unavailable: {exc}")
     root.withdraw()
 
     class App:
