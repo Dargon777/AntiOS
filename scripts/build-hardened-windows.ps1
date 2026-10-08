@@ -76,7 +76,7 @@ function Build-HardenedProgram {
     $entryStem = [System.IO.Path]::GetFileNameWithoutExtension($Entry)
     $sourceDist = Join-Path $workRoot "$entryStem.dist"
     if (-not (Test-Path -LiteralPath $sourceDist -PathType Container)) {
-        throw "Nuitka standalone directory missing for $Name: $sourceDist"
+        throw "Nuitka standalone directory missing for ${Name}: $sourceDist"
     }
 
     $targetDist = Join-Path $outputRoot $Name
