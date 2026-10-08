@@ -151,6 +151,20 @@ def ensure_resident_guard(*, wait_seconds: float = 6.0) -> dict:
             break
         time.sleep(0.2)
         latest = read_guard_state()
+    if not latest.get("running") or str(latest.get("state")) not in _ACTIVE_STATES:
+        state = str(latest.get("state") or "unknown")
+        detail = (
+            latest.get("last_error")
+            or latest.get("detail")
+            or latest.get("engine", {}).get("detail")
+            if isinstance(latest.get("engine"), dict)
+            else None
+        )
+        message = f"Resident Guard did not start successfully (state={state})"
+        if detail:
+            message += f": {str(detail)[:500]}"
+        raise RuntimeError(message)
+
     return dict(
         latest,
         startup_configured=True,
