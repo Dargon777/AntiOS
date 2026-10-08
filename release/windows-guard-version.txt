@@ -1,14 +1,14 @@
 VSVersionInfo(
-  ffi=FixedFileInfo(filevers=(2, 0, 25, 0), prodvers=(2, 0, 25, 0),
+  ffi=FixedFileInfo(filevers=(2, 0, 26, 0), prodvers=(2, 0, 26, 0),
                    mask=0x3f, flags=0x2, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[StringFileInfo([StringTable('040904B0', [
     StringStruct('CompanyName', 'DargonITP'),
     StringStruct('FileDescription', 'AntiOS Resident File Monitor'),
-    StringStruct('FileVersion', '2.0.0a25'),
+    StringStruct('FileVersion', '2.0.0a26'),
     StringStruct('InternalName', 'AntiOS-Guard.exe'),
     StringStruct('OriginalFilename', 'AntiOS-Guard.exe'),
     StringStruct('ProductName', 'AntiOS'),
-    StringStruct('ProductVersion', '2.0.0a25'),
+    StringStruct('ProductVersion', '2.0.0a26'),
     StringStruct('LegalCopyright', 'Copyright 2026 Dargon777 and AntiOS contributors')
   ])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])]
 )

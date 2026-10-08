@@ -8,7 +8,7 @@
 
 AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
 
-> **Pre-release:** 2.0.0 alpha 25
+> **Pre-release:** 2.0.0 alpha 26
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -281,7 +281,7 @@ The executables are not Authenticode-signed yet, so Windows SmartScreen may show
 Releases also include a wheel and source distribution.
 
 ```powershell
-python -m pip install .\antios-2.0.0a25-py3-none-any.whl
+python -m pip install .\antios-2.0.0a26-py3-none-any.whl
 antios-gui
 ```
 

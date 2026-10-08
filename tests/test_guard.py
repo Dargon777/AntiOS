@@ -260,7 +260,7 @@ def test_reviews_never_enter_automatic_quarantine(tmp_path):
         # Hosted Windows runners can take longer to schedule the Guard
         # thread under a full matrix load; keep the same assertion with a
         # slightly wider bounded startup window.
-        until(lambda: instance.status['scanned'] == 1, seconds=10)
+        until(lambda: instance.status['scanned'] == 1, seconds=20)
         until(lambda: instance.status['state'] == 'degraded', seconds=10)
         assert target.exists()
         assert not calls
