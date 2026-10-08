@@ -12,6 +12,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ScriptDirectory = if ($PSScriptRoot) {
+    $PSScriptRoot
+} else {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+}
 
 if ($RootsJson) {
     if ($Roots.Count -gt 0) {
@@ -38,8 +43,12 @@ function Stop-ManagedGuardProcess([string]$Path) {
             return
         }
         if ($actual -eq $expected) {
-            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-            Wait-Process -Id $_.Id -Timeout 3 -ErrorAction SilentlyContinue
+            $processId = $_.Id
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+                if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) { break }
+                Start-Sleep -Milliseconds 100
+            }
         }
     }
 }
@@ -54,13 +63,13 @@ if ($Uninstall) {
         Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     }
-    $uninstallExe = if ($Executable) { $Executable } else { Join-Path $PSScriptRoot 'AntiOS-Guard.exe' }
+    $uninstallExe = if ($Executable) { $Executable } else { Join-Path $ScriptDirectory 'AntiOS-Guard.exe' }
     Stop-ManagedGuardProcess $uninstallExe
     return
 }
 
 if (-not $Executable) {
-    $Executable = Join-Path $PSScriptRoot 'AntiOS-Guard.exe'
+    $Executable = Join-Path $ScriptDirectory 'AntiOS-Guard.exe'
 }
 
 $exe = (Resolve-Path -LiteralPath $Executable).Path
