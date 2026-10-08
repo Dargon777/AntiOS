@@ -1,7 +1,7 @@
 # Explicit current-user startup management. Preview by default; no Defender changes.
 [CmdletBinding()]
 param(
-    [string]$Executable = (Join-Path $PSScriptRoot 'AntiOS-Guard.exe'),
+    [string]$Executable,
     [string[]]$Roots = @(),
     [string]$RootsJson,
     [ValidateSet('notify', 'quarantine')][string]$Mode = 'notify',
@@ -39,6 +39,10 @@ if ($Uninstall) {
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     }
     return
+}
+
+if (-not $Executable) {
+    $Executable = Join-Path $PSScriptRoot 'AntiOS-Guard.exe'
 }
 
 $exe = (Resolve-Path -LiteralPath $Executable).Path
