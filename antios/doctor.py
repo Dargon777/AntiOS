@@ -52,7 +52,20 @@ def diagnose(scan_data: dict[str, Any]) -> dict[str, Any]:
 
     generation = windows.get("generation")
     build = windows.get("full_build") or windows.get("build")
-    if generation:
+    support = windows.get("support") if isinstance(windows.get("support"), dict) else None
+    if support is not None:
+        if support.get("supported") is True:
+            checks.append(CheckResult(
+                "windows-version", "ok", "Windows support",
+                f"Detected {generation}, build {build or 'unknown'}; supported by AntiOS.",
+            ))
+        else:
+            checks.append(CheckResult(
+                "windows-version", "warn", "Windows support",
+                f"Detected {generation or 'unknown Windows'}, build {build or 'unknown'}; "
+                f"AntiOS supports {support.get('minimum', 'Windows 10 22H2 x64 or newer')}.",
+            ))
+    elif generation:
         checks.append(CheckResult(
             "windows-version", "ok", "Windows detection",
             f"Detected {generation}, build {build or 'unknown'}.",
