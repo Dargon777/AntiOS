@@ -620,6 +620,20 @@ class Dashboard:
             name="AntiOSUpdateCheck",
         ).start()
 
+
+    def _open_update_folder(self) -> None:
+        from .updater import default_update_directory
+        target = None
+        if isinstance(self.update_payload, dict):
+            value = self.update_payload.get("download_directory")
+            if value:
+                target = Path(str(value))
+        if target is None:
+            target = default_update_directory()
+        target.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            os.startfile(str(target))  # type: ignore[attr-defined]
+
     def _check_updates_now(self) -> None:
         self._start_update_worker(download=False, automatic=False)
 
@@ -660,6 +674,7 @@ class Dashboard:
         except Exception:
             pass
 
+
     def set_protection_state(self, status: dict[str, Any] | str) -> None:
         state = status.get("state") if isinstance(status, dict) else status
         state = str(state or "not-running")
@@ -667,6 +682,20 @@ class Dashboard:
         _apply_window_icon(self.root, state)
         if self._dashboard_tray is not None:
             self._dashboard_tray.set_state(state)
+
+        if hasattr(self, "overview_guard_status"):
+            healthy = state in {"monitoring", "scanning"}
+            starting = state == "starting"
+            if healthy:
+                text = "Активен · мониторинг" if self.language == "ru" else "Active · monitoring"
+                color = THEME["ok"]
+            elif starting:
+                text = "Запускается…" if self.language == "ru" else "Starting…"
+                color = THEME["info"]
+            else:
+                text = "Не активен" if self.language == "ru" else "Not active"
+                color = THEME["warn"]
+            self.overview_guard_status.configure(text=text, fg=color)
 
     def _close(self) -> None:
         if self._dashboard_tray is not None and self._dashboard_tray.running:
@@ -1741,97 +1770,71 @@ class Dashboard:
             )
         )
 
-    def _render_cleanup_result(self, result: dict[str, Any]) -> None:
-        summary = result.get("summary", {})
-        self.cleanup_summary["duplicate_groups"].configure(
-            text=str(summary.get("duplicate_groups", 0))
+
+    def _render(self, data: dict[str, Any]) -> None:
+        self.data = data
+        self.refresh_button.configure(state="normal", text=self.t("button.refresh"))
+
+        evaluation = data["evaluation"]
+        health = data["health"]
+        scan_data = data["scan"]
+        overall = evaluation.get("overall")
+        summary = evaluation.get("summary", {})
+
+        if overall == "needs-attention":
+            kicker = (self.t("overview.needs_attention"), THEME["warn"])
+            score = max(20, 100 - int(summary.get("warn", 0)) * 24 - int(summary.get("advisory", 0)) * 8)
+            score_note = "Требуется внимание" if self.language == "ru" else "Attention required"
+        elif overall == "review":
+            kicker = (self.t("overview.review"), THEME["review"])
+            score = max(45, 100 - int(summary.get("advisory", 0)) * 8)
+            score_note = "Есть рекомендации" if self.language == "ru" else "Recommendations available"
+        else:
+            kicker = (self.t("overview.all_clear"), THEME["ok"])
+            score = 100
+            score_note = "Критичных проблем не обнаружено" if self.language == "ru" else "No critical issues detected"
+
+        self.hero_kicker.configure(text=kicker[0], fg=kicker[1])
+        self.status_title.configure(text=evaluation.get("headline", "Check complete"))
+        self.status_summary.configure(
+            text=self.t("overview.completed", count=summary.get("info", 0))
         )
-        self.cleanup_summary["duplicate_reclaimable_bytes"].configure(
-            text=format_bytes(summary.get("duplicate_reclaimable_bytes", 0))
-        )
-        for key in ("old_large_files", "installer_archives", "empty_files"):
-            self.cleanup_summary[key].configure(text=str(summary.get(key, 0)))
+        if hasattr(self, "overview_score"):
+            self.overview_score.configure(text=str(score), fg=kicker[1])
+            self.overview_score_note.configure(text=score_note)
 
-        self.cleanup_tree.delete(*self.cleanup_tree.get_children())
-        rows: dict[str, dict[str, Any]] = {}
+        for row in self._check_rows:
+            row.destroy()
+        self._check_rows.clear()
+        for check in evaluation.get("checks", [])[:8]:
+            card = self._status_card(self.check_scroll.inner, check)
+            card.pack(fill="x", pady=(0, 8))
+            self._check_rows.append(card)
 
-        def add_row(
-            path: str,
-            kind: str,
-            size: int,
-            modified: float | None,
-        ) -> None:
-            row = rows.setdefault(
-                path,
-                {
-                    "types": [],
-                    "size": size,
-                    "modified": modified,
-                    "path": path,
-                },
+        defender = health.get("defender", {}) if isinstance(health, dict) else {}
+        defender_ok = defender.get("antivirus_enabled") is True and defender.get("real_time_protection") is True
+        if hasattr(self, "overview_defender_status"):
+            self.overview_defender_status.configure(
+                text=("Активен · совместная работа" if defender_ok else "Требует проверки")
+                     if self.language == "ru" else
+                     ("Active · coexistence" if defender_ok else "Needs review"),
+                fg=THEME["ok"] if defender_ok else THEME["review"],
             )
-            if kind not in row["types"]:
-                row["types"].append(kind)
-
-        snapshots = result.get("candidate_snapshots", {})
-        for group in result.get("duplicates", []):
-            for path in group.get("paths", []):
-                snapshot = snapshots.get(str(path), {})
-                modified_ns = snapshot.get("modified_ns")
-                modified = (float(modified_ns) / 1_000_000_000
-                            if isinstance(modified_ns, int) else None)
-                add_row(
-                    str(path),
-                    self.t("cleanup.type.duplicate"),
-                    int(group.get("size_bytes", 0)),
-                    modified,
-                )
-
-        for key, type_key in (
-            ("old_large_files", "cleanup.type.old"),
-            ("installer_archives", "cleanup.type.archive"),
-            ("empty_files", "cleanup.type.empty"),
-        ):
-            for item in result.get(key, []):
-                add_row(
-                    str(item.get("path", "")),
-                    self.t(type_key),
-                    int(item.get("size_bytes", 0)),
-                    item.get("modified"),
-                )
-
-        ordered = sorted(
-            rows.values(),
-            key=lambda row: (-int(row["size"]), str(row["path"]).casefold()),
-        )
-        self.cleanup_rows = {}
-        for index, row in enumerate(ordered):
-            modified = (
-                datetime.fromtimestamp(float(row["modified"])).strftime("%Y-%m-%d")
-                if isinstance(row["modified"], (int, float))
-                else "—"
+        if hasattr(self, "overview_signature_status"):
+            age = defender.get("signature_age_days")
+            signature_text = (
+                f"Defender: {age} дн." if self.language == "ru" and age is not None
+                else f"Defender: {age} d" if age is not None
+                else ("Управляется движком" if self.language == "ru" else "Managed by engine")
             )
-            iid = f"cleanup-{index}"
-            self.cleanup_rows[iid] = row
-            self.cleanup_tree.insert(
-                "",
-                "end",
-                iid=iid,
-                values=(
-                    " + ".join(row["types"]),
-                    format_bytes(row["size"]),
-                    modified,
-                    row["path"],
-                ),
-                tags=("even" if index % 2 == 0 else "odd",),
-            )
+            self.overview_signature_status.configure(text=signature_text)
+        if hasattr(self, "overview_engine_status"):
+            self.overview_engine_status.configure(text=f"v{__version__} · Alpha", fg=THEME["accent"])
 
-        self.cleanup_tree.tag_configure("even", background=THEME["surface"])
-        self.cleanup_tree.tag_configure("odd", background=THEME["surface_alt"])
-        self._cleanup_selection_changed()
-
-        if not ordered:
-            self.cleanup_status.configure(text=self.t("cleanup.none"))
+        self._render_security(scan_data, health)
+        self.antivirus_panel.render_provider_status(health)
+        self._render_startup(health)
+        self._render_system(scan_data, health)
 
     def _selected_cleanup_rows(self) -> list[dict[str, Any]]:
         return [
@@ -2017,77 +2020,112 @@ class Dashboard:
         # never presents stale files as still selectable.
         self._start_cleanup_scan()
 
+
     def _build_settings(self, parent: Any) -> None:
         tk = self.tk
-
         scroll = ScrollFrame(parent, tk)
         scroll.frame.pack(fill="both", expand=True)
         body = scroll.inner
 
-        appearance = tk.Frame(
+        tabs = tk.Frame(
             body,
             bg=THEME["surface"],
             highlightthickness=1,
             highlightbackground=THEME["border"],
         )
-        appearance.pack(fill="x", pady=(0, 14))
+        tabs.pack(fill="x", pady=(0, 12))
+        for index, label in enumerate([
+            "Основные" if self.language == "ru" else "General",
+            "Обновления" if self.language == "ru" else "Updates",
+            "Защита" if self.language == "ru" else "Protection",
+            "Дополнительно" if self.language == "ru" else "Advanced",
+        ]):
+            active = index == 0
+            tk.Label(
+                tabs,
+                text=label,
+                bg=THEME["accent_soft"] if active else THEME["surface"],
+                fg=THEME["accent"] if active else THEME["muted"],
+                font=("Segoe UI Semibold", 9),
+                padx=18,
+                pady=11,
+            ).pack(side="left", padx=(1 if index == 0 else 0, 0), pady=1)
 
+        grid = tk.Frame(body, bg=THEME["bg"])
+        grid.pack(fill="both", expand=True)
+        grid.grid_columnconfigure(0, weight=3, uniform="settings")
+        grid.grid_columnconfigure(1, weight=2, uniform="settings")
+
+        left = tk.Frame(grid, bg=THEME["bg"])
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        right = tk.Frame(grid, bg=THEME["bg"])
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        appearance = tk.Frame(
+            left,
+            bg=THEME["surface"],
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
+        appearance.pack(fill="x", pady=(0, 12))
         tk.Label(
             appearance,
-            text=self.t("settings.appearance.title"),
+            text="Внешний вид и язык" if self.language == "ru" else "Appearance and language",
             bg=THEME["surface"],
             fg=THEME["text"],
-            font=("Segoe UI", 14, "bold"),
-        ).pack(anchor="w", padx=20, pady=(18, 2))
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w", padx=18, pady=(17, 3))
         tk.Label(
             appearance,
-            text=self.t("settings.appearance.subtitle"),
+            text="Настройте оформление AntiOS под систему и рабочее окружение."
+                 if self.language == "ru" else
+                 "Match AntiOS to your system and workspace.",
             bg=THEME["surface"],
             fg=THEME["muted"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=20, pady=(0, 16))
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=18, pady=(0, 14))
 
         appearance_grid = tk.Frame(appearance, bg=THEME["surface"])
-        appearance_grid.pack(fill="x", padx=20, pady=(0, 20))
+        appearance_grid.pack(fill="x", padx=18, pady=(0, 18))
         appearance_grid.grid_columnconfigure(0, weight=1)
         appearance_grid.grid_columnconfigure(1, weight=1)
 
-        language_group = tk.Frame(appearance_grid, bg=THEME["surface"])
-        language_group.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        auto_language = self.t("settings.language.auto")
+        self.language_display_to_code = {auto_language: "auto"}
+        self.language_display_to_code.update({label: code for code, label in LANGUAGE_NAMES.items()})
+        language_value = auto_language if self.language_setting == "auto" else LANGUAGE_NAMES.get(self.language_setting, auto_language)
+        self.language_var = tk.StringVar(value=language_value)
+
+        lang_group = tk.Frame(appearance_grid, bg=THEME["surface"])
+        lang_group.grid(row=0, column=0, sticky="ew", padx=(0, 7))
         tk.Label(
-            language_group,
+            lang_group,
             text=self.t("settings.language"),
             bg=THEME["surface"],
             fg=THEME["muted_2"],
             font=("Segoe UI Semibold", 8),
         ).pack(anchor="w", pady=(0, 6))
-
-        auto_language = self.t("settings.language.auto")
-        self.language_display_to_code = {auto_language: "auto"}
-        self.language_display_to_code.update(
-            {label: code for code, label in LANGUAGE_NAMES.items()}
-        )
-        language_value = (
-            auto_language
-            if self.language_setting == "auto"
-            else LANGUAGE_NAMES.get(self.language_setting, auto_language)
-        )
-        self.language_var = tk.StringVar(value=language_value)
         self.language_combo = self.ttk.Combobox(
-            language_group,
+            lang_group,
             textvariable=self.language_var,
             values=list(self.language_display_to_code),
             state="readonly",
             style="AntiOS.TCombobox",
         )
         self.language_combo.pack(fill="x")
-        self.language_combo.bind(
-            "<<ComboboxSelected>>",
-            self._on_language_selected,
-        )
+        self.language_combo.bind("<<ComboboxSelected>>", self._on_language_selected)
 
+        self.theme_display_to_code = {
+            self.t("settings.theme.system"): "system",
+            self.t("settings.theme.dark"): "dark",
+            self.t("settings.theme.light"): "light",
+        }
+        theme_code_to_display = {code: label for label, code in self.theme_display_to_code.items()}
+        self.theme_var = tk.StringVar(
+            value=theme_code_to_display.get(self.theme_mode, self.t("settings.theme.system"))
+        )
         theme_group = tk.Frame(appearance_grid, bg=THEME["surface"])
-        theme_group.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+        theme_group.grid(row=0, column=1, sticky="ew", padx=(7, 0))
         tk.Label(
             theme_group,
             text=self.t("settings.theme"),
@@ -2095,21 +2133,6 @@ class Dashboard:
             fg=THEME["muted_2"],
             font=("Segoe UI Semibold", 8),
         ).pack(anchor="w", pady=(0, 6))
-
-        self.theme_display_to_code = {
-            self.t("settings.theme.system"): "system",
-            self.t("settings.theme.dark"): "dark",
-            self.t("settings.theme.light"): "light",
-        }
-        theme_code_to_display = {
-            code: label for label, code in self.theme_display_to_code.items()
-        }
-        self.theme_var = tk.StringVar(
-            value=theme_code_to_display.get(
-                self.theme_mode,
-                self.t("settings.theme.system"),
-            )
-        )
         self.theme_combo = self.ttk.Combobox(
             theme_group,
             textvariable=self.theme_var,
@@ -2118,74 +2141,97 @@ class Dashboard:
             style="AntiOS.TCombobox",
         )
         self.theme_combo.pack(fill="x")
-        self.theme_combo.bind(
-            "<<ComboboxSelected>>",
-            self._on_theme_selected,
-        )
+        self.theme_combo.bind("<<ComboboxSelected>>", self._on_theme_selected)
 
-        cleanup = tk.Frame(
-            body,
+        protection = tk.Frame(
+            left,
             bg=THEME["surface"],
             highlightthickness=1,
             highlightbackground=THEME["border"],
         )
-        cleanup.pack(fill="x", pady=(0, 14))
+        protection.pack(fill="x", pady=(0, 12))
+        tk.Label(
+            protection,
+            text="Запуск защиты" if self.language == "ru" else "Protection startup",
+            bg=THEME["surface"],
+            fg=THEME["text"],
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w", padx=18, pady=(17, 3))
+        tk.Label(
+            protection,
+            text="Резидентная защита запускается вместе с Windows и восстанавливается автоматически."
+                 if self.language == "ru" else
+                 "Resident protection starts with Windows and self-heals when possible.",
+            bg=THEME["surface"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 8),
+            wraplength=600,
+            justify="left",
+        ).pack(anchor="w", padx=18, pady=(0, 12))
+        protection_row = tk.Frame(protection, bg=THEME["surface_alt"])
+        protection_row.pack(fill="x", padx=18, pady=(0, 18))
+        tk.Label(
+            protection_row,
+            text="●",
+            bg=THEME["surface_alt"],
+            fg=THEME["accent"] if self.config.protection.resident_enabled else THEME["muted_2"],
+            font=("Segoe UI", 10, "bold"),
+        ).pack(side="left", padx=(12, 8), pady=12)
+        tk.Label(
+            protection_row,
+            text=("Автозапуск Resident Guard включён" if self.config.protection.resident_enabled
+                  else "Автозапуск Resident Guard выключен")
+                 if self.language == "ru" else
+                 ("Resident Guard auto-start is enabled" if self.config.protection.resident_enabled
+                  else "Resident Guard auto-start is disabled"),
+            bg=THEME["surface_alt"],
+            fg=THEME["text"],
+            font=("Segoe UI Semibold", 9),
+        ).pack(side="left", fill="x", expand=True)
+        self._button(
+            protection_row,
+            self.t("button.open"),
+            lambda: self.show_page("antivirus"),
+            kind="ghost",
+        ).pack(side="right", padx=10, pady=6)
 
+        cleanup = tk.Frame(
+            left,
+            bg=THEME["surface"],
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
+        cleanup.pack(fill="x")
         tk.Label(
             cleanup,
             text=self.t("settings.cleanup.title"),
             bg=THEME["surface"],
             fg=THEME["text"],
-            font=("Segoe UI", 14, "bold"),
-        ).pack(anchor="w", padx=20, pady=(18, 2))
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w", padx=18, pady=(17, 3))
         tk.Label(
             cleanup,
             text=self.t("settings.cleanup.subtitle"),
             bg=THEME["surface"],
             fg=THEME["muted"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=20, pady=(0, 16))
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=18, pady=(0, 14))
 
         cleanup_grid = tk.Frame(cleanup, bg=THEME["surface"])
-        cleanup_grid.pack(fill="x", padx=20)
+        cleanup_grid.pack(fill="x", padx=18)
         for column in range(3):
-            cleanup_grid.grid_columnconfigure(column, weight=1, uniform="settings_cleanup")
+            cleanup_grid.grid_columnconfigure(column, weight=1, uniform="cleanup")
 
-        self.cleanup_old_days_var = tk.StringVar(
-            value=str(self.config.cleanup.old_days)
-        )
-        self.cleanup_large_mb_var = tk.StringVar(
-            value=str(self.config.cleanup.large_mb)
-        )
-        self.cleanup_duplicate_min_var = tk.StringVar(
-            value=str(self.config.cleanup.duplicate_min_mb)
-        )
-
-        fields = [
-            (
-                self.t("settings.cleanup.old_days"),
-                self.cleanup_old_days_var,
-                0,
-            ),
-            (
-                self.t("settings.cleanup.large_mb"),
-                self.cleanup_large_mb_var,
-                1,
-            ),
-            (
-                self.t("settings.cleanup.duplicate_min_mb"),
-                self.cleanup_duplicate_min_var,
-                2,
-            ),
-        ]
-        for label, variable, column in fields:
+        self.cleanup_old_days_var = tk.StringVar(value=str(self.config.cleanup.old_days))
+        self.cleanup_large_mb_var = tk.StringVar(value=str(self.config.cleanup.large_mb))
+        self.cleanup_duplicate_min_var = tk.StringVar(value=str(self.config.cleanup.duplicate_min_mb))
+        for column, (label, variable) in enumerate([
+            (self.t("settings.cleanup.old_days"), self.cleanup_old_days_var),
+            (self.t("settings.cleanup.large_mb"), self.cleanup_large_mb_var),
+            (self.t("settings.cleanup.duplicate_min_mb"), self.cleanup_duplicate_min_var),
+        ]):
             group = tk.Frame(cleanup_grid, bg=THEME["surface"])
-            group.grid(
-                row=0,
-                column=column,
-                sticky="ew",
-                padx=(0 if column == 0 else 8, 0 if column == 2 else 8),
-            )
+            group.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 6, 0 if column == 2 else 6))
             tk.Label(
                 group,
                 text=label,
@@ -2209,12 +2255,10 @@ class Dashboard:
                 highlightcolor=THEME["accent"],
                 font=("Segoe UI", 10),
             )
-            spin.pack(fill="x", ipady=6)
+            spin.pack(fill="x", ipady=7)
 
-        self.cleanup_remember_var = tk.BooleanVar(
-            value=self.config.cleanup.remember_folder
-        )
-        remember = tk.Checkbutton(
+        self.cleanup_remember_var = tk.BooleanVar(value=self.config.cleanup.remember_folder)
+        tk.Checkbutton(
             cleanup,
             text=self.t("settings.cleanup.remember_folder"),
             variable=self.cleanup_remember_var,
@@ -2226,55 +2270,72 @@ class Dashboard:
             highlightthickness=0,
             bd=0,
             font=("Segoe UI", 9),
-        )
-        remember.pack(anchor="w", padx=20, pady=(16, 12))
+        ).pack(anchor="w", padx=18, pady=(14, 10))
 
         cleanup_actions = tk.Frame(cleanup, bg=THEME["surface"])
-        cleanup_actions.pack(fill="x", padx=20, pady=(0, 20))
-        self._button(
-            cleanup_actions,
-            self.t("settings.save"),
-            self._save_cleanup_settings,
-            kind="primary",
-        ).pack(side="left")
-        self._button(
-            cleanup_actions,
-            self.t("settings.reset"),
-            self._reset_settings,
-            kind="secondary",
-        ).pack(side="left", padx=(8, 0))
-
+        cleanup_actions.pack(fill="x", padx=18, pady=(0, 18))
+        self._button(cleanup_actions, self.t("settings.save"), self._save_cleanup_settings, kind="primary").pack(side="left")
+        self._button(cleanup_actions, self.t("settings.reset"), self._reset_settings, kind="secondary").pack(side="left", padx=(8, 0))
         self.settings_status = tk.Label(
             cleanup_actions,
             text="",
             bg=THEME["surface"],
             fg=THEME["ok"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 8),
         )
         self.settings_status.pack(side="left", padx=(12, 0))
 
         updates = tk.Frame(
-            body,
+            right,
             bg=THEME["surface"],
             highlightthickness=1,
             highlightbackground=THEME["border"],
         )
-        updates.pack(fill="x", pady=(0, 14))
-
+        updates.pack(fill="x", pady=(0, 12))
         tk.Label(
             updates,
             text=self.t("settings.updates.title"),
             bg=THEME["surface"],
             fg=THEME["text"],
-            font=("Segoe UI", 14, "bold"),
-        ).pack(anchor="w", padx=20, pady=(18, 2))
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w", padx=18, pady=(17, 3))
         tk.Label(
             updates,
-            text=self.t("settings.updates.subtitle"),
+            text="Безопасная проверка релизов GitHub, контроль хэша и подписи установщика."
+                 if self.language == "ru" else
+                 "Safe GitHub release checks with hash and installer signature validation.",
             bg=THEME["surface"],
             fg=THEME["muted"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=20, pady=(0, 12))
+            font=("Segoe UI", 8),
+            wraplength=420,
+            justify="left",
+        ).pack(anchor="w", padx=18, pady=(0, 14))
+
+        update_summary = tk.Frame(updates, bg=THEME["accent_soft"])
+        update_summary.pack(fill="x", padx=18, pady=(0, 14))
+        tk.Label(
+            update_summary,
+            text="✓",
+            bg=THEME["accent_soft"],
+            fg=THEME["accent"],
+            font=("Segoe UI", 17, "bold"),
+        ).pack(side="left", padx=(12, 10), pady=12)
+        update_summary_text = tk.Frame(update_summary, bg=THEME["accent_soft"])
+        update_summary_text.pack(side="left", fill="x", expand=True, pady=10)
+        tk.Label(
+            update_summary_text,
+            text=f"AntiOS {__version__}",
+            bg=THEME["accent_soft"],
+            fg=THEME["text"],
+            font=("Segoe UI Semibold", 10),
+        ).pack(anchor="w")
+        tk.Label(
+            update_summary_text,
+            text="Канал Alpha" if self.language == "ru" else "Alpha channel",
+            bg=THEME["accent_soft"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(2, 0))
 
         self.update_auto_var = tk.BooleanVar(value=self.config.updates.auto_update)
         tk.Checkbutton(
@@ -2289,21 +2350,17 @@ class Dashboard:
             selectcolor=THEME["surface_alt"],
             bd=0,
             font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=20, pady=(0, 12))
+        ).pack(anchor="w", padx=18, pady=(0, 12))
 
         update_actions = tk.Frame(updates, bg=THEME["surface"])
-        update_actions.pack(fill="x", padx=20, pady=(0, 10))
+        update_actions.pack(fill="x", padx=18, pady=(0, 10))
+        self._button(update_actions, self.t("settings.updates.check"), self._check_updates_now, kind="primary").pack(side="left")
+        self._button(update_actions, self.t("settings.updates.download"), self._download_update_now, kind="secondary").pack(side="left", padx=(8, 0))
         self._button(
             update_actions,
-            self.t("settings.updates.check"),
-            self._check_updates_now,
-            kind="secondary",
-        ).pack(side="left")
-        self._button(
-            update_actions,
-            self.t("settings.updates.download"),
-            self._download_update_now,
-            kind="primary",
+            "Открыть папку" if self.language == "ru" else "Open folder",
+            self._open_update_folder,
+            kind="ghost",
         ).pack(side="left", padx=(8, 0))
 
         self.update_status = tk.Label(
@@ -2311,77 +2368,38 @@ class Dashboard:
             text=self.t("settings.updates.current", version=__version__),
             bg=THEME["surface"],
             fg=THEME["muted"],
-            font=("Segoe UI", 9),
-            wraplength=780,
+            font=("Segoe UI", 8),
+            wraplength=420,
             justify="left",
         )
-        self.update_status.pack(anchor="w", padx=20, pady=(0, 18))
+        self.update_status.pack(anchor="w", padx=18, pady=(0, 18))
 
         about = tk.Frame(
-            body,
+            right,
             bg=THEME["surface"],
             highlightthickness=1,
             highlightbackground=THEME["border"],
         )
-        about.pack(fill="x", pady=(0, 14))
-
+        about.pack(fill="x")
         tk.Label(
             about,
             text=self.t("settings.about.title"),
             bg=THEME["surface"],
             fg=THEME["text"],
-            font=("Segoe UI", 14, "bold"),
-        ).pack(anchor="w", padx=20, pady=(18, 2))
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w", padx=18, pady=(17, 3))
         tk.Label(
             about,
-            text=self.t("settings.about.subtitle"),
+            text=f"AntiOS {__version__}\nDargonITP · Apache-2.0\nWindows 10 22H2 x64 и Windows 11",
             bg=THEME["surface"],
             fg=THEME["muted"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=20, pady=(0, 12))
-
-        info = tk.Frame(about, bg=THEME["surface"])
-        info.pack(fill="x", padx=20, pady=(0, 14))
-        info_text = (
-            f"{self.t('settings.about.version')}: {__version__}    •    "
-            f"{self.t('settings.about.channel')}: "
-            f"{self.t('settings.about.channel.alpha')}    •    "
-            f"{self.t('settings.about.store')}: 9P7V8BKW2KG9"
-        )
-        tk.Label(
-            info,
-            text=info_text,
-            bg=THEME["surface"],
-            fg=THEME["text"],
-            font=("Segoe UI", 10),
-        ).pack(anchor="w")
-        tk.Label(
-            info,
-            text=self.t(
-                "settings.config_location",
-                path=str(self.config_path),
-            ),
-            bg=THEME["surface"],
-            fg=THEME["muted_2"],
             font=("Segoe UI", 8),
-            wraplength=780,
             justify="left",
-        ).pack(anchor="w", pady=(5, 0))
-
-        links = tk.Frame(about, bg=THEME["surface"])
-        links.pack(fill="x", padx=20, pady=(0, 20))
-        for index, (label, url) in enumerate([
-            (self.t("settings.github"), PROJECT_URL),
-            (self.t("settings.releases"), RELEASES_URL),
-            (self.t("settings.privacy"), PRIVACY_URL),
-            (self.t("settings.support"), SUPPORT_URL),
-        ]):
-            self._button(
-                links,
-                label,
-                lambda target=url: _open_url(target),
-                kind="secondary",
-            ).pack(side="left", padx=(0 if index == 0 else 8, 0))
+        ).pack(anchor="w", padx=18, pady=(0, 14))
+        about_actions = tk.Frame(about, bg=THEME["surface"])
+        about_actions.pack(fill="x", padx=18, pady=(0, 18))
+        self._button(about_actions, "GitHub", lambda: _open_url(PROJECT_URL), kind="secondary").pack(side="left")
+        self._button(about_actions, self.t("sidebar.privacy"), lambda: _open_url(PRIVACY_URL), kind="ghost").pack(side="left", padx=(8, 0))
 
     def _persist_config(self) -> bool:
         try:
@@ -2825,6 +2843,7 @@ class Dashboard:
         self._persist_config()
         self._rebuild_ui("settings")
 
+
     def show_page(self, name: str) -> None:
         if name not in self.pages:
             return
@@ -2838,41 +2857,38 @@ class Dashboard:
             "cleanup": (self.t("nav.cleanup"), self.t("page.cleanup.subtitle")),
             "settings": (self.t("nav.settings"), self.t("page.settings.subtitle")),
         }
-
         self.active_page = name
         self.pages[name].tkraise()
-
         title, subtitle = titles[name]
         self.page_title.configure(text=title)
         self.page_subtitle.configure(text=subtitle)
 
-        # Pages with their own action model stay visually quiet; health/report
-        # actions return only where they are relevant.
         if name in {"antivirus", "cleanup", "settings"}:
             self.export_button.pack_forget()
             self.refresh_button.pack_forget()
         else:
             if not self.export_button.winfo_manager():
-                self.export_button.pack(side="left", padx=(0, 10))
+                self.export_button.pack(side="left", padx=(0, 8))
             if not self.refresh_button.winfo_manager():
                 self.refresh_button.pack(side="left")
 
         for key, button in self.nav_buttons.items():
             selected = key == name
             button.configure(
-                bg=THEME["surface_alt"] if selected else THEME["sidebar"],
-                fg=THEME["text"] if selected else THEME["muted"],
+                bg=THEME["accent_soft"] if selected else THEME["sidebar"],
+                fg=THEME["accent"] if selected else THEME["muted"],
             )
+            holder, stripe = self.nav_frames.get(key, (None, None))
+            if holder is not None:
+                holder.configure(bg=THEME["accent_soft"] if selected else THEME["sidebar"])
+            if stripe is not None:
+                stripe.configure(bg=THEME["accent"] if selected else THEME["sidebar"])
 
         if hasattr(self, "settings_button"):
-            settings_selected = name == "settings"
+            selected = name == "settings"
             self.settings_button.configure(
-                bg=THEME["surface_alt"]
-                if settings_selected
-                else THEME["sidebar"],
-                fg=THEME["text"]
-                if settings_selected
-                else THEME["muted"],
+                bg=THEME["accent_soft"] if selected else THEME["sidebar"],
+                fg=THEME["accent"] if selected else THEME["muted"],
             )
 
     def refresh(self) -> None:
