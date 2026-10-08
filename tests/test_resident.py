@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from antios import resident
 
 
@@ -79,3 +81,19 @@ def test_disable_resident_guard_stops_and_unregisters(monkeypatch):
     result = resident.disable_resident_guard()
     assert result["configured"] is False
     assert result["previous"]["stop"] is True
+
+
+
+def test_ensure_resident_guard_rejects_stale_unresponsive_state(monkeypatch):
+    states = iter([
+        {"state": "not-running", "running": False},
+        {"state": "unresponsive", "running": False, "detail": "heartbeat stale"},
+    ])
+    monkeypatch.setattr(resident, "read_guard_state", lambda **kwargs: next(states))
+    monkeypatch.setattr(
+        resident,
+        "configure_resident_guard",
+        lambda **kwargs: {"configured": True, "roots": [r"C:\\Users\\Test\\Downloads"]},
+    )
+    with pytest.raises(RuntimeError, match="state=unresponsive"):
+        resident.ensure_resident_guard(wait_seconds=0)
