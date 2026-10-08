@@ -28,6 +28,22 @@ if ($RootsJson) {
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $taskName = "AntiOS Guard ($($identity.User.Value))"
 
+function Stop-ManagedGuardProcess([string]$Path) {
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    $expected = [IO.Path]::GetFullPath($Path)
+    Get-Process -Name 'AntiOS-Guard' -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $actual = [IO.Path]::GetFullPath($_.Path)
+        } catch {
+            return
+        }
+        if ($actual -eq $expected) {
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $_.Id -Timeout 3 -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 if ($Uninstall) {
     if (-not $Apply) {
         Write-Output "Preview: stop and unregister task '$taskName'; preserve history and quarantine."
@@ -38,6 +54,8 @@ if ($Uninstall) {
         Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     }
+    $uninstallExe = if ($Executable) { $Executable } else { Join-Path $PSScriptRoot 'AntiOS-Guard.exe' }
+    Stop-ManagedGuardProcess $uninstallExe
     return
 }
 
@@ -168,6 +186,11 @@ if ($existing) {
         throw "Existing Resident Guard task did not stop before reconfiguration."
     }
 }
+
+# A task from an older build can have lost scheduler ownership while its
+# process remains alive. Kill only a process whose full image path matches this
+# managed Guard executable, so a stale lock cannot block the replacement.
+Stop-ManagedGuardProcess $exe
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AntiOS selected-folder post-write monitoring with trusted ClamD binding; no pre-execution blocking.' -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
