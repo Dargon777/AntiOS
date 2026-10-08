@@ -281,6 +281,12 @@ jobs:
             throw "Invalid Authenticode signature for AntiOS-Setup.exe ($($signature.Status))"
           }
 
+      - name: Smoke-test previous-release upgrade
+        shell: pwsh
+        run: |
+          ./scripts/smoke-upgrade.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Smoke-test AntiOS Setup
         shell: pwsh
         run: |
