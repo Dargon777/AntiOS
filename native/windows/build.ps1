@@ -69,7 +69,7 @@ try {
         foreach ($source in (Get-ChildItem "$PSScriptRoot\filter\*.c")) {
             $object = "$($source.BaseName)-kernel.obj"
             Invoke-Checked -Program 'cl.exe' -Arguments @('/nologo','/TC','/c','/kernel','/W4','/O2','/GS','/guard:cf','/Zp8',
-                '/D_AMD64_','/D_KERNEL_MODE','/D_WIN64','/D_WIN32_WINNT=0x0A00','/DNTDDI_VERSION=0x0A00000C',
+                '/D_AMD64_','/D_KERNEL_MODE','/D_WIN64','/D_WIN32_WINNT=0x0A00','/DNTDDI_VERSION=0x0A000000',
                 "/I$wdk\Include\$kit\km", "/I$wdk\Include\$kit\km\crt", "/I$sdk\Include\$kit\shared",
                 "/I$PSScriptRoot\inc", "/Fo$object",$source.FullName)
             $objects += $object
