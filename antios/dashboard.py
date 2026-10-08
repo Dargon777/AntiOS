@@ -418,7 +418,7 @@ class Dashboard:
         root.geometry("1440x900")
         root.minsize(1180, 760)
         root.configure(bg=THEME["bg"])
-        root.option_add("*Font", ("Segoe UI Variable Text", 10))
+        root.option_add("*Font", ("Segoe UI", 10))
         root.bind("<F5>", lambda _event: self.refresh())
         root.bind("<Control-e>", lambda _event: self.export_report())
         root.bind("<Control-E>", lambda _event: self.export_report())
@@ -826,7 +826,7 @@ class Dashboard:
             text="AntiOS",
             bg=THEME["sidebar"],
             fg=THEME["text"],
-            font=("Segoe UI Variable Display", 20, "bold"),
+            font=("Segoe UI", 20, "bold"),
         ).pack(anchor="w")
         tk.Label(
             brand_text,
@@ -891,7 +891,7 @@ class Dashboard:
             text=self.t("nav.overview"),
             bg=THEME["bg"],
             fg=THEME["text"],
-            font=("Segoe UI Variable Display", 26, "bold"),
+            font=("Segoe UI", 26, "bold"),
         )
         self.page_title.pack(anchor="w")
         self.page_subtitle = tk.Label(
@@ -1045,7 +1045,7 @@ class Dashboard:
             text=self.t("overview.checking_title"),
             bg=THEME["surface"],
             fg=THEME["text"],
-            font=("Segoe UI Variable Display", 24, "bold"),
+            font=("Segoe UI", 24, "bold"),
             anchor="w",
             justify="left",
         )
@@ -1091,7 +1091,7 @@ class Dashboard:
             text="—",
             bg=THEME["surface_soft"],
             fg=THEME["accent"],
-            font=("Segoe UI Variable Display", 32, "bold"),
+            font=("Segoe UI", 32, "bold"),
         )
         self.overview_score.pack()
         self.overview_score_caption = tk.Label(
@@ -2702,7 +2702,7 @@ class Dashboard:
             anchor="nw",
             bg=THEME["surface"],
             fg=THEME["text"],
-            font=("Segoe UI Variable Display", 16 if not multiline else 10, "bold" if not multiline else "normal"),
+            font=("Segoe UI", 16 if not multiline else 10, "bold" if not multiline else "normal"),
         )
         value.pack(fill="both", expand=True, padx=18, pady=(8, 5))
         detail = tk.Label(
