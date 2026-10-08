@@ -45,7 +45,7 @@ function Build-HardenedProgram {
         "--mode=standalone",
         "--assume-yes-for-downloads",
         "--msvc=latest",
-        "--lto=yes",
+        "--lto=no",
         "--remove-output",
         "--output-dir=$workRoot",
         "--output-filename=$Name.exe",
