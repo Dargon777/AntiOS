@@ -30,6 +30,38 @@ jobs:
           ANTIOS_TEST_CLAMD: /usr/sbin/clamd
         run: python -m pytest tests/test_clamav_integration.py -v
 
+
+  legacy-windows-api-proxy:
+    name: legacy Windows API proxy (not Win10 certification)
+    runs-on: windows-2019
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Show runner version
+        shell: pwsh
+        run: |
+          Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsBuildNumber | Format-List
+
+      - name: Install
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          python -m pip install -e .
+
+      - name: Compatibility smoke
+        shell: pwsh
+        run: |
+          python -m pytest -rs tests/test_system_info.py tests/test_health.py tests/test_doctor.py tests/test_guard.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m antios --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
