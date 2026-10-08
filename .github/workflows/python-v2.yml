@@ -11,6 +11,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  public-source-boundary:
+    name: Public/private source boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Reject accidentally published proprietary source
+        run: python scripts/check-public-boundary.py
+
   clamav-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 10
