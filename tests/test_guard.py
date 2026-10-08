@@ -215,7 +215,10 @@ def test_journal_has_exclusive_owner_bounded_history_and_stale_status(tmp_path):
         assert state.db.execute('SELECT COUNT(*) FROM events').fetchone()[0] == 1000
         state.publish({'state': 'monitoring', 'running': True, 'heartbeat': time.time()-100, 'run_id': 'old'})
         assert read_guard_state(state.folder)['state'] == 'unresponsive'
-        assert not read_guard_state(state.folder, stop=True).get('stop_requested')
+        stopped = read_guard_state(state.folder, stop=True)
+        assert stopped['state'] == 'unresponsive'
+        assert stopped['running'] is False
+        assert stopped['stop_requested'] is True
     finally:
         other.close()
         state.close()
