@@ -102,14 +102,26 @@ Section "AntiOS" SecMain
   SectionIn RO
   SetRegView 64
 
+  ; Stop the previous persistent Guard task before replacing binaries. A stale
+  ; heartbeat can belong to a still-live process holding guard.lock, so the
+  ; cooperative Guard stop alone is not sufficient for upgrades.
+  IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
+    Pop $1
   IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +4
     nsExec::Exec '"$INSTDIR\AntiOS-Guard.exe" stop'
     Pop $0
-    Sleep 500
+    Sleep 1000
 
   SetOutPath "$INSTDIR"
   SetOverwrite on
   File /r "${SOURCE_DIR}\*.*"
+
+  ; Normalize startup state with the newly installed script as well. This also
+  ; repairs upgrades from older builds whose uninstall path was broken.
+  IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
+    Pop $1
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
