@@ -2820,6 +2820,7 @@ class Dashboard:
             ui=UIConfig(
                 language=self.language_setting,
                 theme=self.theme_mode,
+                start_with_windows=self.config.ui.start_with_windows,
             ),
         )
         self._persist_config()
@@ -2838,6 +2839,7 @@ class Dashboard:
             ui=UIConfig(
                 language=self.language_setting,
                 theme=self.theme_mode,
+                start_with_windows=self.config.ui.start_with_windows,
             ),
         )
         self._persist_config()
@@ -3180,7 +3182,7 @@ class Dashboard:
         )
 
 
-def launch(language: str | None = None) -> int:
+def launch(language: str | None = None, *, background: bool = False) -> int:
     tr = Translator(normalize_language(language or detect_language()))
     if not is_windows():
         raise RuntimeError(tr.t("error.dashboard_windows"))
@@ -3196,7 +3198,9 @@ def launch(language: str | None = None) -> int:
 
     root = tk.Tk()
     _apply_window_icon(root, "not-running")
-    Dashboard(root, language=language)
+    dashboard = Dashboard(root, language=language)
+    if background and dashboard._dashboard_tray is not None and dashboard._dashboard_tray.running:
+        root.withdraw()
     root.mainloop()
     return 0
 
@@ -3219,6 +3223,11 @@ def main(argv: list[str] | None = None) -> int:
         "--lang",
         choices=list(LANGUAGE_NAMES),
         help="UI language: en, ru, es, zh-CN, fi, pl, mn. Defaults to Windows locale.",
+    )
+    parser.add_argument(
+        "--background",
+        action="store_true",
+        help="Start the AntiOS Control Center in the notification area.",
     )
     args = parser.parse_args(argv)
     if args.self_test:
@@ -3250,4 +3259,4 @@ def main(argv: list[str] | None = None) -> int:
     elevation_status = ensure_administrator(args.lang)
     if elevation_status is not None:
         return elevation_status
-    return launch(args.lang)
+    return launch(args.lang, background=args.background)
