@@ -83,6 +83,7 @@ jobs:
             ".\scripts\protection-repair.ps1",
             ".\scripts\protection-first-run.ps1",
             ".\scripts\guard-startup.ps1",
+            ".\scripts\dashboard-startup.ps1",
             ".\native\windows\amsi\Install-AmsiProvider.ps1"
           )) {
             $tokens = $null
@@ -294,7 +295,7 @@ jobs:
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
           ./installer-output/AntiOS-Setup.exe /S /NOENGINE=1 "/D=$installDir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "AntiOS-AmsiProvider.dll", "Install-AmsiProvider.ps1", "Uninstall.exe")) {
+          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "AntiOS-AmsiProvider.dll", "Install-AmsiProvider.ps1", "dashboard-startup.ps1", "Uninstall.exe")) {
             if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {
               throw "Installer smoke missing $required"
             }
@@ -400,6 +401,7 @@ jobs:
           Copy-Item .\native\windows\amsi\Install-AmsiProvider.ps1 .\package\Install-AmsiProvider.ps1 -Force
           Copy-Item .\native\windows\LICENSE.microsoft .\package\LICENSE.native-MS-PL.txt -Force
           Copy-Item .\scripts\guard-startup.ps1 .\package\guard-startup.ps1
+          Copy-Item .\scripts\dashboard-startup.ps1 .\package\dashboard-startup.ps1
           Copy-Item .\scripts\protection-engine.ps1 .\package\protection-engine.ps1
           Copy-Item .\scripts\install.ps1 .\package\install.ps1
           Copy-Item .\scripts\uninstall.ps1 .\package\uninstall.ps1
