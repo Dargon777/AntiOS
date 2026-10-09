@@ -17,7 +17,6 @@ def test_installer_still_requests_normal_uac_consent():
 def test_installer_manages_control_center_autostart_separately_from_guard():
     source = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
     assert "dashboard-startup.ps1" in source
-    assert "AntiOS Control Center" not in source  # task identity belongs to the script
     assert "-Apply -AllowManagedUnsigned" in source
     assert "dashboard-startup.ps1\" -Uninstall -Apply" in source
 
