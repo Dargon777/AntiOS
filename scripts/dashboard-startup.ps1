@@ -37,7 +37,7 @@ function Assert-ManagedUnsignedDashboard([string]$Path) {
                        [Security.AccessControl.FileSystemRights]::FullControl
     $acl = Get-Acl -LiteralPath $installDir
     foreach ($rule in $acl.Access) {
-        if ($rule.AccessControlType -ne [Security.AccessControl.FileSystemRights]::Allow) { continue }
+        if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
         try {
             $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
         } catch {
