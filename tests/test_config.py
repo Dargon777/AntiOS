@@ -31,6 +31,7 @@ def test_write_and_load_default_config(tmp_path):
     assert config.general.color == "auto"
     assert config.logging.level == "INFO"
     assert config.ui == UIConfig()
+    assert config.ui.start_with_windows is True
     assert config.cleanup == CleanupConfig()
     assert config.protection == ProtectionConfig()
     assert config.updates == UpdateConfig()
@@ -86,6 +87,7 @@ def test_save_and_load_ui_preferences(tmp_path):
 
     assert loaded.ui.language == "pl"
     assert loaded.ui.theme == "light"
+    assert loaded.ui.start_with_windows is True
     assert loaded.cleanup.old_days == 90
     assert loaded.cleanup.large_mb == 250
     assert loaded.cleanup.duplicate_min_mb == 2
@@ -117,3 +119,29 @@ def test_config_rejects_nonpositive_cleanup_threshold(tmp_path):
 
     with pytest.raises(ValueError, match="cleanup.old_days"):
         load_config(path)
+
+
+
+def test_config_can_disable_dashboard_autostart(tmp_path):
+    path = tmp_path / "antios.toml"
+    path.write_text(
+        '[ui]\nlanguage = "ru"\ntheme = "dark"\nstart_with_windows = false\n',
+        encoding="utf-8",
+    )
+
+    loaded = load_config(path)
+
+    assert loaded.ui.language == "ru"
+    assert loaded.ui.theme == "dark"
+    assert loaded.ui.start_with_windows is False
+
+
+def test_rendered_config_persists_dashboard_autostart(tmp_path):
+    path = tmp_path / "antios.toml"
+    config = AppConfig(ui=UIConfig(start_with_windows=False))
+
+    save_config(config, path)
+    text = path.read_text(encoding="utf-8")
+
+    assert "start_with_windows = false" in text
+    assert load_config(path).ui.start_with_windows is False
