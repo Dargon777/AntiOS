@@ -3359,10 +3359,15 @@ def launch(language: str | None = None, *, background: bool = False) -> int:
         _configure_windows_identity()
 
     root = tk.Tk()
+    if background:
+        root.withdraw()
     _apply_window_icon(root, "not-running")
     dashboard = Dashboard(root, language=language)
-    if background and dashboard._dashboard_tray is not None and dashboard._dashboard_tray.running:
-        root.withdraw()
+    if background and (
+        dashboard._dashboard_tray is None
+        or not dashboard._dashboard_tray.running
+    ):
+        root.deiconify()
     root.mainloop()
     return 0
 
