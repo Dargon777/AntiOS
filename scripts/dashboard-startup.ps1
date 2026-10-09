@@ -17,6 +17,9 @@ $ScriptDirectory = if ($PSScriptRoot) {
 }
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+if ($identity.User.Value -eq 'S-1-5-18') {
+    throw 'Control Center autostart must be configured for an interactive user, not LocalSystem.'
+}
 $taskName = "AntiOS Control Center ($($identity.User.Value))"
 
 function Get-ControlCenterTask {
