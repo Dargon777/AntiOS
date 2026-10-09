@@ -14,8 +14,9 @@ $GuiTarget = Join-Path $InstallDir "AntiOS-GUI.exe"
 $GuardSource = Join-Path $SourceDirectory "AntiOS-Guard.exe"
 $GuardTarget = Join-Path $InstallDir "AntiOS-Guard.exe"
 $StartupSource = Join-Path $SourceDirectory "guard-startup.ps1"
+$DashboardStartupSource = Join-Path $SourceDirectory "dashboard-startup.ps1"
 
-foreach ($required in @($CliSource, $GuiSource, $GuardSource, $StartupSource, (Join-Path $SourceDirectory "_cli"), (Join-Path $SourceDirectory "_gui"), (Join-Path $SourceDirectory "_guard"))) {
+foreach ($required in @($CliSource, $GuiSource, $GuardSource, $StartupSource, $DashboardStartupSource, (Join-Path $SourceDirectory "_cli"), (Join-Path $SourceDirectory "_gui"), (Join-Path $SourceDirectory "_guard"))) {
     if (-not (Test-Path $required)) {
         throw "Required AntiOS file not found: $required"
     }
@@ -33,6 +34,7 @@ Copy-Item -Force $CliSource $CliTarget
 Copy-Item -Force $GuiSource $GuiTarget
 Copy-Item -Force $GuardSource $InstallDir
 Copy-Item -Force $StartupSource $InstallDir
+Copy-Item -Force $DashboardStartupSource $InstallDir
 foreach ($runtime in @("_cli", "_gui", "_guard")) {
     Copy-Item -Recurse -Force (Join-Path $SourceDirectory $runtime) $InstallDir
 }
