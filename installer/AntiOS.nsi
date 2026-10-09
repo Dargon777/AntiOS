@@ -27,6 +27,7 @@ Unicode true
 !define APP_PATH_KEY "Software\Microsoft\Windows\CurrentVersion\App Paths\AntiOS-GUI.exe"
 
 Var SkipEngine
+Var ExistingVersion
 
 Name "${PRODUCT_NAME} ${APP_VERSION}"
 OutFile "${OUTPUT_FILE}"
@@ -85,6 +86,7 @@ Function .onInit
   ${EndIf}
 
   SetRegView 64
+  ReadRegStr $ExistingVersion HKLM "${INSTALL_KEY}" "Version"
   ReadRegStr $0 HKLM "${INSTALL_KEY}" "InstallDir"
   ${If} $0 != ""
     StrCpy $INSTDIR $0
@@ -146,6 +148,17 @@ Section "AntiOS" SecMain
   CreateShortCut "$COMMONPROGRAMS\AntiOS\Uninstall AntiOS.lnk" "$INSTDIR\Uninstall.exe"
   CreateShortCut "$COMMONDESKTOP\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
 
+  ; Fresh installs enable the Control Center at user logon. Upgrades preserve
+  ; the existing task/config choice so a user who disabled it is not overridden.
+  ${If} $ExistingVersion == ""
+    IfFileExists "$INSTDIR\dashboard-startup.ps1" 0 control_center_done
+    DetailPrint "Enabling AntiOS Control Center startup..."
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\dashboard-startup.ps1" -Apply -AllowManagedUnsigned'
+    Pop $4
+    WriteRegDWORD HKLM "${INSTALL_KEY}" "DashboardStartupExitCode" $4
+control_center_done:
+  ${EndIf}
+
   ${If} $SkipEngine != "1"
     DetailPrint "Bootstrapping AntiOS protection engine..."
     nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-bootstrap.ps1" -ManifestPath "$INSTDIR\clamav-windows.json" -Apply'
@@ -198,6 +211,9 @@ Section "Uninstall"
     Pop $0
   IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
     nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
+    Pop $0
+  IfFileExists "$INSTDIR\dashboard-startup.ps1" 0 +3
+    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\dashboard-startup.ps1" -Uninstall -Apply'
     Pop $0
   IfFileExists "$INSTDIR\protection-engine.ps1" 0 +3
     nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-engine.ps1" -Uninstall -Apply'
