@@ -30,6 +30,11 @@ if (Test-Path -LiteralPath $Guard) {
 $StartupManager = Join-Path $InstallDir 'guard-startup.ps1'
 if (Test-Path -LiteralPath $StartupManager) { & $StartupManager -Uninstall -Apply }
 
+$DashboardStartupManager = Join-Path $InstallDir 'dashboard-startup.ps1'
+if (Test-Path -LiteralPath $DashboardStartupManager) {
+    & $DashboardStartupManager -Uninstall -Apply
+}
+
 if (Test-Path $StartMenuDir) {
     Remove-Item -Recurse -Force $StartMenuDir
     Write-Host "Removed AntiOS Start Menu shortcuts."

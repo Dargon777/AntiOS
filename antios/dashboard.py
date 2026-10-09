@@ -453,9 +453,18 @@ class Dashboard:
             self.set_protection_state({"state": "not-running"})
 
     def _start_background_services(self) -> None:
-        """Self-heal installed resident protection and check for updates."""
-        if os.name != "nt" or not getattr(sys, "frozen", False):
+        """Self-heal installed protection, reconcile UI startup and check updates."""
+        packaged = (
+            os.name == "nt"
+            and Path(sys.executable).name.casefold() == "antios-gui.exe"
+        )
+        if not packaged:
             return
+        threading.Thread(
+            target=self._dashboard_startup_reconcile_worker,
+            daemon=True,
+            name="AntiOSDashboardStartup",
+        ).start()
         if self.config.protection.resident_enabled:
             threading.Thread(
                 target=self._resident_autostart_worker,
@@ -515,6 +524,124 @@ class Dashboard:
             return {"enabled": True, "engine": engine, "guard": guard}
         from .resident import disable_resident_guard
         return disable_resident_guard()
+
+    def _dashboard_startup_reconcile_worker(self) -> None:
+        try:
+            from .dashboard_startup import reconcile_dashboard_startup
+            payload = reconcile_dashboard_startup(
+                self.config.ui.start_with_windows
+            )
+            error = None
+        except Exception as exc:
+            payload = None
+            error = str(exc)[:1000]
+
+        def complete() -> None:
+            if not hasattr(self, "dashboard_startup_status"):
+                return
+            if error:
+                self.dashboard_startup_status.configure(
+                    text=(
+                        "Ошибка автозапуска"
+                        if self.language == "ru"
+                        else "Startup error"
+                    ),
+                    fg=THEME["warn"],
+                )
+                return
+            enabled = bool(payload and payload.get("enabled"))
+            self.dashboard_startup_status.configure(
+                text=(
+                    "Включён" if enabled and self.language == "ru"
+                    else "Enabled" if enabled
+                    else "Выключен" if self.language == "ru"
+                    else "Disabled"
+                ),
+                fg=THEME["ok"] if enabled else THEME["muted"],
+            )
+
+        try:
+            self.root.after(0, complete)
+        except Exception:
+            pass
+
+    def _save_dashboard_startup_preference(self) -> None:
+        enabled = bool(self.start_with_windows_var.get())
+        previous = self.config.ui.start_with_windows
+        self.config = replace(
+            self.config,
+            ui=replace(self.config.ui, start_with_windows=enabled),
+        )
+        if not self._persist_config():
+            self.config = replace(
+                self.config,
+                ui=replace(self.config.ui, start_with_windows=previous),
+            )
+            self.start_with_windows_var.set(previous)
+            self.dashboard_startup_status.configure(
+                text=(
+                    "Не удалось сохранить"
+                    if self.language == "ru"
+                    else "Could not save"
+                ),
+                fg=THEME["warn"],
+            )
+            return
+
+        self.start_with_windows_check.configure(state="disabled")
+        self.dashboard_startup_status.configure(
+            text="Применяем…" if self.language == "ru" else "Applying…",
+            fg=THEME["muted"],
+        )
+
+        def worker() -> None:
+            try:
+                from .dashboard_startup import set_dashboard_startup
+                payload = set_dashboard_startup(enabled)
+                error = None
+            except Exception as exc:
+                payload = None
+                error = str(exc)[:1000]
+
+            def complete() -> None:
+                self.start_with_windows_check.configure(state="normal")
+                if error:
+                    self.config = replace(
+                        self.config,
+                        ui=replace(
+                            self.config.ui,
+                            start_with_windows=previous,
+                        ),
+                    )
+                    self._persist_config()
+                    self.start_with_windows_var.set(previous)
+                    self.dashboard_startup_status.configure(
+                        text=(
+                            "Не удалось применить"
+                            if self.language == "ru"
+                            else "Could not apply"
+                        ),
+                        fg=THEME["warn"],
+                    )
+                    return
+                active = bool(payload and payload.get("enabled"))
+                self.dashboard_startup_status.configure(
+                    text=(
+                        "Включён" if active and self.language == "ru"
+                        else "Enabled" if active
+                        else "Выключен" if self.language == "ru"
+                        else "Disabled"
+                    ),
+                    fg=THEME["ok"] if active else THEME["muted"],
+                )
+
+            self.root.after(0, complete)
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name="AntiOSDashboardStartupSetting",
+        ).start()
 
     def _save_update_preference(self) -> None:
         enabled = bool(self.update_auto_var.get()) if hasattr(self, "update_auto_var") else True
@@ -2195,6 +2322,41 @@ class Dashboard:
             kind="ghost",
         ).pack(side="right", padx=10, pady=6)
 
+        control_center_row = tk.Frame(protection, bg=THEME["surface_alt"])
+        control_center_row.pack(fill="x", padx=18, pady=(0, 18))
+        self.start_with_windows_var = tk.BooleanVar(
+            value=self.config.ui.start_with_windows
+        )
+        self.start_with_windows_check = tk.Checkbutton(
+            control_center_row,
+            text=(
+                "Запускать AntiOS вместе с Windows (в трей)"
+                if self.language == "ru"
+                else "Start AntiOS with Windows (notification area)"
+            ),
+            variable=self.start_with_windows_var,
+            command=self._save_dashboard_startup_preference,
+            bg=THEME["surface_alt"],
+            fg=THEME["text"],
+            activebackground=THEME["surface_alt"],
+            activeforeground=THEME["text"],
+            selectcolor=THEME["surface_alt"],
+            highlightthickness=0,
+            bd=0,
+            font=("Segoe UI Semibold", 9),
+        )
+        self.start_with_windows_check.pack(
+            side="left", fill="x", expand=True, padx=10, pady=10
+        )
+        self.dashboard_startup_status = tk.Label(
+            control_center_row,
+            text="",
+            bg=THEME["surface_alt"],
+            fg=THEME["muted"],
+            font=("Segoe UI", 8),
+        )
+        self.dashboard_startup_status.pack(side="right", padx=(8, 12))
+
         cleanup = tk.Frame(
             left,
             bg=THEME["surface"],
@@ -2820,6 +2982,7 @@ class Dashboard:
             ui=UIConfig(
                 language=self.language_setting,
                 theme=self.theme_mode,
+                start_with_windows=self.config.ui.start_with_windows,
             ),
         )
         self._persist_config()
@@ -2838,6 +3001,7 @@ class Dashboard:
             ui=UIConfig(
                 language=self.language_setting,
                 theme=self.theme_mode,
+                start_with_windows=self.config.ui.start_with_windows,
             ),
         )
         self._persist_config()
@@ -3180,7 +3344,7 @@ class Dashboard:
         )
 
 
-def launch(language: str | None = None) -> int:
+def launch(language: str | None = None, *, background: bool = False) -> int:
     tr = Translator(normalize_language(language or detect_language()))
     if not is_windows():
         raise RuntimeError(tr.t("error.dashboard_windows"))
@@ -3195,8 +3359,15 @@ def launch(language: str | None = None) -> int:
         _configure_windows_identity()
 
     root = tk.Tk()
+    if background:
+        root.withdraw()
     _apply_window_icon(root, "not-running")
-    Dashboard(root, language=language)
+    dashboard = Dashboard(root, language=language)
+    if background and (
+        dashboard._dashboard_tray is None
+        or not dashboard._dashboard_tray.running
+    ):
+        root.deiconify()
     root.mainloop()
     return 0
 
@@ -3219,6 +3390,11 @@ def main(argv: list[str] | None = None) -> int:
         "--lang",
         choices=list(LANGUAGE_NAMES),
         help="UI language: en, ru, es, zh-CN, fi, pl, mn. Defaults to Windows locale.",
+    )
+    parser.add_argument(
+        "--background",
+        action="store_true",
+        help="Start the AntiOS Control Center in the notification area.",
     )
     args = parser.parse_args(argv)
     if args.self_test:
@@ -3250,4 +3426,4 @@ def main(argv: list[str] | None = None) -> int:
     elevation_status = ensure_administrator(args.lang)
     if elevation_status is not None:
         return elevation_status
-    return launch(args.lang)
+    return launch(args.lang, background=args.background)

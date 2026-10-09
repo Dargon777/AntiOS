@@ -29,6 +29,7 @@ Copy-Item -LiteralPath $amsiProvider -Destination (Join-Path $stage "AntiOS-Amsi
 
 foreach ($path in @(
     "scripts\guard-startup.ps1",
+    "scripts\dashboard-startup.ps1",
     "scripts\protection-engine.ps1",
     "scripts\protection-bootstrap.ps1",
     "scripts\protection-repair.ps1",
@@ -72,6 +73,7 @@ $required = @(
     "_gui",
     "_guard",
     "guard-startup.ps1",
+    "dashboard-startup.ps1",
     "protection-engine.ps1",
     "protection-bootstrap.ps1",
     "protection-repair.ps1",

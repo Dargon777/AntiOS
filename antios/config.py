@@ -32,6 +32,7 @@ class LoggingConfig:
 class UIConfig:
     language: str = "auto"
     theme: str = "system"
+    start_with_windows: bool = True
 
 
 @dataclass(frozen=True)
@@ -158,6 +159,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         ui=UIConfig(
             language=_language(ui.get("language", "auto")),
             theme=_theme(ui.get("theme", "system")),
+            start_with_windows=bool(ui.get("start_with_windows", True)),
         ),
         cleanup=CleanupConfig(
             old_days=_positive_int(
@@ -208,6 +210,7 @@ file = {_toml_string(config.logging.file)} # empty disables file logging
 [ui]
 language = {_toml_string(config.ui.language)} # auto | en | ru | es | zh-CN | fi | pl | mn
 theme = {_toml_string(config.ui.theme)} # system | dark | light
+start_with_windows = {str(config.ui.start_with_windows).lower()}
 
 [cleanup]
 old_days = {config.cleanup.old_days}

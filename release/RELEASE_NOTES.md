@@ -1,67 +1,43 @@
-# AntiOS v2.0.0 alpha 26
+# AntiOS v2.0.0 alpha 27
 
-Alpha 26 is a full desktop interface redesign. The protection backend, Guard,
-quarantine and update safety rules remain the same; the desktop experience is
-rebuilt around a consistent endpoint-security design system.
+Alpha 27 adds a proper Windows logon experience for the AntiOS Control Center and introduces the first validated hardened Windows build path.
 
-## New design system
+## Control Center autostart
 
-- new graphite / emerald / cyan palette with restrained semantic use of amber
-  and red;
-- 8 px base rhythm with larger spacing following a phi-like progression
-  (8 / 13 / 21 / 34 / 55);
-- unified card, button, navigation, table and status hierarchy;
-- Windows 10-safe Segoe UI typography;
-- quieter borders, stronger contrast hierarchy and clearer primary actions.
+AntiOS can now start with Windows without opening a normal window on the desktop.
 
-The large protection visuals use a restrained logarithmic / golden-ratio-style
-orbit motif as a visual identity element. It is decorative only and never
-replaces real status text.
+- a dedicated **AntiOS Control Center** Scheduled Task starts `AntiOS-GUI.exe --background` at the current user's logon;
+- the task runs separately from Resident Guard, so disabling the Control Center startup does **not** disable resident protection;
+- fresh installer deployments enable Control Center startup by default;
+- upgrades preserve the user's existing choice instead of forcing startup back on;
+- Settings now exposes **Start AntiOS with Windows (notification area)**;
+- disabling the option unregisters only the Control Center task;
+- uninstall removes the task cleanly;
+- background startup hides the root window before UI construction, avoiding a visible startup flash;
+- if the notification-area component cannot start, AntiOS falls back to showing the normal window instead of disappearing.
 
-## New Overview
+Unsigned alpha builds may register startup only when the executable is the machine-installed AntiOS-GUI.exe in a protected install directory. Signed builds use normal Authenticode validation.
 
-The Overview is rebuilt as a protection dashboard instead of the legacy
-read-only diagnostics landing page. It now prioritizes:
+## Code hardening groundwork
 
-- current protection state;
-- a transparent protection-health score derived from AntiOS health checks;
-- Resident Guard state;
-- Defender coexistence state;
-- engine / signature summary;
-- the most relevant recent system checks;
-- direct paths into Antivirus, Windows Security and Updates.
+A parallel Windows build now compiles AntiOS CLI, GUI and Resident Guard with Nuitka standalone, MSVC and LTO.
 
-## New Antivirus screen
+CI verifies that the hardened binaries:
 
-The Antivirus page now has:
+- build successfully on Windows;
+- start the CLI, GUI and Guard;
+- contain no loose AntiOS `.py` or `.pyc` files;
+- retain Windows metadata and package resources;
+- produce a SHA-256 hardening manifest.
 
-- a large Resident Guard protection hero;
-- live protection score and Guard status;
-- dedicated cards for Guard, behavior analysis, file monitoring and engine
-  state;
-- a clearer scan target / scan action workflow;
-- component health summary;
-- findings and quarantine kept in the same operational page;
-- advanced engine, signature and Defender tools retained as secondary controls.
+This hardened path is intentionally kept parallel to the established release pipeline for now. It raises reverse-engineering cost but is not described as encryption or absolute secrecy.
 
-All existing backend operations remain connected to the redesigned widgets.
+## Open-core boundary
 
-## New Settings
+The public AntiOS v2 tree remains Apache-2.0. Already published source cannot be made secret retroactively.
 
-Settings is reorganized into a two-column control surface with clear sections
-for appearance, language, Resident Guard startup, cleanup defaults, updates and
-product information.
-
-The update area now exposes an explicit **Open folder** action for downloaded
-updates while keeping the existing SHA-256 / GitHub digest / Authenticode safety
-policy. Unsigned installers are still never launched automatically.
-
-## Product language
-
-Top-level copy has been updated to reflect AntiOS as an endpoint-security
-product rather than the older health-dashboard wording.
+Future proprietary technology such as CBF scoring, Business/EDR fleet correlation, commercial policy and cloud-side logic should live outside the public source tree behind a narrow signed interface.
 
 ## Compatibility
 
-The redesign keeps the Alpha 25 support target: Windows 10 22H2 x64 (build
-19045) and newer Windows 11 builds. No Windows 11-only UI font is required.
+Windows 10 22H2 x64 (build 19045) and newer Windows 11 builds remain the supported desktop target.
