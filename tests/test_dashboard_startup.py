@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from antios import dashboard_startup
@@ -79,3 +80,15 @@ def test_reconcile_dashboard_startup_is_idempotent(monkeypatch):
 
     assert payload["enabled"] is True
     assert calls == []
+
+
+
+def test_dashboard_startup_task_is_separate_elevated_logon_task():
+    source = Path("scripts/dashboard-startup.ps1").read_text(encoding="utf-8")
+
+    assert "AntiOS Control Center" in source
+    assert "New-ScheduledTaskTrigger -AtLogOn" in source
+    assert "-RunLevel Highest" in source
+    assert "Arguments = '--background'" in source
+    assert "Resident Guard protection is managed separately" in source
+    assert "S-1-5-18" in source
