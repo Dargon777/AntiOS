@@ -54,11 +54,20 @@ jobs:
       - name: Install NSIS compiler
         shell: pwsh
         run: |
-          choco install nsis --no-progress -y
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          # Chocolatey's package feed can intermittently return 5xx. Retry the
+          # install and reuse an already available compiler on the runner.
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if (Test-Path -LiteralPath $makensis) { break }
+            choco install nsis --no-progress -y
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $makensis)) { break }
+            if ($attempt -lt 3) {
+              Write-Warning "NSIS install attempt $attempt failed; retrying"
+              Start-Sleep -Seconds (10 * $attempt)
+            }
+          }
           if (-not (Test-Path -LiteralPath $makensis)) {
-            throw "NSIS compiler not found at $makensis"
+            throw "NSIS compiler unavailable after three attempts."
           }
 
       - name: Validate release version
