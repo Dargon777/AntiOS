@@ -257,11 +257,11 @@ def test_manual_missing_engine_requests_bootstrap_not_silent_repair(monkeypatch)
 
 def test_guard_preference_rolls_back_when_uac_is_denied(monkeypatch):
     import pytest
-    from antios.config import AppConfig
+    from antios.config import AppConfig, ProtectionConfig
     from antios.dashboard import Dashboard
 
     dashboard = Dashboard.__new__(Dashboard)
-    dashboard.config = AppConfig()
+    dashboard.config = AppConfig(protection=ProtectionConfig(resident_enabled=False))
     original = dashboard.config.protection.resident_enabled
     saves = []
     dashboard._persist_config = lambda: saves.append(
