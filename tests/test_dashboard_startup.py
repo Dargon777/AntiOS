@@ -92,3 +92,5 @@ def test_dashboard_startup_task_is_separate_elevated_logon_task():
     assert "Arguments = '--background'" in source
     assert "Resident Guard protection is managed separately" in source
     assert "S-1-5-18" in source
+    assert "Win32_ComputerSystem" in source
+    assert "current elevated identity differs from the interactive user" in source
