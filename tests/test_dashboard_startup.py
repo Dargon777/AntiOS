@@ -88,7 +88,7 @@ def test_dashboard_startup_task_is_separate_elevated_logon_task():
 
     assert "AntiOS Control Center" in source
     assert "New-ScheduledTaskTrigger -AtLogOn" in source
-    assert "-RunLevel Highest" in source
+    assert "-RunLevel Limited" in source
     assert "Arguments = '--background'" in source
     assert "Resident Guard protection is managed separately" in source
     assert "S-1-5-18" in source
