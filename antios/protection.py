@@ -258,7 +258,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     blockers = []
     if not engine_ready:
         blockers.append("trusted-current-engine")
-    if not guard_running:
+    if not guard_operational:
         blockers.append("resident-post-write-guard")
     if not pre_execution:
         blockers.append("signed-native-pre-execution-enforcement")
