@@ -490,8 +490,22 @@ class Dashboard:
 
         if not is_administrator():
             if interactive:
-                request_protection_elevation("repair" if repairable else "bootstrap")
-                return {"action": "elevation-requested", "operation": "repair" if repairable else "bootstrap"}
+                action = "repair" if repairable else "bootstrap"
+                completion = request_protection_elevation(action)
+                # The elevated process has exited successfully. Verify that
+                # the service and its malware database are actually ready.
+                verified = collect_protection_status()
+                if not verified.get("capabilities", {}).get("standalone_detection_engine"):
+                    raise RuntimeError(
+                        "Administrator maintenance finished, but ClamAV is not ready. "
+                        "Inspect protection status and repair logs before enabling Guard."
+                    )
+                return {
+                    "action": "repaired" if repairable else "bootstrapped",
+                    "completion": completion,
+                    "verified": True,
+                    "status": verified,
+                }
             # Background startup must never prompt for UAC or silently modify
             # machine-wide service/ACL/engine settings.
             return {"action": "requires-elevation"}
@@ -522,10 +536,6 @@ class Dashboard:
         from .resident import ensure_resident_guard
 
         engine = self._heal_managed_engine(interactive=True)
-        if engine.get("action") == "elevation-requested":
-            # UAC consent only confirms that a separate elevated CLI was
-            # launched; it does not prove the repair succeeded.
-            return {"engine": engine, "guard": {"changed": False, "state": "repair-requested"}}
         guard = ensure_resident_guard()
         return {"engine": engine, "guard": guard}
 
@@ -541,9 +551,6 @@ class Dashboard:
             if enabled:
                 from .resident import ensure_resident_guard
                 engine = self._heal_managed_engine(interactive=True)
-                if engine.get("action") == "elevation-requested":
-                    return {"enabled": True, "engine": engine,
-                            "guard": {"changed": False, "state": "repair-requested"}}
                 guard = ensure_resident_guard()
                 return {"enabled": True, "engine": engine, "guard": guard}
             from .resident import disable_resident_guard
