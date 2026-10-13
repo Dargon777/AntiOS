@@ -100,13 +100,20 @@ The dashboard and its logon task run as the interactive user (asInvoker /
 Limited), not permanently as administrator. Scanning and the user's DPAPI
 quarantine therefore stay under that user's identity. A missing/damaged
 machine-wide ClamD installation is **not** silently repaired during background
-startup. Clicking Repair protection explicitly asks Windows to elevate the
-separate installed AntiOS CLI for an allowlisted repair/bootstrap operation.
-The GUI reports this as a request, not a completed repair; refresh protection
-status after it finishes. Automatic privileged repair from user-writable portable
-directories is not supported. The installer and command-line utility retain
-their privileged operations. Re-register an older Highest logon task as Limited
-when reconciling the startup preference.
+startup. Clicking Repair protection explicitly asks Windows to elevate the separate
+installed AntiOS CLI for an allowlisted repair/bootstrap operation. The GUI
+waits for its **real Windows process handle** and checks its exit code
+(6-minute limit for repair, 20-minute limit for initial bootstrap). Even exit
+code zero is not enough: the GUI independently re-reads verified ClamD and
+database state and **does not start Guard or claim completion if this check
+fails**. A timeout does not terminate the administrator's installation; the
+result is explicitly unverified until the user refreshes protection status.
+No elevated output or IPC data is trusted from user-writable files.
+
+Automatic privileged repair from user-writable portable directories is not
+supported. The installer and command-line utility retain their privileged
+operations. Re-register an older Highest logon task as Limited when reconciling
+the startup preference.
 
 ## Quarantine
 
