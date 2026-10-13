@@ -505,7 +505,10 @@ class Guard:
                 if ready and self.status['engine'].get('available') and not cancelled():
                     path, (identity, _) = ready
                     del self.pending[path]
-                    self.status.update(state='scanning', current_path=str(path))
+                    # A degraded Guard must not look fully healthy merely because
+                    # it entered a scanning phase.
+                    scan_state = 'degraded' if self.status['state'] == 'degraded' else 'scanning'
+                    self.status.update(state=scan_state, current_path=str(path))
                     store.publish(self.status)
                     self._notify_status()
                     try:
