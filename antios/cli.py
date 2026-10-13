@@ -117,6 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Run FreshClam while applying the repair.")
     repair_cmd.add_argument("--json", action="store_true")
 
+    bootstrap_cmd = sub.add_parser(
+        "protection-bootstrap",
+        help="Install/refresh the official pinned ClamAV engine (administrator only).",
+    )
+    bootstrap_cmd.add_argument("--yes", action="store_true", help="Confirm system installation.")
+    bootstrap_cmd.add_argument("--json", action="store_true")
+
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
     version_cmd.add_argument("--json", action="store_true")
 
@@ -365,6 +372,19 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(status)
             else:
                 print(render_coexistence_status(status))
+            return 0
+
+        if args.command == "protection-bootstrap":
+            if not args.yes:
+                raise ValueError("Protection bootstrap changes machine settings; pass --yes to confirm")
+            if not _is_admin():
+                raise PermissionError("Administrator privileges are required for protection bootstrap")
+            from .protection_repair import run_protection_bootstrap
+            payload = run_protection_bootstrap()
+            if args.json:
+                _print_json(payload)
+            else:
+                print("AntiOS protection bootstrap: " + str(payload.get("kind")))
             return 0
 
         if args.command == "protection-repair":
