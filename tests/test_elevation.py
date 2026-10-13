@@ -125,6 +125,10 @@ def test_os_process_handle_reports_success_and_closes(monkeypatch):
         return 1
 
     shell = SimpleNamespace(ShellExecuteExW=Native(shell_exec))
+    ole = SimpleNamespace(
+        CoInitializeEx=Native(lambda *_args: 0),
+        CoUninitialize=Native(lambda: None),
+    )
     kernel = SimpleNamespace(
         WaitForSingleObject=Native(finish),
         GetExitCodeProcess=Native(exit_code),
@@ -133,7 +137,9 @@ def test_os_process_handle_reports_success_and_closes(monkeypatch):
     monkeypatch.setattr(elevation, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(
         elevation.ctypes, "WinDLL",
-        lambda name, **kwargs: shell if name == "shell32" else kernel,
+        lambda name, **kwargs: (
+            shell if name == "shell32" else ole if name == "ole32" else kernel
+        ),
         raising=False,
     )
 
@@ -163,6 +169,10 @@ def test_os_elevated_process_failure_and_timeout_close_handle(monkeypatch):
 
     outcomes = [258, 0]
     shell = SimpleNamespace(ShellExecuteExW=Native(launch))
+    ole = SimpleNamespace(
+        CoInitializeEx=Native(lambda *_args: 0),
+        CoUninitialize=Native(lambda: None),
+    )
     kernel = SimpleNamespace(
         WaitForSingleObject=Native(lambda *_args: outcomes.pop(0)),
         GetExitCodeProcess=Native(
@@ -173,7 +183,9 @@ def test_os_elevated_process_failure_and_timeout_close_handle(monkeypatch):
     monkeypatch.setattr(elevation, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(
         elevation.ctypes, "WinDLL",
-        lambda name, **kwargs: shell if name == "shell32" else kernel,
+        lambda name, **kwargs: (
+            shell if name == "shell32" else ole if name == "ole32" else kernel
+        ),
         raising=False,
     )
     cli = Path("C:/Program Files/AntiOS/AntiOS.exe")
