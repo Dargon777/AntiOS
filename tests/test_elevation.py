@@ -51,18 +51,24 @@ def test_privileged_action_allowlist_rejects_unknown_operations():
 
 def test_explicit_repair_uses_only_managed_cli_with_fixed_arguments(monkeypatch):
     from pathlib import Path
-    shell = shell_mock(monkeypatch, status=42)
+    shell_mock(monkeypatch, status=42)
+    calls = []
     monkeypatch.setattr(
         elevation, "managed_cli_path",
         lambda: Path("C:/Program Files/AntiOS/AntiOS.exe"),
     )
-    elevation.request_protection_elevation("repair")
-    call = shell.ShellExecuteW.calls[0]
-    assert call[1] == "runas"
-    assert call[2].endswith("AntiOS.exe")
-    assert call[3] == "protection-repair --yes --update-signatures --json"
+    monkeypatch.setattr(
+        elevation, "_run_elevated_cli",
+        lambda path, args, *, timeout_seconds:
+            calls.append((str(path), args, timeout_seconds)) or {"completed": True, "exit_code": 0},
+    )
+    assert elevation.request_protection_elevation("repair")["completed"] is True
+    assert calls[0][0].endswith("AntiOS.exe")
+    assert calls[0][1] == ["protection-repair", "--yes", "--update-signatures", "--json"]
+    assert calls[0][2] == 360
     elevation.request_protection_elevation("bootstrap")
-    assert shell.ShellExecuteW.calls[1][3] == "protection-bootstrap --yes --json"
+    assert calls[1][1] == ["protection-bootstrap", "--yes", "--json"]
+    assert calls[1][2] == 1200
 
 
 def test_denied_uac_never_reports_success(monkeypatch):
@@ -74,5 +80,105 @@ def test_denied_uac_never_reports_success(monkeypatch):
         elevation, "managed_cli_path",
         lambda: Path("C:/Program Files/AntiOS/AntiOS.exe"),
     )
-    with pytest.raises(PermissionError, match="denied"):
+    monkeypatch.setattr(
+        elevation, "_run_elevated_cli",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            PermissionError("Administrator consent was cancelled")
+        ),
+    )
+    with pytest.raises(PermissionError, match="cancelled"):
         elevation.request_protection_elevation("repair")
+
+
+
+def test_os_process_handle_reports_success_and_closes(monkeypatch):
+    """Exercise the ShellExecuteEx/Wait/GetExitCode contract without Windows."""
+    import ctypes
+    from pathlib import Path
+
+    calls = []
+    class Native:
+        def __init__(self, fn):
+            self.fn = fn
+        def __call__(self, *args):
+            return self.fn(*args)
+
+    def shell_exec(pointer):
+        request = pointer._obj
+        assert request.lpVerb == "runas"
+        assert request.fMask & 0x40
+        assert request.fMask & 0x100
+        assert request.lpParameters == "protection-repair --yes"
+        request.hProcess = 9123
+        calls.append("launch")
+        return 1
+
+    def finish(handle, timeout):
+        assert handle == 9123 and timeout == 360000
+        calls.append("wait")
+        return 0
+
+    def exit_code(handle, result):
+        assert handle == 9123
+        result._obj.value = 0
+        calls.append("exitcode")
+        return 1
+
+    shell = SimpleNamespace(ShellExecuteExW=Native(shell_exec))
+    kernel = SimpleNamespace(
+        WaitForSingleObject=Native(finish),
+        GetExitCodeProcess=Native(exit_code),
+        CloseHandle=Native(lambda handle: calls.append(("close", handle)) or 1),
+    )
+    monkeypatch.setattr(elevation, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        elevation.ctypes, "WinDLL",
+        lambda name, **kwargs: shell if name == "shell32" else kernel,
+        raising=False,
+    )
+
+    result = elevation._run_elevated_cli(
+        Path("C:/Program Files/AntiOS/AntiOS.exe"),
+        ["protection-repair", "--yes"], timeout_seconds=360,
+    )
+    assert result == {"completed": True, "exit_code": 0}
+    assert calls == ["launch", "wait", "exitcode", ("close", 9123)]
+
+
+def test_os_elevated_process_failure_and_timeout_close_handle(monkeypatch):
+    import ctypes
+    from pathlib import Path
+    import pytest
+
+    closed = []
+    class Native:
+        def __init__(self, fn):
+            self.fn = fn
+        def __call__(self, *args):
+            return self.fn(*args)
+
+    def launch(pointer):
+        pointer._obj.hProcess = 77
+        return 1
+
+    outcomes = [258, 0]
+    shell = SimpleNamespace(ShellExecuteExW=Native(launch))
+    kernel = SimpleNamespace(
+        WaitForSingleObject=Native(lambda *_args: outcomes.pop(0)),
+        GetExitCodeProcess=Native(
+            lambda _handle, result: setattr(result._obj, "value", 2) or 1
+        ),
+        CloseHandle=Native(lambda handle: closed.append(handle) or 1),
+    )
+    monkeypatch.setattr(elevation, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        elevation.ctypes, "WinDLL",
+        lambda name, **kwargs: shell if name == "shell32" else kernel,
+        raising=False,
+    )
+    cli = Path("C:/Program Files/AntiOS/AntiOS.exe")
+    with pytest.raises(TimeoutError, match="unverified"):
+        elevation._run_elevated_cli(cli, ["protection-repair"], timeout_seconds=1)
+    with pytest.raises(RuntimeError, match="exit code 2"):
+        elevation._run_elevated_cli(cli, ["protection-repair"], timeout_seconds=1)
+    assert closed == [77, 77]
