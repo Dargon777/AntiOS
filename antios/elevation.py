@@ -1,4 +1,4 @@
-"""Request a normal Windows UAC consent prompt before opening the dashboard."""
+"""Restrict elevated AntiOS operations to explicit, allowlisted UAC maintenance."""
 from __future__ import annotations
 
 import ctypes
@@ -72,11 +72,11 @@ def managed_cli_path():
     return cli
 
 
-def request_protection_elevation(action: str) -> None:
+def request_protection_elevation(action: str) -> dict:
     """Launch an allowlisted machine repair via a separate UAC-elevated CLI.
 
-    Successful ShellExecute means only that Windows accepted the launch. The
-    dashboard must not assume the elevated operation completed successfully.
+    Returns completion only after the elevated process exits with code zero.
+    Callers must also independently re-probe managed engine health.
     """
     if action not in {"repair", "bootstrap"}:
         raise ValueError("Unsupported privileged protection operation")
@@ -88,14 +88,90 @@ def request_protection_elevation(action: str) -> None:
         if action == "repair" else
         ["protection-bootstrap", "--yes", "--json"]
     )
+    # ShellExecuteW only confirms that UAC launched a process; it cannot
+    # distinguish successful repair from a failed bootstrap. Wait on a real
+    # Windows process handle instead of trusting a writable status file or IPC
+    # message from a potentially different administrator account.
+    timeout = 1200 if action == "bootstrap" else 360
+    return _run_elevated_cli(cli, arguments, timeout_seconds=timeout)
+
+
+def _run_elevated_cli(cli, arguments: list[str], *, timeout_seconds: int) -> dict:
+    """Wait for one allowlisted elevated CLI and inspect its OS exit status.
+
+    Must be called from a GUI worker, never the Tk/UI thread. Timeout closes
+    our process handle but does not terminate the elevated maintenance job.
+    """
+    if os.name != "nt":
+        raise OSError("Windows UAC is required")
+    if not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 3600:
+        raise ValueError("Invalid privileged-operation timeout")
+
+    from ctypes import wintypes
+
+    class _ShellExecuteInfo(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("fMask", wintypes.ULONG),
+            ("hwnd", wintypes.HWND),
+            ("lpVerb", wintypes.LPCWSTR),
+            ("lpFile", wintypes.LPCWSTR),
+            ("lpParameters", wintypes.LPCWSTR),
+            ("lpDirectory", wintypes.LPCWSTR),
+            ("nShow", ctypes.c_int),
+            ("hInstApp", wintypes.HINSTANCE),
+            ("lpIDList", ctypes.c_void_p),
+            ("lpClass", wintypes.LPCWSTR),
+            ("hkeyClass", wintypes.HKEY),
+            ("dwHotKey", wintypes.DWORD),
+            ("hIconOrMonitor", wintypes.HANDLE),
+            ("hProcess", wintypes.HANDLE),
+        ]
+
     shell = ctypes.WinDLL("shell32", use_last_error=True, winmode=0x800)
-    shell.ShellExecuteW.argtypes = [
-        ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
-        ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int,
-    ]
-    shell.ShellExecuteW.restype = ctypes.c_void_p
-    status = shell.ShellExecuteW(
-        None, "runas", str(cli), subprocess.list2cmdline(arguments), str(cli.parent), 1,
-    )
-    if not status or status <= 32:
-        raise PermissionError("Administrator consent was denied or repair could not launch")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True, winmode=0x800)
+    shell.ShellExecuteExW.argtypes = [ctypes.POINTER(_ShellExecuteInfo)]
+    shell.ShellExecuteExW.restype = wintypes.BOOL
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+
+    request = _ShellExecuteInfo()
+    request.cbSize = ctypes.sizeof(_ShellExecuteInfo)
+    request.fMask = 0x00000040 | 0x00000100  # SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC
+    request.lpVerb = "runas"
+    request.lpFile = str(cli)
+    request.lpParameters = subprocess.list2cmdline(arguments)
+    request.lpDirectory = str(cli.parent)
+    request.nShow = 1  # CLI window visible for administrator diagnostics
+
+    # UAC interaction stays in the native Windows shell. No PowerShell Bypass,
+    # user-writable executable/script or untrusted arguments are involved.
+    if not shell.ShellExecuteExW(ctypes.byref(request)):
+        error = ctypes.get_last_error()
+        if error == 1223:  # ERROR_CANCELLED
+            raise PermissionError("Administrator consent was cancelled")
+        raise OSError(error, "Cannot launch elevated AntiOS maintenance CLI")
+    if not request.hProcess:
+        raise RuntimeError("Windows did not return an elevated process handle")
+
+    try:
+        wait = kernel.WaitForSingleObject(request.hProcess, timeout_seconds * 1000)
+        if wait == 258:  # WAIT_TIMEOUT
+            raise TimeoutError(
+                "AntiOS maintenance is still running; completion is unverified. "
+                "Refresh protection state after it finishes."
+            )
+        if wait != 0:  # WAIT_OBJECT_0
+            raise OSError(ctypes.get_last_error(), "Unable to wait for elevated AntiOS CLI")
+        code = wintypes.DWORD()
+        if not kernel.GetExitCodeProcess(request.hProcess, ctypes.byref(code)):
+            raise OSError(ctypes.get_last_error(), "Unable to read elevated AntiOS exit status")
+        if code.value != 0:
+            raise RuntimeError(f"AntiOS administrator repair failed (exit code {code.value})")
+        return {"completed": True, "exit_code": 0}
+    finally:
+        kernel.CloseHandle(request.hProcess)
