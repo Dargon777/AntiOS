@@ -25,7 +25,7 @@ for name in ('AntiOS', 'AntiOS-GUI', 'AntiOS-Guard'):
                     manifests.append(ET.fromstring(pe.get_data(data.OffsetToData, data.Size)))
     levels = [level.attrib['level'] for root in manifests
               for level in root.iter('{urn:schemas-microsoft-com:asm.v3}requestedExecutionLevel')]
-    expected_level = 'asInvoker' if name == 'AntiOS-Guard' else 'requireAdministrator'
+    expected_level = 'requireAdministrator' if name == 'AntiOS' else 'asInvoker'
     assert levels == [expected_level], levels
     pe.close()
     with tempfile.TemporaryDirectory() as folder:
