@@ -169,7 +169,7 @@ def test_manual_guard_enable_repairs_engine_before_resident_start(monkeypatch):
     dashboard = Dashboard.__new__(Dashboard)
     dashboard.config = AppConfig()
     dashboard._persist_config = lambda: calls.append("persist")
-    dashboard._heal_managed_engine = lambda: calls.append("engine") or {"action": "ready"}
+    dashboard._heal_managed_engine = lambda **_kwargs: calls.append("engine") or {"action": "ready"}
     monkeypatch.setattr(
         resident,
         "ensure_resident_guard",
