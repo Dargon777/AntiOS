@@ -530,22 +530,30 @@ class Dashboard:
         return {"engine": engine, "guard": guard}
 
     def set_resident_protection_enabled(self, enabled: bool) -> dict:
-        """Persist the user's Guard preference and apply it immediately."""
+        """Persist Guard preference without lying about a failed transition."""
+        original = self.config
         self.config = replace(
             self.config,
             protection=replace(self.config.protection, resident_enabled=bool(enabled)),
         )
         self._persist_config()
-        if enabled:
-            from .resident import ensure_resident_guard
-            engine = self._heal_managed_engine(interactive=True)
-            if engine.get("action") == "elevation-requested":
-                return {"enabled": True, "engine": engine,
-                        "guard": {"changed": False, "state": "repair-requested"}}
-            guard = ensure_resident_guard()
-            return {"enabled": True, "engine": engine, "guard": guard}
-        from .resident import disable_resident_guard
-        return disable_resident_guard()
+        try:
+            if enabled:
+                from .resident import ensure_resident_guard
+                engine = self._heal_managed_engine(interactive=True)
+                if engine.get("action") == "elevation-requested":
+                    return {"enabled": True, "engine": engine,
+                            "guard": {"changed": False, "state": "repair-requested"}}
+                guard = ensure_resident_guard()
+                return {"enabled": True, "engine": engine, "guard": guard}
+            from .resident import disable_resident_guard
+            return disable_resident_guard()
+        except Exception:
+            # A denied UAC prompt or failed task registration must not leave an
+            # enabled/disabled preference that was never successfully applied.
+            self.config = original
+            self._persist_config()
+            raise
 
     def _dashboard_startup_reconcile_worker(self) -> None:
         try:
