@@ -166,7 +166,7 @@ jobs:
       - name: Build GUI executable
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onedir --contents-directory _gui --uac-admin --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
+          pyinstaller --clean --noconfirm --onedir --contents-directory _gui --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
 
       - name: Build resident guard executable
         shell: pwsh
