@@ -148,13 +148,31 @@ def _run_elevated_cli(cli, arguments: list[str], *, timeout_seconds: int) -> dic
     request.lpDirectory = str(cli.parent)
     request.nShow = 1  # CLI window visible for administrator diagnostics
 
+    # ShellExecuteEx can invoke COM-based shell handlers. Microsoft recommends
+    # initializing the calling worker thread as an STA. Avoid an implicit
+    # uninitialized-COM dependency when the dashboard is launched from Tk.
+    ole = ctypes.WinDLL("ole32", use_last_error=True, winmode=0x800)
+    ole.CoInitializeEx.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+    ole.CoInitializeEx.restype = ctypes.c_long
+    ole.CoUninitialize.argtypes = []
+    ole.CoUninitialize.restype = None
+    hr = ole.CoInitializeEx(None, 0x2 | 0x4)  # STA | disable legacy OLE1 DDE
+    com_initialized = hr in (0, 1)  # S_OK / S_FALSE both require CoUninitialize
+    if not com_initialized and hr != -2147417850:  # RPC_E_CHANGED_MODE
+        raise OSError(f"Cannot initialize Windows shell COM apartment: HRESULT {hr:#x}")
+
     # UAC interaction stays in the native Windows shell. No PowerShell Bypass,
     # user-writable executable/script or untrusted arguments are involved.
-    if not shell.ShellExecuteExW(ctypes.byref(request)):
-        error = ctypes.get_last_error()
-        if error == 1223:  # ERROR_CANCELLED
+    try:
+        launched = shell.ShellExecuteExW(ctypes.byref(request))
+        launch_error = ctypes.get_last_error() if not launched else 0
+    finally:
+        if com_initialized:
+            ole.CoUninitialize()
+    if not launched:
+        if launch_error == 1223:  # ERROR_CANCELLED
             raise PermissionError("Administrator consent was cancelled")
-        raise OSError(error, "Cannot launch elevated AntiOS maintenance CLI")
+        raise OSError(launch_error, "Cannot launch elevated AntiOS maintenance CLI")
     if not request.hProcess:
         raise RuntimeError("Windows did not return an elevated process handle")
 
