@@ -100,6 +100,9 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
 
         panel = app.antivirus_panel
         assert panel.engine_var.get() == "clamav"
+        panel._sync_guard_ui({"state": "monitoring", "running": True})
+        assert panel.protection_status_text["text"] != "92"
+        assert not hasattr(panel, "protection_score")
         assert not hasattr(panel, "engine_choice")
         assert not panel.advanced_visible
         assert not panel.advanced_frame.place_info()
