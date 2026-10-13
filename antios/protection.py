@@ -218,6 +218,15 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         guard.get("running") and
         guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
     )
+    # A live Guard process can still have incomplete filesystem, engine or
+    # process telemetry coverage. Do not count a degraded Guard as a verified
+    # resident protection layer in the headline capability/coexistence status.
+    guard_operational = bool(
+        guard_running and guard.get("state") in {"monitoring", "attention", "scanning"}
+        and not guard.get("capacity_exceeded")
+        and not guard.get("inventory_issues")
+        and not guard.get("behavior_alerts_dropped", 0)
+    )
     behavior = guard.get("behavior", {}) if isinstance(guard.get("behavior"), dict) else {}
     risk = guard.get("risk", {}) if isinstance(guard.get("risk"), dict) else {}
     last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
