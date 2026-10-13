@@ -252,3 +252,25 @@ def test_manual_missing_engine_requests_bootstrap_not_silent_repair(monkeypatch)
     result = dashboard._heal_managed_engine(interactive=True)
     assert actions == ["bootstrap"]
     assert result["action"] == "elevation-requested"
+
+
+
+def test_guard_preference_rolls_back_when_uac_is_denied(monkeypatch):
+    import pytest
+    from antios.config import AppConfig
+    from antios.dashboard import Dashboard
+
+    dashboard = Dashboard.__new__(Dashboard)
+    dashboard.config = AppConfig()
+    original = dashboard.config.protection.resident_enabled
+    saves = []
+    dashboard._persist_config = lambda: saves.append(
+        dashboard.config.protection.resident_enabled
+    )
+    dashboard._heal_managed_engine = lambda **kwargs: (
+        (_ for _ in ()).throw(PermissionError("UAC denied"))
+    )
+    with pytest.raises(PermissionError, match="UAC denied"):
+        Dashboard.set_resident_protection_enabled(dashboard, not original)
+    assert dashboard.config.protection.resident_enabled == original
+    assert saves == [not original, original]
