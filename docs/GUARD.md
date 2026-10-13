@@ -28,8 +28,9 @@ The CLI works independently of the dashboard:
 
 For a Python installation, use `antios guard ...` or `antios-guard ...`. The
 companion EXE requests `asInvoker`, not administrator rights. Its `_guard`
-directory must remain beside it. The main dashboard and advanced CLI retain
-existing UAC behavior. The Store package currently contains only the dashboard;
+directory must remain beside it. The dashboard now runs with the interactive user's normal permissions;
+the packaged advanced CLI still requires UAC when launched directly. Machine
+engine repair uses a separate, explicit elevated CLI handoff. The Store package currently contains only the dashboard;
 its Guard start button is disabled when the companion is absent. Store support
 requires a separate package and installed-Windows acceptance test.
 
