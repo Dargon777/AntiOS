@@ -474,7 +474,7 @@ class Dashboard:
         if self.config.updates.auto_update:
             self._start_update_worker(download=True, automatic=True)
 
-    def _heal_managed_engine(self) -> dict:
+    def _heal_managed_engine(self, *, interactive: bool = False) -> dict:
         from .protection import collect_protection_status
         from .protection_repair import run_protection_bootstrap, run_protection_repair
 
@@ -486,6 +486,15 @@ class Dashboard:
         managed = status.get("managed_runtime", {})
         managed_files = managed.get("files", {}) if isinstance(managed, dict) else {}
         repairable = bool(managed_files) and all(bool(value) for value in managed_files.values())
+        from .elevation import is_administrator, request_protection_elevation
+
+        if not is_administrator():
+            if interactive:
+                request_protection_elevation("repair" if repairable else "bootstrap")
+                return {"action": "elevation-requested", "operation": "repair" if repairable else "bootstrap"}
+            # Background startup must never prompt for UAC or silently modify
+            # machine-wide service/ACL/engine settings.
+            return {"action": "requires-elevation"}
         if repairable:
             result = run_protection_repair(apply=True, update_signatures=True)
             return {"action": "repaired", "result": result}
@@ -496,7 +505,13 @@ class Dashboard:
         try:
             from .resident import ensure_resident_guard
 
-            self._heal_managed_engine()
+            engine = self._heal_managed_engine()
+            if engine.get("action") == "requires-elevation":
+                self.antivirus_queue.put((
+                    "error",
+                    "Resident engine needs administrator repair. Open Antivirus and choose Repair protection.",
+                ))
+                return
             value = ensure_resident_guard()
             self.antivirus_queue.put(("guard-action", value))
         except Exception as exc:
@@ -506,7 +521,11 @@ class Dashboard:
         """Repair/bootstrap the managed engine and restore Resident Guard."""
         from .resident import ensure_resident_guard
 
-        engine = self._heal_managed_engine()
+        engine = self._heal_managed_engine(interactive=True)
+        if engine.get("action") == "elevation-requested":
+            # UAC consent only confirms that a separate elevated CLI was
+            # launched; it does not prove the repair succeeded.
+            return {"engine": engine, "guard": {"changed": False, "state": "repair-requested"}}
         guard = ensure_resident_guard()
         return {"engine": engine, "guard": guard}
 
@@ -519,7 +538,10 @@ class Dashboard:
         self._persist_config()
         if enabled:
             from .resident import ensure_resident_guard
-            engine = self._heal_managed_engine()
+            engine = self._heal_managed_engine(interactive=True)
+            if engine.get("action") == "elevation-requested":
+                return {"enabled": True, "engine": engine,
+                        "guard": {"changed": False, "state": "repair-requested"}}
             guard = ensure_resident_guard()
             return {"enabled": True, "engine": engine, "guard": guard}
         from .resident import disable_resident_guard
@@ -3450,8 +3472,7 @@ def main(argv: list[str] | None = None) -> int:
         root.update_idletasks()
         root.destroy()
         return 0
-    from .elevation import ensure_administrator
-    elevation_status = ensure_administrator(args.lang)
-    if elevation_status is not None:
-        return elevation_status
+    # The control center is an asInvoker application: monitoring, quarantine
+    # and ordinary diagnostics must use the *interactive user's* identity.
+    # Privileged service repair is requested only after explicit user action.
     return launch(args.lang, background=args.background)
