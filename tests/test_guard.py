@@ -821,3 +821,162 @@ def test_guard_cli_persists_startup_error_before_heartbeat(tmp_path):
     assert payload["kind"] == "antios-guard-startup-error"
     assert payload["error_type"] == "ValueError"
     assert "Unknown guard policy field" in payload["error"]
+
+
+
+def test_process_collector_error_marks_guard_degraded_and_recovers(tmp_path):
+    class FailingSampler:
+        def poll(self):
+            raise OSError(errno.EIO, "process snapshot temporarily unavailable")
+
+    class HealthySampler:
+        def poll(self):
+            return []
+
+    creations = []
+    def factory():
+        creations.append(1)
+        return FailingSampler() if len(creations) == 1 else HealthySampler()
+
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path, process_sampler=None, process_sampler_factory=factory,
+    )
+    try:
+        until(lambda: instance.status["behavior"]["collector_errors"] >= 1)
+        until(lambda: instance.status["state"] == "degraded")
+        assert instance.status["behavior"]["collector"] == "file-correlation-only"
+        assert instance.status["behavior"]["collector_detail"]
+        # Simulate expiry of the 30-second recovery backoff without waiting.
+        instance._process_retry_at = float("-inf")
+        until(lambda: instance.status["behavior"]["collector_recoveries"] == 1)
+        until(lambda: instance.status["state"] == "monitoring")
+        assert instance.status["behavior"]["collector"] == "injected"
+        assert instance.status["behavior"]["collector_errors"] >= 1
+        assert instance.status["behavior"]["collector_detail"] == ""
+        events = read_guard_state(state, history=True)["events"]
+        assert any(event["kind"] == "behavior-collector-recovered" for event in events)
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_process_sampler_initialization_error_is_retried(tmp_path):
+    class HealthySampler:
+        def poll(self):
+            return []
+
+    attempts = []
+    def factory():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise OSError(errno.EBUSY, "initial snapshot unavailable")
+        return HealthySampler()
+
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path, process_sampler=None, process_sampler_factory=factory,
+    )
+    assert instance.status["behavior"]["collector_errors"] == 1
+    assert instance.status["behavior"]["collector"] == "file-correlation-only"
+    try:
+        until(lambda: instance.status["state"] == "degraded")
+        instance._process_retry_at = float("-inf")
+        until(lambda: instance.status["behavior"]["collector_recoveries"] >= 1)
+        until(lambda: instance.status["state"] == "monitoring")
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_guard_journals_behavior_event_loss_and_never_reports_healthy(tmp_path):
+    class Finding:
+        def to_dict(self):
+            return {"rule": "inert-test-alert", "severity": "medium"}
+
+    root = tmp_path / "watched-overflow"
+    root.mkdir()
+    state = tmp_path / "overflow-state"
+    instance = guard.Guard(
+        guard.GuardPolicy((root,), interval=0.1, settle=0.01),
+        state, scanner=scan, probe=probe, watcher_factory=PollNotifications,
+        process_sampler=type("SilentSampler", (), {"poll": lambda self: []})(),
+        native_probe=lambda: None,
+    )
+    instance._queue_behavior_findings([Finding() for _ in range(135)])
+    assert len(instance._behavior_events) == 100
+    assert instance.status["behavior_alerts_dropped"] == 35
+    assert instance.status["behavior"]["alerts_dropped"] == 35
+    stop, failures = threading.Event(), []
+
+    def run_guard():
+        try:
+            instance.run(stop)
+        except Exception as exc:
+            failures.append(exc)
+
+    thread = threading.Thread(target=run_guard, daemon=True)
+    thread.start()
+    try:
+        until(lambda: instance.status["state"] == "degraded")
+        until(lambda: any(
+            event["kind"] == "behavior-alert-loss"
+            for event in read_guard_state(state, history=True)["events"]
+        ))
+        assert instance.status["behavior_alerts_dropped"] == 35
+        assert instance.status["scanned"] == 0
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_deleted_file_releases_transient_retry_state(tmp_path):
+    root, state, instance, stop, thread, failures = launch(tmp_path)
+    target = root / "ephemeral.exe"
+    try:
+        target.write_bytes(b"innocuous")
+        until(lambda: instance.status["scanned"] >= 1)
+        instance.transient_retries[target] = 2
+        target.unlink()
+        until(lambda: target not in instance.transient_retries)
+        assert target not in instance.known
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_new_file_identity_resets_stale_transient_retry_budget(tmp_path):
+    root = tmp_path / "identity-root"
+    root.mkdir()
+    target = root / "changing.exe"
+    target.write_bytes(b"old")
+    old_identity = guard.file_identity(target.stat())
+    instance = guard.Guard(
+        guard.GuardPolicy((root,), interval=0.1, settle=0.05),
+        tmp_path / "identity-state", scanner=scan, probe=probe,
+        watcher_factory=PollNotifications,
+        process_sampler=type("SilentSampler", (), {"poll": lambda self: []})(),
+        native_probe=lambda: None,
+    )
+    instance.pending[target] = (old_identity, time.monotonic() + 5)
+    instance.transient_retries[target] = guard._MAX_TRANSIENT_SCAN_RETRIES
+    target.write_bytes(b"new content with distinct length")
+
+    stop, failures = threading.Event(), []
+    def run_guard():
+        try:
+            instance.run(stop)
+        except Exception as exc:
+            failures.append(exc)
+    thread = threading.Thread(target=run_guard, daemon=True)
+    thread.start()
+    try:
+        until(lambda: target not in instance.transient_retries)
+        until(lambda: instance.status["scanned"] >= 1)
+        assert instance.status["errors"] == 0
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
