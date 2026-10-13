@@ -665,6 +665,8 @@ class Dashboard:
         if self.update_busy:
             return
         self.update_busy = True
+        if hasattr(self, "install_update_button"):
+            self.install_update_button.configure(state="disabled")
         if not automatic:
             self._set_update_status(self.t("settings.updates.checking"))
 
@@ -674,7 +676,6 @@ class Dashboard:
                     default_update_directory,
                     download_update,
                     latest_alpha,
-                    schedule_install,
                 )
                 payload = latest_alpha()
                 if download and payload.get("update_available"):
@@ -684,11 +685,8 @@ class Dashboard:
                         require_signature=False,
                         replace_existing=True,
                     )
-                    if automatic and payload.get("install_ready"):
-                        payload["installer"] = schedule_install(
-                            payload["setup_path"],
-                            payload["sha256"],
-                        )
+                    # Auto-check/download is allowed; silent install is not.
+                    # Installing requires explicit confirmation and closing the GUI.
                 error = None
             except Exception as exc:
                 payload = None
@@ -697,6 +695,7 @@ class Dashboard:
             def complete() -> None:
                 self.update_busy = False
                 if error:
+                    self.update_payload = None
                     self._set_update_status(
                         self.t("settings.updates.failed", error=error),
                         warning=True,
@@ -704,14 +703,15 @@ class Dashboard:
                     return
                 assert payload is not None
                 self.update_payload = payload
+                if hasattr(self, "install_update_button"):
+                    self.install_update_button.configure(
+                        state="normal" if payload.get("install_ready") else "disabled"
+                    )
                 if not payload.get("update_available"):
                     self._set_update_status(self.t("settings.updates.latest"))
-                elif payload.get("installer"):
+                elif payload.get("downloaded") and payload.get("install_ready"):
                     self._set_update_status(
-                        self.t(
-                            "settings.updates.signed_ready",
-                            version=payload.get("latest_version"),
-                        )
+                        self.t("settings.updates.signed_ready", version=payload.get("latest_version"))
                     )
                 elif payload.get("downloaded") and payload.get("install_ready"):
                     self._set_update_status(
@@ -747,6 +747,28 @@ class Dashboard:
             name="AntiOSUpdateCheck",
         ).start()
 
+
+    def _install_update_now(self) -> None:
+        """Hand off a verified update only after explicit user confirmation."""
+        from tkinter import messagebox
+        from .updater import schedule_install
+
+        payload = self.update_payload
+        if self.update_busy or not isinstance(payload, dict) or not payload.get("install_ready"):
+            self._set_update_status(self.t("settings.updates.unavailable"), warning=True)
+            return
+        if not messagebox.askyesno("AntiOS", self.t("settings.updates.confirm")):
+            return
+        try:
+            schedule_install(payload["setup_path"], payload["sha256"])
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_update_status(
+                self.t("settings.updates.failed", error=str(exc)[:500]),
+                warning=True,
+            )
+            return
+        self._set_update_status(self.t("settings.updates.installing"))
+        self._exit()
 
     def _open_update_folder(self) -> None:
         from .updater import default_update_directory
@@ -2518,6 +2540,12 @@ class Dashboard:
         update_actions.pack(fill="x", padx=18, pady=(0, 10))
         self._button(update_actions, self.t("settings.updates.check"), self._check_updates_now, kind="primary").pack(side="left")
         self._button(update_actions, self.t("settings.updates.download"), self._download_update_now, kind="secondary").pack(side="left", padx=(8, 0))
+        self.install_update_button = self._button(
+            update_actions, self.t("settings.updates.install"),
+            self._install_update_now, kind="secondary"
+        )
+        self.install_update_button.configure(state="disabled")
+        self.install_update_button.pack(side="left", padx=(8, 0))
         self._button(
             update_actions,
             "Открыть папку" if self.language == "ru" else "Open folder",
