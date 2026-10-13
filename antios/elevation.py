@@ -57,7 +57,13 @@ def managed_cli_path():
         registered, _ = winreg.QueryValueEx(key, "InstallDir")
     installed = Path(registered).resolve()
     gui_dir = Path(sys.executable).resolve().parent
-    program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files")).resolve()
+    # Use the machine-wide installation root, not the caller's mutable
+    # environment variables, to decide whether a UAC target is managed.
+    with winreg.OpenKey(
+        winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion"
+    ) as key:
+        program_files_dir, _ = winreg.QueryValueEx(key, "ProgramFilesDir")
+    program_files = Path(program_files_dir).resolve()
     if installed != gui_dir or installed == program_files or program_files not in installed.parents:
         raise RuntimeError("Privileged repair requires an installed AntiOS in Program Files")
     cli = installed / "AntiOS.exe"
