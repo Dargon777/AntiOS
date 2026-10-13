@@ -198,19 +198,19 @@ class AntivirusPanel:
         score.grid(row=0, column=3, sticky="nsew", padx=(0, 18), pady=18)
         tk.Label(
             score,
-            text="УРОВЕНЬ ЗАЩИТЫ" if self.app.language == "ru" else "PROTECTION LEVEL",
+            text="СОСТОЯНИЕ GUARD" if self.app.language == "ru" else "GUARD STATUS",
             bg=self.palette["surface_soft"],
             fg=self.palette["muted_2"],
             font=("Segoe UI Semibold", 8),
         ).pack(pady=(20, 7))
-        self.protection_score = tk.Label(
+        self.protection_status_text = tk.Label(
             score,
             text="—",
             bg=self.palette["surface_soft"],
             fg=self.palette["warn"],
-            font=("Segoe UI", 31, "bold"),
+            font=("Segoe UI", 17, "bold"),
         )
-        self.protection_score.pack()
+        self.protection_status_text.pack()
         self.engine_chip = tk.Label(
             score,
             text=self.t("managed_engine"),
@@ -900,6 +900,9 @@ class AntivirusPanel:
         self.guard_state_label.configure(text=short, fg=color)
         behavior = value.get("behavior") if isinstance(value.get("behavior"), dict) else {}
         behavior_state = str(behavior.get("state") or "unavailable")
+        if os.name == "nt" and behavior.get("collector") not in {"toolhelp-snapshot", "injected"}:
+            # A degraded process collector must not be presented as healthy.
+            behavior_state = "unavailable"
         behavior_label = self.t(
             "behavior_" + behavior_state
             if behavior_state in {"normal", "attention", "alert"}
@@ -948,16 +951,9 @@ class AntivirusPanel:
             )
         )
 
-        if hasattr(self, "protection_score"):
-            if healthy:
-                score = 100 if self.layered_active else 92
-            elif state == "starting":
-                score = 72
-            elif state == "attention":
-                score = 48
-            else:
-                score = 18
-            self.protection_score.configure(text=str(score), fg=color)
+        if hasattr(self, "protection_status_text"):
+            # Show the actual Guard state, never a fabricated protection score.
+            self.protection_status_text.configure(text=short, fg=color)
 
         if hasattr(self, "behavior_component_status"):
             behavior_color = (
