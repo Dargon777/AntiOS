@@ -280,7 +280,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "incidents": incidents,
         "capabilities": {
             "standalone_detection_engine": engine_ready,
-            "resident_post_write_detection": guard_running and engine_ready,
+            "resident_post_write_detection": guard_operational and engine_ready,
+            "resident_post_write_partial": guard_running and not guard_operational,
             "behavior_monitoring": behavior_monitoring,
             "behavior_process_visibility": behavior_process_visibility,
             "risk_fusion": guard_running and risk.get("mode") == "fusion",
