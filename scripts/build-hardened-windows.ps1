@@ -92,7 +92,7 @@ function Build-HardenedProgram {
 }
 
 $cli = Build-HardenedProgram -Entry "antios_entry.py" -Name "AntiOS" -Description "AntiOS Command Line" -ConsoleMode "force" -RequireAdmin
-$gui = Build-HardenedProgram -Entry "antios_gui_entry.py" -Name "AntiOS-GUI" -Description "AntiOS Endpoint Protection" -ConsoleMode "disable" -RequireAdmin -IncludeTray
+$gui = Build-HardenedProgram -Entry "antios_gui_entry.py" -Name "AntiOS-GUI" -Description "AntiOS Endpoint Protection" -ConsoleMode "disable" -IncludeTray
 $guard = Build-HardenedProgram -Entry "antios_guard_entry.py" -Name "AntiOS-Guard" -Description "AntiOS Resident Guard" -ConsoleMode "force" -IncludeTray
 
 Remove-Item -Recurse -Force $workRoot -ErrorAction SilentlyContinue
