@@ -152,3 +152,50 @@ def test_download_update_can_replace_cached_files(tmp_path, monkeypatch):
     )
     assert result["downloaded"] is True
     assert (tmp_path / "AntiOS-Setup.exe").read_bytes() == setup_bytes
+
+
+
+def test_update_handoff_uses_bounded_wait_and_verifies_before_install(tmp_path):
+    from pathlib import Path
+
+    setup = tmp_path / "AntiOS-Setup.exe"
+    script = updater._update_handoff_script(setup, "a" * 64, 12345)
+    assert "$deadline=(Get-Date).AddSeconds(120)" in script
+    assert "AntiOS did not exit; update cancelled." in script
+    assert "Get-FileHash -LiteralPath $setup -Algorithm SHA256" in script
+    assert "Get-AuthenticodeSignature -LiteralPath $setup" in script
+    assert "Start-Process -FilePath $setup" in script
+    assert "install-antios-update.ps1" not in script
+    quoted = updater._update_handoff_script(
+        Path("C:/Temp/O'Brien/AntiOS-Setup.exe"), "b" * 64, 22
+    )
+    assert "O''Brien" in quoted
+
+
+def test_update_handoff_rejects_invalid_inputs(tmp_path):
+    with pytest.raises(ValueError, match="digest"):
+        updater._update_handoff_script(tmp_path / "AntiOS-Setup.exe", "bad", 123)
+    with pytest.raises(ValueError, match="parent"):
+        updater._update_handoff_script(tmp_path / "AntiOS-Setup.exe", "a" * 64, 0)
+
+
+def test_schedule_install_does_not_write_user_writable_ps1(tmp_path, monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    setup = tmp_path / "AntiOS-Setup.exe"
+    setup.write_bytes(b"installer fixture")
+    calls = []
+    monkeypatch.setattr(updater, "os", SimpleNamespace(name="nt", getpid=lambda: 77))
+    monkeypatch.setattr(updater, "system_executable", lambda _name: Path("powershell.exe"))
+    monkeypatch.setattr(updater, "hidden_process_kwargs", lambda **_kw: {})
+    monkeypatch.setattr(
+        updater.subprocess, "Popen",
+        lambda args, **kw: calls.append((args, kw)) or SimpleNamespace(pid=1234),
+    )
+    result = updater.schedule_install(setup, "a" * 64)
+    assert result["scheduled"] is True
+    assert result["helper_pid"] == 1234
+    assert calls[0][0][-2] == "-Command"
+    assert "$waitPid=77" in calls[0][0][-1]
+    assert not list(tmp_path.glob("*.ps1"))
