@@ -224,7 +224,10 @@ def download_update(
 
         signature = None
         publisher_verified = False
-        publisher_error = None
+        publisher_error = (
+            "Authenticode publisher verification requires Windows"
+            if os.name != "nt" else None
+        )
         if require_signature or os.name == "nt":
             try:
                 signature = _authenticode(setup_path)
