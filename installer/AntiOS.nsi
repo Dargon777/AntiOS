@@ -91,13 +91,13 @@ Var RollbackFailed
 !macro ANTIOS_RESTORE_APP_ITEM ITEM
   ; An item absent from staging has already been activated. Move it out of
   ; the way so the previous item can return to its original path.
-  IfFileExists "$StageDir\${ITEM}" +5 0
-    IfFileExists "$INSTDIR\${ITEM}" 0 +4
+  IfFileExists "$StageDir\${ITEM}" +6 0
+    IfFileExists "$INSTDIR\${ITEM}" 0 +5
       ClearErrors
       Rename "$INSTDIR\${ITEM}" "$StageDir\${ITEM}"
       IfErrors 0 +2
         StrCpy $RollbackFailed "1"
-  IfFileExists "$BackupDir\${ITEM}" 0 +4
+  IfFileExists "$BackupDir\${ITEM}" 0 +5
     ClearErrors
     Rename "$BackupDir\${ITEM}" "$INSTDIR\${ITEM}"
     IfErrors 0 +2
@@ -274,8 +274,8 @@ antios_payload_copy_ok:
     nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
     Pop $1
 
-  WriteUninstaller "$INSTDIR\Uninstall.exe"
-
+  ; The new Uninstall.exe was generated and staged with the payload before
+  ; touching the previous installed app.
   WriteRegStr HKLM "${INSTALL_KEY}" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "${INSTALL_KEY}" "Version" "${APP_VERSION}"
   WriteRegStr HKLM "${APP_PATH_KEY}" "" "$INSTDIR\AntiOS-GUI.exe"
