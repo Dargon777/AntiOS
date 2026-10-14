@@ -119,12 +119,28 @@ The installer and command-line utility retain their privileged operations.
 Re-register an older Highest logon task as Limited when reconciling
 the startup preference.
 
-Setup also rejects an existing installation directory that is a junction or
-reparse point, before running old lifecycle scripts. It aborts on file-copy
-errors without falsely updating the registered version. **This is not a
-transactional rollback:** if replacement partially succeeded before a failure,
-manual recovery and reinstallation can still be required. Full atomic upgrades
-with an authenticated old-version fallback remain unimplemented.
+Setup rejects an existing installation directory that is a junction or
+reparse point, before running old lifecycle scripts. The Windows NSIS installer
+now stages the **complete application payload** (including its new uninstaller)
+under `_antios_next`, validates required entries, and only then stops the old
+Guard and begins activation. For each known application file/directory, an old
+item is renamed into `_antios_previous` before the new item is renamed into
+place, on the same filesystem. On a detected activation failure, the installer
+attempts to undo all completed moves. A failed preflight or extraction does
+not replace any previous application file, and a failed activation cannot
+register the new version. Neither the live `ClamAV` service directory nor
+ProgramData or user DPAPI quarantine is part of the application-file swap.
+
+This is **application-file rollback, not full atomic upgrade**. During the
+sequence of renames there is a short mixed-version interval. A sudden power
+loss, an inability to restore a locked file, or a failed post-activation engine
+bootstrap can still leave a partially updated installation. On an incomplete
+rollback the installer preserves `_antios_next` and `_antios_previous`
+for manual recovery; the next upgrade refuses to overwrite them.
+The installed service/task lifecycle and Windows registry are not yet covered
+by a full transaction. Do not manually run executables from incomplete
+installation trees. Full crash-safe recovery with authenticated old-version
+fallback remains a separate release gate.
 
 ## Quarantine
 
