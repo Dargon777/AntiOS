@@ -72,3 +72,55 @@ def test_acl_preflight_requires_windows(tmp_path):
     if windows_acl.os.name != "nt":
         with pytest.raises(OSError, match="Windows"):
             windows_acl.assert_protected_install(tmp_path / "AntiOS.exe", tmp_path)
+
+
+
+@pytest.mark.skipif(windows_acl.os.name != "nt", reason="Native PowerShell ACL integration requires Windows")
+def test_windows_acl_rejects_user_writable_temporary_installs(tmp_path):
+    root = tmp_path / "Fake Program Files"
+    target = root / "AntiOS" / "AntiOS.exe"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"inert only")
+    # The temporary directory belongs to the current interactive user; the
+    # entire root must fail the elevated trust check even if its path looks
+    # like Program Files.
+    with pytest.raises(PermissionError, match="NTFS ACL cannot be verified"):
+        windows_acl.assert_protected_install(target, root)
+
+
+@pytest.mark.skipif(windows_acl.os.name != "nt", reason="PowerShell AST parser requires Windows")
+def test_acl_validation_powershell_is_parseable(tmp_path, monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+    from antios.windows_process import system_executable
+
+    root = tmp_path / "Program Files"
+    exe = root / "AntiOS" / "AntiOS.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"inert")
+    command = []
+    monkeypatch.setattr(
+        windows_acl.subprocess, "run",
+        lambda args, **_kwargs: command.append(args[-1]) or
+        SimpleNamespace(returncode=0, stdout="AntiOS protected install verified", stderr=""),
+    )
+    windows_acl.assert_protected_install(exe, root)
+    source = command[0]
+    import base64
+    literal = base64.b64encode(source.encode("utf-8")).decode("ascii")
+    parser = (
+        "$errors=$null;$tokens=$null;"
+        f"$text=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{literal}'));"
+        "[System.Management.Automation.Language.Parser]::ParseInput("
+        "$text,[ref]$tokens,[ref]$errors)|Out-Null;"
+        "if($errors.Count){$errors|ForEach-Object {Write-Error $_};exit 1}"
+    )
+    # Popen, not the monkeypatched subprocess.run, validates the real Windows
+    # PowerShell grammar without actually checking a live system installation.
+    with subprocess.Popen(
+        [str(system_executable("WindowsPowerShell/v1.0/powershell.exe")),
+         "-NoProfile", "-NonInteractive", "-Command", parser],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    ) as process:
+        stdout, stderr = process.communicate(timeout=20)
+        assert process.returncode == 0, (stdout, stderr)
