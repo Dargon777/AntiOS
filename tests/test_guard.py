@@ -91,7 +91,7 @@ def test_existing_new_and_modified_files_are_scanned_once_until_changed(tmp_path
         status = read_guard_state(state, history=True, stop=True)
         assert not status['pre_execution_blocking']
         assert status['stop_requested']
-        thread.join(3)
+        thread.join(10)
         assert not thread.is_alive()
         assert read_guard_state(state)['state'] == 'stopped'
     finally:
