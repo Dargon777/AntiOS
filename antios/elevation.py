@@ -69,6 +69,12 @@ def managed_cli_path():
     cli = installed / "AntiOS.exe"
     if not cli.is_file() or cli.is_symlink():
         raise FileNotFoundError("Managed AntiOS.exe for elevated repair is missing or unsafe")
+
+    # A signed image can be swapped before UAC if its directory is writable
+    # by the current (unelevated) Windows user. Deny that installation instead
+    # of elevating from an unsafe location.
+    from .windows_acl import assert_protected_install
+    assert_protected_install(cli, program_files)
     return cli
 
 
