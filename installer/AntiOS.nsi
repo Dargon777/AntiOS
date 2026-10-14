@@ -148,7 +148,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright 2026 Dargon777 and AntiOS
 
 Function .onInit
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP|MB_OK "AntiOS requires 64-bit Windows."
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS requires 64-bit Windows." /SD IDOK
     Abort
   ${EndIf}
 
@@ -187,7 +187,7 @@ Section "AntiOS" SecMain
     IntOp $1 $0 & 0x400
     ${If} $1 != 0
       SetErrorLevel 27
-      MessageBox MB_ICONSTOP|MB_OK "AntiOS cannot install into a directory with a reparse point or an unreadable target."
+      MessageBox MB_ICONSTOP|MB_OK "AntiOS cannot install into a directory with a reparse point or an unreadable target." /SD IDOK
       Abort
     ${EndIf}
 antios_path_preflight_done:
@@ -200,11 +200,11 @@ antios_path_preflight_done:
   StrCpy $BackupDir "$INSTDIR\_antios_previous"
   IfFileExists "$StageDir" 0 +4
     SetErrorLevel 29
-    MessageBox MB_ICONSTOP|MB_OK "AntiOS found a pending update directory. Preserve it and recover the previous installation before retrying."
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS found a pending update directory. Preserve it and recover the previous installation before retrying." /SD IDOK
     Abort
   IfFileExists "$BackupDir" 0 +4
     SetErrorLevel 29
-    MessageBox MB_ICONSTOP|MB_OK "AntiOS found a previous-version backup. Preserve it and resolve the interrupted update before retrying."
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS found a previous-version backup. Preserve it and resolve the interrupted update before retrying." /SD IDOK
     Abort
 
   ClearErrors
@@ -230,7 +230,7 @@ antios_staging_failed:
   RMDir /r "$StageDir"
   RMDir "$BackupDir"
   SetErrorLevel 28
-  MessageBox MB_ICONSTOP|MB_OK "AntiOS could not prepare the complete update. The previous installation was not replaced."
+  MessageBox MB_ICONSTOP|MB_OK "AntiOS could not prepare the complete update. The previous installation was not replaced." /SD IDOK
   Abort
 
 antios_staging_ready:
@@ -257,9 +257,9 @@ antios_transaction_failed:
   ${If} $RollbackFailed == "0"
     RMDir /r "$StageDir"
     RMDir "$BackupDir"
-    MessageBox MB_ICONSTOP|MB_OK "AntiOS could not activate the update. The previous application files were restored."
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS could not activate the update. The previous application files were restored." /SD IDOK
   ${Else}
-    MessageBox MB_ICONSTOP|MB_OK "AntiOS could not complete or fully restore the application files. Recovery directories were preserved. Do not launch AntiOS until repaired."
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS could not complete or fully restore the application files. Recovery directories were preserved. Do not launch AntiOS until repaired." /SD IDOK
   ${EndIf}
   SetErrorLevel 28
   Abort
