@@ -107,7 +107,7 @@ def test_download_update_refuses_unsigned_setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(updater, "_download", fake_download)
     monkeypatch.setattr(updater, "_authenticode", lambda _path: {"Status": "NotSigned"})
-    with pytest.raises(RuntimeError, match="Authenticode"):
+    with pytest.raises(RuntimeError, match="publisher identity"):
         updater.download_update(tmp_path, require_signature=True)
     assert not (tmp_path / "AntiOS-Setup.exe").exists()
 
