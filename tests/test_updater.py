@@ -321,3 +321,32 @@ def test_certificate_identity_requires_valid_signature_and_full_thumbprint():
         {"Status": "Valid", "Thumbprint": "0"},
         TRUSTED_CERT,
     )
+
+
+
+@pytest.mark.skipif(updater.os.name != "nt", reason="PowerShell parser requires Windows")
+def test_update_handoff_command_parses_in_windows_powershell(tmp_path):
+    """Validate actual PowerShell 5.1 grammar without executing an update."""
+    import base64
+    import subprocess
+    from pathlib import Path
+
+    script = updater._update_handoff_script(
+        tmp_path / "O'Brien" / "AntiOS-Setup.exe",
+        "a" * 64, 12345, TRUSTED_CERT,
+    )
+    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    parser = (
+        "$errors=$null;$tokens=$null;"
+        f"$source=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}'));"
+        "[System.Management.Automation.Language.Parser]::ParseInput("
+        "$source,[ref]$tokens,[ref]$errors)|Out-Null;"
+        "if($errors.Count){"
+        "$errors|ForEach-Object {Write-Error $_};exit 1};exit 0"
+    )
+    completed = subprocess.run(
+        [str(updater.system_executable("WindowsPowerShell/v1.0/powershell.exe")),
+         "-NoProfile", "-NonInteractive", "-Command", parser],
+        capture_output=True, text=True, timeout=20,
+    )
+    assert completed.returncode == 0, completed.stderr
