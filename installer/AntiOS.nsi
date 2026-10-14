@@ -267,7 +267,11 @@ antios_transaction_failed:
 antios_payload_copy_ok:
   ; Both app executables and runtime folders were committed together. The
   ; ClamAV service and its data were never renamed, removed or copied.
+  ; An unexpected leftover staged file is a packaging mismatch, not success:
+  ; restore the old application rather than silently omitting that file.
+  ClearErrors
   RMDir "$StageDir"
+  IfErrors antios_transaction_failed
   ; Normalize startup state with the newly installed script as well. This also
   ; repairs upgrades from older builds whose uninstall path was broken.
   IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
