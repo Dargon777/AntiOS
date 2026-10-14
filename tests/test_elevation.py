@@ -194,3 +194,54 @@ def test_os_elevated_process_failure_and_timeout_close_handle(monkeypatch):
     with pytest.raises(RuntimeError, match="exit code 2"):
         elevation._run_elevated_cli(cli, ["protection-repair"], timeout_seconds=1)
     assert closed == [77, 77]
+
+
+
+def test_managed_cli_requires_protected_install_acl(tmp_path, monkeypatch):
+    """Never elevate a replaceable executable even beneath Program Files."""
+    import sys
+    import pytest
+    from pathlib import Path
+    from antios import windows_acl
+
+    root = tmp_path / "Program Files"
+    installed = root / "AntiOS"
+    installed.mkdir(parents=True)
+    gui = installed / "AntiOS-GUI.exe"
+    cli = installed / "AntiOS.exe"
+    gui.write_bytes(b"gui")
+    cli.write_bytes(b"cli")
+
+    class Key:
+        def __init__(self, name):
+            self.name = name
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+
+    fake_reg = SimpleNamespace(
+        HKEY_LOCAL_MACHINE=object(),
+        OpenKey=lambda _hive, name: Key(name),
+        QueryValueEx=lambda key, _value: (
+            str(installed) if key.name == r"SOFTWARE\DargonITP\AntiOS" else str(root),
+            1,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "winreg", fake_reg)
+    monkeypatch.setattr(elevation.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(elevation.sys, "executable", str(gui))
+
+    calls = []
+    monkeypatch.setattr(
+        windows_acl, "assert_protected_install",
+        lambda executable, trusted_root: calls.append((executable, trusted_root)),
+    )
+    assert elevation.managed_cli_path() == cli.resolve()
+    assert calls == [(cli.resolve(), root.resolve())]
+
+    def refuse(_executable, _root):
+        raise PermissionError("Unsafe inherited ACL")
+    monkeypatch.setattr(windows_acl, "assert_protected_install", refuse)
+    with pytest.raises(PermissionError, match="Unsafe inherited ACL"):
+        elevation.managed_cli_path()
