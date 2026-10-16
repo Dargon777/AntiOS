@@ -322,6 +322,30 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $installDir "AntiOS-GUI.exe") --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # A junction replacing a packaged runtime directory must abort the
+          # privileged uninstaller before deleting a single external file.
+          $ownedRuntime = Join-Path $installDir "_cli"
+          $savedRuntime = Join-Path $installDir "_cli-before-junction"
+          $externalTarget = Join-Path $env:RUNNER_TEMP "AntiOS-Uninstall-Junction-Trap"
+          New-Item -ItemType Directory -Force $externalTarget | Out-Null
+          "must-preserve" | Set-Content -LiteralPath (Join-Path $externalTarget "Sentinel.txt")
+          Move-Item -LiteralPath $ownedRuntime -Destination $savedRuntime
+          New-Item -ItemType Junction -Path $ownedRuntime -Target $externalTarget | Out-Null
+          try {
+            $reject = Start-Process -FilePath (Join-Path $installDir "Uninstall.exe") -ArgumentList "/S" -PassThru -Wait
+            if ($reject.ExitCode -eq 0) {
+              throw "Uninstaller accepted a substituted runtime junction"
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $externalTarget "Sentinel.txt"))) {
+              throw "Uninstaller modified a junction target outside AntiOS"
+            }
+          }
+          finally {
+            Remove-Item -LiteralPath $ownedRuntime -Force -ErrorAction SilentlyContinue
+            Move-Item -LiteralPath $savedRuntime -Destination $ownedRuntime -ErrorAction Stop
+            Remove-Item -LiteralPath $externalTarget -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
           # An administrator-level uninstaller must not recursively delete
           # unrelated user-owned data from a custom installation directory.
           $unrelated = Join-Path $installDir "Keep-my-file.txt"
