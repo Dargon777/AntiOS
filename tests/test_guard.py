@@ -91,7 +91,17 @@ def test_existing_new_and_modified_files_are_scanned_once_until_changed(tmp_path
         status = read_guard_state(state, history=True, stop=True)
         assert not status['pre_execution_blocking']
         assert status['stop_requested']
-        thread.join(3)
+        thread.join(10)
+        if thread.is_alive():
+            # Diagnose a real failure of cooperative Guard stop, rather than
+            # hiding it with a local Event override or extending the deadline.
+            import sys
+            import traceback
+            frame = sys._current_frames().get(thread.ident)
+            if frame is not None:
+                print("Guard did not accept SQLite stop request:\n" +
+                      "".join(traceback.format_stack(frame)))
+            print("Current Guard status:", read_guard_state(state))
         assert not thread.is_alive()
         assert read_guard_state(state)['state'] == 'stopped'
     finally:

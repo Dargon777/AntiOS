@@ -1095,14 +1095,16 @@ class AntivirusPanel:
             elif kind == "guard-action":
                 self.last_guard_probe = 0
                 engine = value.get("engine") if isinstance(value, dict) else None
-                if isinstance(engine, dict) and engine.get("action") == "elevation-requested":
+                if isinstance(engine, dict) and engine.get("verified") is True:
+                    # Refresh actual engine and Defender coexistence status.
+                    self.last_protection_probe = 0
                     self.status.configure(
                         text=(
-                            "Запущено отдельное восстановление с запросом UAC. Проверь статус после его завершения."
+                            "Обслуживание завершено, ClamAV проверен. Обновляю состояние защиты."
                             if self.app.language == "ru"
-                            else "Administrator repair was requested separately. Recheck protection status after it finishes."
+                            else "Maintenance completed and ClamAV verified. Refreshing protection status."
                         ),
-                        fg=self.palette["warn"],
+                        fg=self.palette["ok"],
                     )
             elif kind == "incident-history":
                 from .incident_viewer import IncidentViewer
