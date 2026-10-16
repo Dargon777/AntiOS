@@ -43,3 +43,28 @@ def test_nsis_transaction_manifest_matches_staged_payload_names():
     for name in names - {"Uninstall.exe", "_cli", "_gui", "_guard",
                          "AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe"}:
         assert name in stage_source, f"Transaction item missing from staged payload: {name}"
+
+
+
+def test_nsis_uninstall_never_recursively_erases_arbitrary_install_root():
+    source = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
+    uninstall = source.split('Section "Uninstall"', 1)[1]
+    assert 'RMDir /r "$INSTDIR"' not in uninstall
+    assert 'RMDir "$INSTDIR"' in uninstall
+    assert '!insertmacro ANTIOS_UNINSTALL_CHECK_PATHS' in uninstall
+    assert '!insertmacro ANTIOS_UNINSTALL_OWNED_PAYLOAD' in uninstall
+    assert uninstall.index('!insertmacro ANTIOS_UNINSTALL_CHECK_PATHS') < uninstall.index('IfFileExists "$INSTDIR\\Install-AmsiProvider.ps1"')
+    assert 'RMDir /r "$SMPROGRAMS\\AntiOS"' not in uninstall
+
+
+def test_stage_generates_exact_file_uninstall_manifest_without_recursive_delete():
+    source = Path("scripts/stage-installer.ps1").read_text(encoding="utf-8")
+    assert "uninstall-manifest.nsh" in source
+    assert "Get-ChildItem -LiteralPath $stage -Recurse -Force" in source
+    assert "Delete " in source
+    assert "RMDir " in source
+    assert "RMDir /r" not in source
+    assert "ReparsePoint" in source
+    nsis = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
+    assert '!include "${SOURCE_DIR}\\uninstall-manifest.nsh"' in nsis
+    assert '!insertmacro ${OP} "uninstall-manifest.nsh"' in nsis
