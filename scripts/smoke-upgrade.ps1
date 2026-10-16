@@ -92,6 +92,63 @@ try {
 
     Assert-Version -Executable $cli -Expected $ExpectedPreviousVersion
 
+    # A failed staging preflight MUST NOT stop the old installation or change
+    # its registered version. Residual stage/backup trees are preserved for
+    # operator investigation and are never silently overwritten.
+    $currentSetup = (Resolve-Path $CurrentSetup).Path
+    $stageDir = Join-Path $installDir "_antios_next"
+    $backupDir = Join-Path $installDir "_antios_previous"
+    New-Item -ItemType Directory -Force $stageDir | Out-Null
+    "do-not-overwrite" | Set-Content -LiteralPath (Join-Path $stageDir "sentinel") -Encoding utf8
+    try {
+        $blocked = Start-Process -FilePath $currentSetup -ArgumentList @("/S", "/NOENGINE=1", "/D=$installDir") -Wait -PassThru
+        if ($blocked.ExitCode -eq 0) {
+            throw "Unsafe update unexpectedly reused a pre-existing staging directory."
+        }
+        Assert-Version -Executable $cli -Expected $ExpectedPreviousVersion
+        if ((Get-ItemProperty "HKLM:\Software\DargonITP\AntiOS" -Name Version).Version -ne $ExpectedPreviousVersion) {
+            throw "Rejected update incorrectly changed the registered version."
+        }
+        if ((Get-Content -LiteralPath (Join-Path $stageDir "sentinel") -Raw).Trim() -ne "do-not-overwrite") {
+            throw "Rejected update modified the existing staging marker."
+        }
+    }
+    finally {
+        Remove-Item -Recurse -Force -LiteralPath $stageDir -ErrorAction SilentlyContinue
+    }
+
+    # Block renaming the previous NOTICE *after* the earlier app items were
+    # rotated. This exercises the actual multi-item rollback path, not just
+    # an early installer preflight failure.
+    $oldNotice = Join-Path $installDir "NOTICE"
+    if (-not (Test-Path -LiteralPath $oldNotice -PathType Leaf)) {
+        throw "Previous installation does not contain NOTICE for rollback test."
+    }
+    $lock = [IO.File]::Open($oldNotice, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $blocked = Start-Process -FilePath $currentSetup -ArgumentList @("/S", "/NOENGINE=1", "/D=$installDir") -Wait -PassThru
+        if ($blocked.ExitCode -eq 0) {
+            throw "Update incorrectly succeeded while previous NOTICE was locked against rename."
+        }
+    }
+    finally {
+        $lock.Dispose()
+    }
+    Assert-Version -Executable $cli -Expected $ExpectedPreviousVersion
+    if ((Get-ItemProperty "HKLM:\Software\DargonITP\AntiOS" -Name Version).Version -ne $ExpectedPreviousVersion) {
+        throw "Failed activation incorrectly registered the new version."
+    }
+    if ((Test-Path -LiteralPath $stageDir) -or (Test-Path -LiteralPath $backupDir)) {
+        throw "Failed activation left rollback directories; automatic restoration was incomplete."
+    }
+
+    # Application payload rotation must not alter a separately installed
+    # managed ClamAV runtime, even when Setup runs with /NOENGINE.
+    $engineRoot = Join-Path $installDir "ClamAV"
+    New-Item -ItemType Directory -Force $engineRoot | Out-Null
+    $engineMarker = Join-Path $engineRoot "preexisting-engine-marker.txt"
+    "retain-existing-engine" | Set-Content -LiteralPath $engineMarker -Encoding utf8
+
     New-Item -ItemType Directory -Force $configDir | Out-Null
     $configLines = @(
         '[general]',
@@ -125,9 +182,15 @@ try {
     $configHashBefore = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
 
     Write-Host "Upgrading previous release with current Setup"
-    Invoke-Setup -Setup (Resolve-Path $CurrentSetup).Path -InstallDir $installDir
+    Invoke-Setup -Setup $currentSetup -InstallDir $installDir
 
     Assert-Version -Executable $cli -Expected $ExpectedCurrentVersion
+    if ((Test-Path -LiteralPath $stageDir) -or (Test-Path -LiteralPath $backupDir)) {
+        throw "Successful upgrade did not retire the staging/rollback directories."
+    }
+    if ((Get-Content -LiteralPath $engineMarker -Raw).Trim() -ne "retain-existing-engine") {
+        throw "Application update damaged the separately installed ClamAV runtime."
+    }
 
     $configHashAfter = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
     if ($configHashAfter -ne $configHashBefore) {

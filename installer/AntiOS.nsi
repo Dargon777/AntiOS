@@ -28,6 +28,81 @@ Unicode true
 
 Var SkipEngine
 Var ExistingVersion
+Var StageDir
+Var BackupDir
+Var RollbackFailed
+
+; Application payload only: DO NOT put managed ClamAV or ProgramData in this
+; transaction. ClamAV\clamd.exe can be a live SCM service, and its files must
+; never be moved with GUI/CLI application binaries.
+!macro ANTIOS_EACH_APP_ITEM OP
+  !insertmacro ${OP} "AntiOS.exe"
+  !insertmacro ${OP} "AntiOS-GUI.exe"
+  !insertmacro ${OP} "AntiOS-Guard.exe"
+  !insertmacro ${OP} "Uninstall.exe"
+  !insertmacro ${OP} "_cli"
+  !insertmacro ${OP} "_gui"
+  !insertmacro ${OP} "_guard"
+  !insertmacro ${OP} "AntiOS-AmsiProvider.dll"
+  !insertmacro ${OP} "guard-startup.ps1"
+  !insertmacro ${OP} "dashboard-startup.ps1"
+  !insertmacro ${OP} "protection-engine.ps1"
+  !insertmacro ${OP} "protection-bootstrap.ps1"
+  !insertmacro ${OP} "protection-repair.ps1"
+  !insertmacro ${OP} "protection-first-run.ps1"
+  !insertmacro ${OP} "Install-AmsiProvider.ps1"
+  !insertmacro ${OP} "LICENSE.microsoft"
+  !insertmacro ${OP} "COEXISTENCE.md"
+  !insertmacro ${OP} "clamav-windows.json"
+  !insertmacro ${OP} "clamav-config"
+  !insertmacro ${OP} "README.md"
+  !insertmacro ${OP} "README.ru.md"
+  !insertmacro ${OP} "README.es.md"
+  !insertmacro ${OP} "README.zh-CN.md"
+  !insertmacro ${OP} "README.fi.md"
+  !insertmacro ${OP} "README.pl.md"
+  !insertmacro ${OP} "README.mn.md"
+  !insertmacro ${OP} "PRIVACY.md"
+  !insertmacro ${OP} "SUPPORT.md"
+  !insertmacro ${OP} "SECURITY.md"
+  !insertmacro ${OP} "CHANGELOG.md"
+  !insertmacro ${OP} "CODE_OF_CONDUCT.md"
+  !insertmacro ${OP} "LICENSE"
+  !insertmacro ${OP} "NOTICE"
+!macroend
+
+!macro ANTIOS_CHECK_STAGED ITEM
+  IfFileExists "$StageDir\${ITEM}" +2 0
+    Goto antios_staging_failed
+!macroend
+
+!macro ANTIOS_SWAP_APP_ITEM ITEM
+  IfFileExists "$StageDir\${ITEM}" +2 0
+    Goto antios_transaction_failed
+  IfFileExists "$INSTDIR\${ITEM}" 0 +4
+    ClearErrors
+    Rename "$INSTDIR\${ITEM}" "$BackupDir\${ITEM}"
+    IfErrors antios_transaction_failed
+  ClearErrors
+  Rename "$StageDir\${ITEM}" "$INSTDIR\${ITEM}"
+  IfErrors antios_transaction_failed
+!macroend
+
+!macro ANTIOS_RESTORE_APP_ITEM ITEM
+  ; An item absent from staging has already been activated. Move it out of
+  ; the way so the previous item can return to its original path.
+  IfFileExists "$StageDir\${ITEM}" +6 0
+    IfFileExists "$INSTDIR\${ITEM}" 0 +5
+      ClearErrors
+      Rename "$INSTDIR\${ITEM}" "$StageDir\${ITEM}"
+      IfErrors 0 +2
+        StrCpy $RollbackFailed "1"
+  IfFileExists "$BackupDir\${ITEM}" 0 +5
+    ClearErrors
+    Rename "$BackupDir\${ITEM}" "$INSTDIR\${ITEM}"
+    IfErrors 0 +2
+      StrCpy $RollbackFailed "1"
+!macroend
 
 Name "${PRODUCT_NAME} ${APP_VERSION}"
 OutFile "${OUTPUT_FILE}"
@@ -73,7 +148,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright 2026 Dargon777 and AntiOS
 
 Function .onInit
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP|MB_OK "AntiOS requires 64-bit Windows."
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS requires 64-bit Windows." /SD IDOK
     Abort
   ${EndIf}
 
@@ -86,6 +161,7 @@ Function .onInit
   ${EndIf}
 
   SetRegView 64
+  SetShellVarContext all
   ReadRegStr $ExistingVersion HKLM "${INSTALL_KEY}" "Version"
   ReadRegStr $0 HKLM "${INSTALL_KEY}" "InstallDir"
   ${If} $0 != ""
@@ -97,6 +173,7 @@ FunctionEnd
 
 Function un.onInit
   SetRegView 64
+  SetShellVarContext all
   !insertmacro MUI_UNGETLANGUAGE
 FunctionEnd
 
@@ -112,11 +189,60 @@ Section "AntiOS" SecMain
     IntOp $1 $0 & 0x400
     ${If} $1 != 0
       SetErrorLevel 27
-      MessageBox MB_ICONSTOP|MB_OK "AntiOS cannot install into a directory with a reparse point or an unreadable target."
+      MessageBox MB_ICONSTOP|MB_OK "AntiOS cannot install into a directory with a reparse point or an unreadable target." /SD IDOK
       Abort
     ${EndIf}
 antios_path_preflight_done:
 
+  ; Extract the complete new payload and generate its uninstaller before
+  ; stopping the previous Guard or replacing one installed application file.
+  ; A residual staging/backup directory may indicate interrupted recovery:
+  ; do not delete or reuse it automatically.
+  StrCpy $StageDir "$INSTDIR\_antios_next"
+  StrCpy $BackupDir "$INSTDIR\_antios_previous"
+  IfFileExists "$StageDir" 0 +4
+    SetErrorLevel 29
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS found a pending update directory. Preserve it and recover the previous installation before retrying." /SD IDOK
+    Abort
+  IfFileExists "$BackupDir" 0 +4
+    SetErrorLevel 29
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS found a previous-version backup. Preserve it and resolve the interrupted update before retrying." /SD IDOK
+    Abort
+
+  ClearErrors
+  CreateDirectory "$INSTDIR"
+  IfErrors antios_staging_failed
+  CreateDirectory "$StageDir"
+  IfErrors antios_staging_failed
+  CreateDirectory "$BackupDir"
+  IfErrors antios_staging_failed
+  SetOutPath "$StageDir"
+  SetOverwrite on
+  ClearErrors
+  File /r "${SOURCE_DIR}\*.*"
+  IfErrors antios_staging_failed
+  WriteUninstaller "$StageDir\Uninstall.exe"
+  IfErrors antios_staging_failed
+  ; Every shipped component must be present before any part of the previous
+  ; installation is touched. The engine-owned ClamAV folder stays in place.
+  !insertmacro ANTIOS_EACH_APP_ITEM ANTIOS_CHECK_STAGED
+  Goto antios_staging_ready
+
+antios_staging_failed:
+  ; SetOutPath changes Setup's working directory. Windows refuses to remove
+  ; its own current directory; leave the staging tree before cleanup.
+  SetOutPath "$INSTDIR"
+  RMDir /r "$StageDir"
+  RMDir "$BackupDir"
+  SetErrorLevel 28
+  MessageBox MB_ICONSTOP|MB_OK "AntiOS could not prepare the complete update. The previous installation was not replaced." /SD IDOK
+  Abort
+
+antios_staging_ready:
+  ; Extraction leaves NSIS with StageDir as its working directory. Both
+  ; the failure rollback and successful activation need to remove StageDir,
+  ; so switch back before any file moves/cleanup.
+  SetOutPath "$INSTDIR"
   ; Stop the previous persistent Guard task before replacing binaries. A stale
   ; heartbeat can belong to a still-live process holding guard.lock, so the
   ; cooperative Guard stop alone is not sufficient for upgrades.
@@ -128,33 +254,41 @@ antios_path_preflight_done:
     Pop $0
     Sleep 1000
 
-  SetOutPath "$INSTDIR"
-  SetOverwrite on
-  ClearErrors
-  File /r "${SOURCE_DIR}\*.*"
-  IfErrors antios_payload_copy_failed
-  IfFileExists "$INSTDIR\AntiOS.exe" 0 antios_payload_copy_failed
-  IfFileExists "$INSTDIR\AntiOS-GUI.exe" 0 antios_payload_copy_failed
-  IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 antios_payload_copy_failed
+  ; Promote app-owned files by rename on the *same volume*. Every existing
+  ; item is first moved to the local recovery directory. If any rename fails,
+  ; reverse all completed moves and preserve the prior registered version.
+  StrCpy $RollbackFailed "0"
+  !insertmacro ANTIOS_EACH_APP_ITEM ANTIOS_SWAP_APP_ITEM
   Goto antios_payload_copy_ok
 
-antios_payload_copy_failed:
-  ; Crucially do not record the *new* installed version after failed copying.
-  ; Restoring overwritten old binaries still needs a transactional upgrade
-  ; manager, but a partial install must not report itself as successful.
+antios_transaction_failed:
+  !insertmacro ANTIOS_EACH_APP_ITEM ANTIOS_RESTORE_APP_ITEM
+  ${If} $RollbackFailed == "0"
+    RMDir /r "$StageDir"
+    RMDir "$BackupDir"
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS could not activate the update. The previous application files were restored." /SD IDOK
+  ${Else}
+    MessageBox MB_ICONSTOP|MB_OK "AntiOS could not complete or fully restore the application files. Recovery directories were preserved. Do not launch AntiOS until repaired." /SD IDOK
+  ${EndIf}
   SetErrorLevel 28
-  MessageBox MB_ICONSTOP|MB_OK "AntiOS could not replace all application files. Installation was aborted without registering the new version."
   Abort
 
 antios_payload_copy_ok:
+  ; Both app executables and runtime folders were committed together. The
+  ; ClamAV service and its data were never renamed, removed or copied.
+  ; An unexpected leftover staged file is a packaging mismatch, not success:
+  ; restore the old application rather than silently omitting that file.
+  ClearErrors
+  RMDir "$StageDir"
+  IfErrors antios_transaction_failed
   ; Normalize startup state with the newly installed script as well. This also
   ; repairs upgrades from older builds whose uninstall path was broken.
   IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
     nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
     Pop $1
 
-  WriteUninstaller "$INSTDIR\Uninstall.exe"
-
+  ; The new Uninstall.exe was generated and staged with the payload before
+  ; touching the previous installed app.
   WriteRegStr HKLM "${INSTALL_KEY}" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "${INSTALL_KEY}" "Version" "${APP_VERSION}"
   WriteRegStr HKLM "${APP_PATH_KEY}" "" "$INSTDIR\AntiOS-GUI.exe"
@@ -170,10 +304,10 @@ antios_payload_copy_ok:
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
 
-  CreateDirectory "$COMMONPROGRAMS\AntiOS"
-  CreateShortCut "$COMMONPROGRAMS\AntiOS\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
-  CreateShortCut "$COMMONPROGRAMS\AntiOS\AntiOS Command Line.lnk" "$INSTDIR\AntiOS.exe" "" "$INSTDIR\AntiOS.exe" 0
-  CreateShortCut "$COMMONPROGRAMS\AntiOS\Uninstall AntiOS.lnk" "$INSTDIR\Uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\AntiOS"
+  CreateShortCut "$SMPROGRAMS\AntiOS\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
+  CreateShortCut "$SMPROGRAMS\AntiOS\AntiOS Command Line.lnk" "$INSTDIR\AntiOS.exe" "" "$INSTDIR\AntiOS.exe" 0
+  CreateShortCut "$SMPROGRAMS\AntiOS\Uninstall AntiOS.lnk" "$INSTDIR\Uninstall.exe"
   CreateShortCut "$COMMONDESKTOP\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
 
   ; Fresh installs enable the Control Center at user logon. Upgrades preserve
@@ -227,6 +361,9 @@ bootstrap_done:
     WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapSkipped" 1
   ${EndIf}
 
+  ; A successful install retires only its own app-file rollback area. A crash
+  ; before this point leaves the backup for explicit manual recovery.
+  RMDir /r "$BackupDir"
 SectionEnd
 
 Section "Uninstall"
@@ -248,7 +385,7 @@ Section "Uninstall"
     Pop $0
 
   Delete "$COMMONDESKTOP\AntiOS.lnk"
-  RMDir /r "$COMMONPROGRAMS\AntiOS"
+  RMDir /r "$SMPROGRAMS\AntiOS"
 
   DeleteRegKey HKLM "${APP_PATH_KEY}"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
