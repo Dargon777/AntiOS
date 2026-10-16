@@ -5,6 +5,10 @@ import pytest
 from antios import updater
 
 
+TRUSTED_CERT = "A" * 40
+OTHER_CERT = "B" * 40
+
+
 def test_latest_alpha_selects_highest_non_draft(monkeypatch):
     monkeypatch.setattr(updater, "_request_json", lambda _url: [
         {"tag_name": "v2.0.0-alpha.14", "draft": False, "assets": []},
@@ -60,8 +64,9 @@ def test_download_update_verifies_hash_and_signature(tmp_path, monkeypatch):
 
     monkeypatch.setattr(updater, "_download", fake_download)
     monkeypatch.setattr(updater, "_authenticode", lambda _path: {
-        "Status": "Valid", "Subject": "CN=Test", "Thumbprint": "00"
+        "Status": "Valid", "Subject": "CN=Test", "Thumbprint": TRUSTED_CERT
     })
+    monkeypatch.setattr(updater, "_installed_signer_thumbprint", lambda: TRUSTED_CERT)
     result = updater.download_update(tmp_path, require_signature=True)
     assert result["downloaded"]
     assert result["sha256"] == digest
@@ -102,7 +107,7 @@ def test_download_update_refuses_unsigned_setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(updater, "_download", fake_download)
     monkeypatch.setattr(updater, "_authenticode", lambda _path: {"Status": "NotSigned"})
-    with pytest.raises(RuntimeError, match="Authenticode"):
+    with pytest.raises(RuntimeError, match="publisher identity"):
         updater.download_update(tmp_path, require_signature=True)
     assert not (tmp_path / "AntiOS-Setup.exe").exists()
 
@@ -159,24 +164,29 @@ def test_update_handoff_uses_bounded_wait_and_verifies_before_install(tmp_path):
     from pathlib import Path
 
     setup = tmp_path / "AntiOS-Setup.exe"
-    script = updater._update_handoff_script(setup, "a" * 64, 12345)
+    script = updater._update_handoff_script(setup, "a" * 64, 12345, TRUSTED_CERT)
     assert "$deadline=(Get-Date).AddSeconds(120)" in script
     assert "AntiOS did not exit; update cancelled." in script
-    assert "Get-FileHash -LiteralPath $setup -Algorithm SHA256" in script
+    assert "Get-FileHash -InputStream $file -Algorithm SHA256" in script
+    assert "[IO.FileShare]::Read" in script
     assert "Get-AuthenticodeSignature -LiteralPath $setup" in script
+    assert "$thumb -cne $trustedThumbprint" in script
+    assert "if($installer.ExitCode -ne 0)" in script
     assert "Start-Process -FilePath $setup" in script
     assert "install-antios-update.ps1" not in script
     quoted = updater._update_handoff_script(
-        Path("C:/Temp/O'Brien/AntiOS-Setup.exe"), "b" * 64, 22
+        Path("C:/Temp/O'Brien/AntiOS-Setup.exe"), "b" * 64, 22, TRUSTED_CERT
     )
     assert "O''Brien" in quoted
 
 
 def test_update_handoff_rejects_invalid_inputs(tmp_path):
     with pytest.raises(ValueError, match="digest"):
-        updater._update_handoff_script(tmp_path / "AntiOS-Setup.exe", "bad", 123)
+        updater._update_handoff_script(tmp_path / "AntiOS-Setup.exe", "bad", 123, TRUSTED_CERT)
     with pytest.raises(ValueError, match="parent"):
-        updater._update_handoff_script(tmp_path / "AntiOS-Setup.exe", "a" * 64, 0)
+        updater._update_handoff_script(tmp_path / "AntiOS-Setup.exe", "a" * 64, 0, TRUSTED_CERT)
+    with pytest.raises(ValueError, match="publisher thumbprint"):
+        updater._update_handoff_script(tmp_path / "AntiOS-Setup.exe", "a" * 64, 1, "00")
 
 
 def test_schedule_install_does_not_write_user_writable_ps1(tmp_path, monkeypatch):
@@ -189,13 +199,154 @@ def test_schedule_install_does_not_write_user_writable_ps1(tmp_path, monkeypatch
     monkeypatch.setattr(updater, "os", SimpleNamespace(name="nt", getpid=lambda: 77))
     monkeypatch.setattr(updater, "system_executable", lambda _name: Path("powershell.exe"))
     monkeypatch.setattr(updater, "hidden_process_kwargs", lambda **_kw: {})
+    monkeypatch.setattr(updater, "_installed_signer_thumbprint", lambda: TRUSTED_CERT)
+    monkeypatch.setattr(updater, "_authenticode", lambda _p: {"Status": "Valid", "Thumbprint": TRUSTED_CERT})
     monkeypatch.setattr(
         updater.subprocess, "Popen",
         lambda args, **kw: calls.append((args, kw)) or SimpleNamespace(pid=1234),
     )
-    result = updater.schedule_install(setup, "a" * 64)
+    expected = hashlib.sha256(setup.read_bytes()).hexdigest()
+    result = updater.schedule_install(setup, expected)
     assert result["scheduled"] is True
     assert result["helper_pid"] == 1234
     assert calls[0][0][-2] == "-Command"
     assert "$waitPid=77" in calls[0][0][-1]
     assert not list(tmp_path.glob("*.ps1"))
+
+
+
+def test_download_rejects_valid_signature_from_unrelated_publisher(tmp_path, monkeypatch):
+    setup_bytes = b"signed-but-not-by-anti-os"
+    digest = hashlib.sha256(setup_bytes).hexdigest()
+    monkeypatch.setattr(updater, "latest_alpha", lambda: {
+        "current_version": "2.0.0a27", "latest_version": "2.0.0a28",
+        "update_available": True,
+        "assets": {
+            "AntiOS-Setup.exe": {"url": "unused", "digest": f"sha256:{digest}"},
+            "AntiOS-Setup.exe.sha256": {"url": "unused"},
+        },
+    })
+    def download(_url, path, _limit):
+        path.write_bytes(
+            f"{digest}  AntiOS-Setup.exe".encode("ascii")
+            if path.suffix == ".sha256" else setup_bytes
+        )
+    monkeypatch.setattr(updater, "_download", download)
+    monkeypatch.setattr(updater, "_authenticode", lambda _p: {
+        "Status": "Valid", "Thumbprint": OTHER_CERT,
+    })
+    monkeypatch.setattr(updater, "_installed_signer_thumbprint", lambda: TRUSTED_CERT)
+    with pytest.raises(RuntimeError, match="publisher identity"):
+        updater.download_update(tmp_path, require_signature=True)
+    assert not (tmp_path / "AntiOS-Setup.exe").exists()
+
+
+def test_unsigned_installation_never_auto_installs_signed_update(tmp_path, monkeypatch):
+    setup_bytes = b"signed-fixture"
+    digest = hashlib.sha256(setup_bytes).hexdigest()
+    monkeypatch.setattr(updater, "latest_alpha", lambda: {
+        "current_version": "2.0.0a27", "latest_version": "2.0.0a28",
+        "update_available": True,
+        "assets": {
+            "AntiOS-Setup.exe": {"url": "unused", "digest": f"sha256:{digest}"},
+            "AntiOS-Setup.exe.sha256": {"url": "unused"},
+        },
+    })
+    monkeypatch.setattr(
+        updater, "_download",
+        lambda _url, path, _limit: path.write_bytes(
+            f"{digest}  AntiOS-Setup.exe".encode("ascii")
+            if path.suffix == ".sha256" else setup_bytes
+        ),
+    )
+    monkeypatch.setattr(updater, "_authenticode", lambda _p: {
+        "Status": "Valid", "Thumbprint": TRUSTED_CERT,
+    })
+    monkeypatch.setattr(
+        updater, "_installed_signer_thumbprint",
+        lambda: (_ for _ in ()).throw(RuntimeError("Unsigned installed CLI")),
+    )
+    result = updater.download_update(tmp_path, require_signature=False)
+    assert result["downloaded"]
+    assert not result["install_ready"]
+    assert not result["publisher_verified"]
+    assert result["publisher_error"]
+
+
+def test_installation_refuses_changed_digest_before_spawn(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from pathlib import Path
+    setup = tmp_path / "AntiOS-Setup.exe"
+    setup.write_bytes(b"tampered")
+    monkeypatch.setattr(updater, "os", SimpleNamespace(name="nt", getpid=lambda: 1))
+    monkeypatch.setattr(
+        updater.subprocess, "Popen",
+        lambda *_args, **_kwargs: pytest.fail("tampered update must not execute"),
+    )
+    with pytest.raises(RuntimeError, match="digest"):
+        updater.schedule_install(setup, hashlib.sha256(b"expected").hexdigest())
+
+
+def test_installation_refuses_other_publisher_before_spawn(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    setup = tmp_path / "AntiOS-Setup.exe"
+    setup.write_bytes(b"installer fixture")
+    monkeypatch.setattr(updater, "os", SimpleNamespace(name="nt", getpid=lambda: 1))
+    monkeypatch.setattr(updater, "_installed_signer_thumbprint", lambda: TRUSTED_CERT)
+    monkeypatch.setattr(updater, "_authenticode", lambda _p: {
+        "Status": "Valid", "Thumbprint": OTHER_CERT,
+    })
+    monkeypatch.setattr(
+        updater.subprocess, "Popen",
+        lambda *_args, **_kwargs: pytest.fail("wrong publisher must not execute"),
+    )
+    with pytest.raises(RuntimeError, match="publisher certificate"):
+        updater.schedule_install(setup, hashlib.sha256(setup.read_bytes()).hexdigest())
+
+
+def test_certificate_identity_requires_valid_signature_and_full_thumbprint():
+    assert updater._matches_installed_signer(
+        {"Status": "Valid", "Thumbprint": TRUSTED_CERT.lower()},
+        TRUSTED_CERT,
+    )
+    assert not updater._matches_installed_signer(
+        {"Status": "Valid", "Thumbprint": OTHER_CERT},
+        TRUSTED_CERT,
+    )
+    assert not updater._matches_installed_signer(
+        {"Status": "NotSigned", "Thumbprint": TRUSTED_CERT},
+        TRUSTED_CERT,
+    )
+    assert not updater._matches_installed_signer(
+        {"Status": "Valid", "Thumbprint": "0"},
+        TRUSTED_CERT,
+    )
+
+
+
+@pytest.mark.skipif(updater.os.name != "nt", reason="PowerShell parser requires Windows")
+def test_update_handoff_command_parses_in_windows_powershell(tmp_path):
+    """Validate actual PowerShell 5.1 grammar without executing an update."""
+    import base64
+    import subprocess
+    from pathlib import Path
+
+    script = updater._update_handoff_script(
+        tmp_path / "O'Brien" / "AntiOS-Setup.exe",
+        "a" * 64, 12345, TRUSTED_CERT,
+    )
+    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    parser = (
+        "$errors=$null;$tokens=$null;"
+        f"$source=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}'));"
+        "[System.Management.Automation.Language.Parser]::ParseInput("
+        "$source,[ref]$tokens,[ref]$errors)|Out-Null;"
+        "if($errors.Count){"
+        "$errors|ForEach-Object {Write-Error $_};exit 1};exit 0"
+    )
+    completed = subprocess.run(
+        [str(updater.system_executable("WindowsPowerShell/v1.0/powershell.exe")),
+         "-NoProfile", "-NonInteractive", "-Command", parser],
+        capture_output=True, text=True, timeout=20,
+    )
+    assert completed.returncode == 0, completed.stderr

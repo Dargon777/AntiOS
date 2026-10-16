@@ -144,13 +144,28 @@ AntiOS.exe update --yes
 Update discovery uses AntiOS GitHub releases. Downloaded Setup files are checked
 against the release SHA-256 (and GitHub asset digest when present).
 
-Installation is stricter: `--yes` requires a **valid Authenticode signature**.
+Installation is stricter: `--yes` requires a **valid Authenticode signature
+from exactly the same signing certificate as the installed, signed AntiOS.exe**
+in the registered Program Files installation directory. A valid but unrelated
+publisher signature is insufficient. The dashboard can still *download* a
+release without a verified local signer, but it never enables one-click installation.
+
 The dashboard may check and download updates automatically, but **never installs
 one without explicit confirmation**. After choosing Install update, it closes
 and hands the installer to a fixed PowerShell command (not a writable .ps1 file
 in the update cache). That command waits at most 120 seconds for AntiOS to exit
-and then verifies SHA-256 and Authenticode again before launching Setup.
-Until release signing is enabled, unsigned Setup cannot be installed automatically.
+and then re-verifies SHA-256, Authenticode status and the exact certificate
+thumbprint before launching Setup. During this final verification and execution,
+a read-only open file handle prevents an ordinary same-user process from replacing
+or rewriting the selected Setup file. Setup's actual exit code is checked.
+
+**Signer rotation:** a new leaf certificate (including an automatically renewed
+Trusted Signing certificate) is intentionally not accepted for silent/automatic
+updates yet, even if issued to the same legal publisher. Manual, independently
+verified signed installer upgrade is required before a new certificate becomes
+the locally trusted reference. Unsigned developer/portable installations cannot
+use unattended setup updates. A full transactional installer rollback is still
+a separate release gate; this change does not claim to provide it.
 
 ## Native pre-execution boundary
 
