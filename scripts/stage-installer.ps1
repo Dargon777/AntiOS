@@ -91,4 +91,53 @@ foreach ($name in $required) {
     }
 }
 
-Write-Host "Prepared AntiOS installer payload at $stage"
+# Build an exact uninstall manifest from the packaged files, not a recursive
+# delete of the destination directory. This preserves unrelated user files.
+function Convert-ToNsisRelativePath {
+    param([string]$FullName)
+    $relative = $FullName.Substring($stage.Length).TrimStart('\')
+    if (-not $relative -or $relative -match '[\x00-\x1F"$]') {
+        throw "Unsafe AntiOS staged path: $relative"
+    }
+    return $relative.Replace('/', '\')
+}
+
+$items = @(Get-ChildItem -LiteralPath $stage -Recurse -Force)
+if (@($items | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
+    throw "Refusing a reparse point in the AntiOS installer stage."
+}
+$files = @($items | Where-Object { -not $_.PSIsContainer } |
+    ForEach-Object { Convert-ToNsisRelativePath $_.FullName })
+$dirs = @($items | Where-Object { $_.PSIsContainer } |
+    ForEach-Object { Convert-ToNsisRelativePath $_.FullName } |
+    Sort-Object { ($_ -split '\\').Count } -Descending)
+$lines = [Collections.Generic.List[string]]::new()
+$lines.Add('!macro ANTIOS_UNINSTALL_CHECK_PATHS')
+foreach ($relative in @('') + @($dirs)) {
+    $target = if ($relative) { '$INSTDIR\' + $relative } else { '$INSTDIR' }
+    $lines.Add('  ${If} ${FileExists} "' + $target + '"')
+    $lines.Add('    System::Call ' + "'kernel32::GetFileAttributesW(w " + '"' + $target + '"' + ") i .r0'")
+    $lines.Add('    IntOp $1 $0 & 0x400')
+    $lines.Add('    ${If} $1 != 0')
+    $lines.Add('      SetErrorLevel 31')
+    $lines.Add('      MessageBox MB_ICONSTOP|MB_OK "Unsafe AntiOS uninstall path (reparse point)." /SD IDOK')
+    $lines.Add('      Abort')
+    $lines.Add('    ${EndIf}')
+    $lines.Add('  ${EndIf}')
+}
+$lines.Add('!macroend')
+$lines.Add('')
+$lines.Add('!macro ANTIOS_UNINSTALL_OWNED_PAYLOAD')
+foreach ($relative in $files) {
+    $lines.Add('  Delete "$INSTDIR\' + $relative + '"')
+}
+$lines.Add('  Delete "$INSTDIR\uninstall-manifest.nsh"')
+foreach ($relative in $dirs) {
+    $lines.Add('  RMDir "$INSTDIR\' + $relative + '"')
+}
+$lines.Add('!macroend')
+[IO.File]::WriteAllLines(
+    (Join-Path $stage 'uninstall-manifest.nsh'), $lines,
+    [Text.UTF8Encoding]::new($false)
+)
+Write-Host "Prepared AntiOS installer payload at $stage with an exact uninstall manifest."
