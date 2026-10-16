@@ -161,6 +161,7 @@ Function .onInit
   ${EndIf}
 
   SetRegView 64
+  SetShellVarContext all
   ReadRegStr $ExistingVersion HKLM "${INSTALL_KEY}" "Version"
   ReadRegStr $0 HKLM "${INSTALL_KEY}" "InstallDir"
   ${If} $0 != ""
@@ -172,6 +173,7 @@ FunctionEnd
 
 Function un.onInit
   SetRegView 64
+  SetShellVarContext all
   !insertmacro MUI_UNGETLANGUAGE
 FunctionEnd
 
@@ -302,10 +304,10 @@ antios_payload_copy_ok:
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
 
-  CreateDirectory "$COMMONPROGRAMS\AntiOS"
-  CreateShortCut "$COMMONPROGRAMS\AntiOS\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
-  CreateShortCut "$COMMONPROGRAMS\AntiOS\AntiOS Command Line.lnk" "$INSTDIR\AntiOS.exe" "" "$INSTDIR\AntiOS.exe" 0
-  CreateShortCut "$COMMONPROGRAMS\AntiOS\Uninstall AntiOS.lnk" "$INSTDIR\Uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\AntiOS"
+  CreateShortCut "$SMPROGRAMS\AntiOS\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
+  CreateShortCut "$SMPROGRAMS\AntiOS\AntiOS Command Line.lnk" "$INSTDIR\AntiOS.exe" "" "$INSTDIR\AntiOS.exe" 0
+  CreateShortCut "$SMPROGRAMS\AntiOS\Uninstall AntiOS.lnk" "$INSTDIR\Uninstall.exe"
   CreateShortCut "$COMMONDESKTOP\AntiOS.lnk" "$INSTDIR\AntiOS-GUI.exe" "" "$INSTDIR\AntiOS-GUI.exe" 0
 
   ; Fresh installs enable the Control Center at user logon. Upgrades preserve
@@ -383,7 +385,7 @@ Section "Uninstall"
     Pop $0
 
   Delete "$COMMONDESKTOP\AntiOS.lnk"
-  RMDir /r "$COMMONPROGRAMS\AntiOS"
+  RMDir /r "$SMPROGRAMS\AntiOS"
 
   DeleteRegKey HKLM "${APP_PATH_KEY}"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
