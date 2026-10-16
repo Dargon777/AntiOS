@@ -227,6 +227,9 @@ antios_path_preflight_done:
   Goto antios_staging_ready
 
 antios_staging_failed:
+  ; SetOutPath changes Setup's working directory. Windows refuses to remove
+  ; its own current directory; leave the staging tree before cleanup.
+  SetOutPath "$INSTDIR"
   RMDir /r "$StageDir"
   RMDir "$BackupDir"
   SetErrorLevel 28
@@ -234,6 +237,10 @@ antios_staging_failed:
   Abort
 
 antios_staging_ready:
+  ; Extraction leaves NSIS with StageDir as its working directory. Both
+  ; the failure rollback and successful activation need to remove StageDir,
+  ; so switch back before any file moves/cleanup.
+  SetOutPath "$INSTDIR"
   ; Stop the previous persistent Guard task before replacing binaries. A stale
   ; heartbeat can belong to a still-live process holding guard.lock, so the
   ; cooperative Guard stop alone is not sufficient for upgrades.
