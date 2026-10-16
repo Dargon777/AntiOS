@@ -351,13 +351,24 @@ class Guard:
         watcher = None
         last_heartbeat, last_probe, last_inventory = 0.0, float('-inf'), float('-inf')
         last_process_poll = float('-inf')
+        last_stop_poll = float('-inf')
         last_alert_loss_reported = 0
         version, changed, notification_error = None, True, False
         next_notification_retry = 0.0
 
         def cancelled():
-            nonlocal last_heartbeat, last_process_poll
+            nonlocal last_heartbeat, last_process_poll, last_stop_poll
+            # Stop requests take priority over process snapshots, journal writes
+            # and inventory reconciliation. A failing/slow collector must not
+            # be invoked again after the user explicitly stopped the Guard.
+            if stop.is_set():
+                return True
             now = time.monotonic()
+            if now - last_stop_poll >= 0.2:
+                last_stop_poll = now
+                if store.stopped(self.status['run_id']):
+                    stop.set()
+                    return True
 
             # Restore a failed Windows process sampler, including one that
             # failed to initialize. The first snapshot is a safe baseline.
@@ -414,8 +425,6 @@ class Guard:
                                    unresolved=len(self.failures), active_threats=len(self.threats))
                 self._publish_incidents(store)
                 store.publish(self.status)
-                if store.stopped(self.status['run_id']):
-                    stop.set()
             return stop.is_set()
 
         store.publish(self.status)

@@ -111,9 +111,20 @@ result is explicitly unverified until the user refreshes protection status.
 No elevated output or IPC data is trusted from user-writable files.
 
 Automatic privileged repair from user-writable portable directories is not
-supported. The installer and command-line utility retain their privileged
-operations. Re-register an older Highest logon task as Limited when reconciling
+supported. Before elevating the managed CLI, AntiOS additionally checks that
+neither the executable nor the directory chain up to Program Files grants
+unprivileged principals NTFS write/delete/ownership permissions. A missing or
+unverifiable ACL fails closed; ordinary GUI monitoring remains usable.
+The installer and command-line utility retain their privileged operations.
+Re-register an older Highest logon task as Limited when reconciling
 the startup preference.
+
+Setup also rejects an existing installation directory that is a junction or
+reparse point, before running old lifecycle scripts. It aborts on file-copy
+errors without falsely updating the registered version. **This is not a
+transactional rollback:** if replacement partially succeeded before a failure,
+manual recovery and reinstallation can still be required. Full atomic upgrades
+with an authenticated old-version fallback remain unimplemented.
 
 ## Quarantine
 

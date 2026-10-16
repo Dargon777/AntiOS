@@ -104,6 +104,19 @@ Section "AntiOS" SecMain
   SectionIn RO
   SetRegView 64
 
+  ; The Setup runs as administrator. Never extract binaries or execute
+  ; follow-up maintenance scripts through a substituted junction/reparse
+  ; install directory. This check happens before stopping the old Guard.
+  IfFileExists "$INSTDIR" 0 antios_path_preflight_done
+    System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR") i .r0'
+    IntOp $1 $0 & 0x400
+    ${If} $1 != 0
+      SetErrorLevel 27
+      MessageBox MB_ICONSTOP|MB_OK "AntiOS cannot install into a directory with a reparse point or an unreadable target."
+      Abort
+    ${EndIf}
+antios_path_preflight_done:
+
   ; Stop the previous persistent Guard task before replacing binaries. A stale
   ; heartbeat can belong to a still-live process holding guard.lock, so the
   ; cooperative Guard stop alone is not sufficient for upgrades.
@@ -117,8 +130,23 @@ Section "AntiOS" SecMain
 
   SetOutPath "$INSTDIR"
   SetOverwrite on
+  ClearErrors
   File /r "${SOURCE_DIR}\*.*"
+  IfErrors antios_payload_copy_failed
+  IfFileExists "$INSTDIR\AntiOS.exe" 0 antios_payload_copy_failed
+  IfFileExists "$INSTDIR\AntiOS-GUI.exe" 0 antios_payload_copy_failed
+  IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 antios_payload_copy_failed
+  Goto antios_payload_copy_ok
 
+antios_payload_copy_failed:
+  ; Crucially do not record the *new* installed version after failed copying.
+  ; Restoring overwritten old binaries still needs a transactional upgrade
+  ; manager, but a partial install must not report itself as successful.
+  SetErrorLevel 28
+  MessageBox MB_ICONSTOP|MB_OK "AntiOS could not replace all application files. Installation was aborted without registering the new version."
+  Abort
+
+antios_payload_copy_ok:
   ; Normalize startup state with the newly installed script as well. This also
   ; repairs upgrades from older builds whose uninstall path was broken.
   IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3

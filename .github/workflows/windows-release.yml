@@ -331,6 +331,27 @@ jobs:
           if (Test-Path -LiteralPath $desktopShortcut) {
             throw "Installer smoke uninstall left the desktop shortcut behind"
           }
+
+          # A signed, elevated Setup must refuse to deploy via a junction.
+          # A user-writable reparse point is otherwise a file-placement and
+          # privilege-escalation risk before service scripts are executed.
+          $junctionTarget = Join-Path $env:RUNNER_TEMP "AntiOS-Unsafe-Target"
+          $junctionInstall = Join-Path $env:RUNNER_TEMP "AntiOS-Unsafe-Junction"
+          New-Item -ItemType Directory -Force $junctionTarget | Out-Null
+          New-Item -ItemType Junction -Path $junctionInstall -Target $junctionTarget | Out-Null
+          try {
+            $rejected = Start-Process -FilePath (Resolve-Path "./installer-output/AntiOS-Setup.exe").Path -ArgumentList @("/S", "/NOENGINE=1", "/D=$junctionInstall") -Wait -PassThru
+            if ($rejected.ExitCode -eq 0) {
+              throw "Installer incorrectly accepted a reparse-point destination"
+            }
+            if (Test-Path -LiteralPath (Join-Path $junctionTarget "AntiOS.exe")) {
+              throw "Installer wrote privileged files through a junction"
+            }
+          }
+          finally {
+            Remove-Item -LiteralPath $junctionInstall -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $junctionTarget -Recurse -Force -ErrorAction SilentlyContinue
+          }
       - name: Smoke-test executables
         shell: pwsh
         run: |

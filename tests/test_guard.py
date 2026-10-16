@@ -990,3 +990,47 @@ def test_new_file_identity_resets_stale_transient_retry_budget(tmp_path):
         stop.set()
         thread.join(3)
     assert not failures
+
+
+
+def test_local_stop_short_circuits_process_collector(tmp_path):
+    """A stop already requested must not start expensive/unresponsive telemetry."""
+    class FailsIfCalled:
+        def poll(self):
+            raise AssertionError("Process collector called after Guard stop")
+
+    root = tmp_path / "stopped-root"
+    root.mkdir()
+    instance = guard.Guard(
+        guard.GuardPolicy((root,), interval=0.1, settle=0.01),
+        tmp_path / "stopped-state",
+        scanner=scan, probe=probe, watcher_factory=PollNotifications,
+        process_sampler=FailsIfCalled(), native_probe=lambda: None,
+    )
+    stop = threading.Event()
+    stop.set()
+    state = instance.run(stop)
+    assert state["state"] == "stopped"
+    assert state["running"] is False
+
+
+def test_remote_stop_checked_before_polling_processes(tmp_path, monkeypatch):
+    """The durable SQLite stop command takes precedence over process sampling."""
+    class FailsIfCalled:
+        def poll(self):
+            raise AssertionError("Poll after a remote stop was requested")
+
+    monkeypatch.setattr(GuardState, "stopped", lambda *_: True)
+    root = tmp_path / "remote-stop-root"
+    root.mkdir()
+    state_path = tmp_path / "remote-stop-state"
+    instance = guard.Guard(
+        guard.GuardPolicy((root,), interval=0.1, settle=0.01),
+        state_path, scanner=scan, probe=probe,
+        watcher_factory=PollNotifications, process_sampler=FailsIfCalled(),
+        native_probe=lambda: None,
+    )
+    result = instance.run()
+    assert result["state"] == "stopped"
+    assert result["running"] is False
+    assert read_guard_state(state_path)["state"] == "stopped"

@@ -30,7 +30,11 @@ For a Python installation, use `antios guard ...` or `antios-guard ...`. The
 companion EXE requests `asInvoker`, not administrator rights. Its `_guard`
 directory must remain beside it. The dashboard now runs with the interactive user's normal permissions;
 the packaged advanced CLI still requires UAC when launched directly. Machine
-engine repair uses a separate, explicit elevated CLI handoff. The Store package currently contains only the dashboard;
+engine repair uses a separate, explicit elevated CLI handoff, refusing targets
+with untrusted NTFS write permissions on the CLI or its Program Files ancestors.
+Local and SQLite-backed stop requests are processed before additional process
+collection or inventory. A remaining CI shutdown race is instrumented with
+the Guard worker stack to distinguish slow cleanup from an unresponsive scanner. The Store package currently contains only the dashboard;
 its Guard start button is disabled when the companion is absent. Store support
 requires a separate package and installed-Windows acceptance test.
 
