@@ -142,6 +142,18 @@ by a full transaction. Do not manually run executables from incomplete
 installation trees. Full crash-safe recovery with authenticated old-version
 fallback remains a separate release gate.
 
+The NSIS uninstaller deletes only paths listed in a build-generated manifest of
+the exact shipped application files. It checks the installed root and the
+packaged subdirectories for Windows reparse points before running privileged
+maintenance scripts. Runtime subdirectories are removed **without recursive
+deletion**: unexpected files or user-added folders remain untouched. The
+installation root is removed only if empty. Known Start Menu shortcuts are
+removed individually rather than recursively deleting a possibly shared menu
+folder. The managed ClamAV service and its data are handled by their dedicated
+uninstall script; a failure there may leave managed files for investigation.
+Current-user settings, history and DPAPI quarantine are not deleted by the
+application uninstaller.
+
 ## Quarantine
 
 Only a confirmed threat is eligible for quarantine.
