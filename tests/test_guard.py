@@ -93,8 +93,8 @@ def test_existing_new_and_modified_files_are_scanned_once_until_changed(tmp_path
         assert status['stop_requested']
         thread.join(10)
         if thread.is_alive():
-            # Keep a failed cooperative stop visible instead of masking it by
-            # setting the local Event. Capture the actual Guard thread stack.
+            # Diagnose a real failure of cooperative Guard stop, rather than
+            # hiding it with a local Event override or extending the deadline.
             import sys
             import traceback
             frame = sys._current_frames().get(thread.ident)
