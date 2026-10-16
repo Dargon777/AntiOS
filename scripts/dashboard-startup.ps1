@@ -107,6 +107,14 @@ if (-not $Apply) {
     return
 }
 
+# Unlike a same-user UAC approval, elevation through a different admin account
+# must not register background software for the administrator instead of the
+# interactive desktop user.
+$interactiveUser = (Get-CimInstance Win32_ComputerSystem).UserName
+if (-not $interactiveUser -or $interactiveUser -ine $identity.Name) {
+    throw 'Control Center startup deferred: current elevated identity differs from the interactive user.'
+}
+
 if ($signature.Status -ne 'Valid') {
     if (-not $AllowManagedUnsigned) {
         throw 'Automatic Control Center startup requires a valid Authenticode signature.'

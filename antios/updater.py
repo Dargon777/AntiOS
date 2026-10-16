@@ -224,39 +224,48 @@ def download_update(
         raise
 
 
-def schedule_install(setup_path: str | Path, expected_sha256: str) -> dict:
-    """Launch verified Setup only after this AntiOS process exits.
+def _update_handoff_script(setup: Path, expected_sha256: str, parent_pid: int) -> str:
+    """Generate a fixed command rather than a user-writable .ps1 helper."""
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+        raise ValueError("Invalid expected update digest")
+    if not isinstance(parent_pid, int) or parent_pid <= 0:
+        raise ValueError("Invalid parent process")
+    escaped = str(setup).replace("'", "''")
+    return (
+        "$ErrorActionPreference='Stop';"
+        f"$waitPid={parent_pid};$setup='{escaped}';$expected='{expected_sha256}';"
+        "$deadline=(Get-Date).AddSeconds(120);"
+        "while(Get-Process -Id $waitPid -ErrorAction SilentlyContinue){"
+        "if((Get-Date) -ge $deadline){throw 'AntiOS did not exit; update cancelled.'};"
+        "Start-Sleep -Milliseconds 500};"
+        "Start-Sleep -Milliseconds 750;"
+        "$actual=(Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant();"
+        "if($actual -ne $expected){throw 'AntiOS update digest changed before install.'};"
+        "$sig=Get-AuthenticodeSignature -LiteralPath $setup;"
+        "if($sig.Status -ne 'Valid'){throw 'AntiOS update signature is no longer valid.'};"
+        "Start-Process -FilePath $setup -ArgumentList '/S' -Verb RunAs -Wait"
+    )
 
-    The helper re-checks SHA-256 and Authenticode immediately before launch to
-    close the verification/use race in the user temp directory.
+
+def schedule_install(setup_path: str | Path, expected_sha256: str) -> dict:
+    """Run verified Setup after AntiOS exits, with bounded waiting.
+
+    Do not stage an executable PowerShell script in the writable update cache.
+    Re-check both the digest and the Authenticode signature before install.
     """
     if os.name != "nt":
         raise OSError("Automatic AntiOS installation requires Windows")
     setup = Path(setup_path).resolve()
     if not setup.is_file():
         raise FileNotFoundError(setup)
-    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
-        raise ValueError("Invalid expected update digest")
-
-    helper = setup.parent / "install-antios-update.ps1"
-    helper.write_text(
-        """param([int]$WaitPid,[string]$Setup,[string]$Expected)\n"""
-        """$ErrorActionPreference='Stop'\n"""
-        """try { Wait-Process -Id $WaitPid -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 750; """
-        """$actual=(Get-FileHash -LiteralPath $Setup -Algorithm SHA256).Hash.ToLowerInvariant(); """
-        """if($actual -ne $Expected){ throw 'AntiOS update digest changed before install.' }; """
-        """$sig=Get-AuthenticodeSignature -LiteralPath $Setup; """
-        """if($sig.Status -ne 'Valid'){ throw 'AntiOS update signature is no longer valid.' }; """
-        """Start-Process -FilePath $Setup -ArgumentList '/S' -Verb RunAs -Wait } """
-        """finally { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue }\n""",
-        encoding="utf-8",
-    )
+    if setup.name != "AntiOS-Setup.exe":
+        raise ValueError("Expected an AntiOS-Setup.exe installer")
+    command = _update_handoff_script(setup, expected_sha256, os.getpid())
     powershell = system_executable("WindowsPowerShell/v1.0/powershell.exe")
     process = subprocess.Popen(
         [
             str(powershell), "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
-            "-ExecutionPolicy", "Bypass", "-File", str(helper),
-            "-WaitPid", str(os.getpid()), "-Setup", str(setup), "-Expected", expected_sha256,
+            "-Command", command,
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

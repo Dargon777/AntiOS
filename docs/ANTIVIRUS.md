@@ -1,4 +1,4 @@
-# AntiOS antivirus — alpha 16
+# AntiOS antivirus — alpha 27
 
 AntiOS uses the managed **ClamAV** engine as its normal scan path. Windows AMSI
 is kept as an explicit compatibility mode; AntiOS does not silently fall back
@@ -125,11 +125,13 @@ AntiOS.exe update --yes
 Update discovery uses AntiOS GitHub releases. Downloaded Setup files are checked
 against the release SHA-256 (and GitHub asset digest when present).
 
-Automatic installation is stricter: `--yes` requires a **valid Authenticode
-signature** immediately after download and re-checks both SHA-256 and
-Authenticode again after the current AntiOS process exits, just before launching
-Setup. Until release signing is enabled, automatic installation intentionally
-refuses to run an unsigned Setup.
+Installation is stricter: `--yes` requires a **valid Authenticode signature**.
+The dashboard may check and download updates automatically, but **never installs
+one without explicit confirmation**. After choosing Install update, it closes
+and hands the installer to a fixed PowerShell command (not a writable .ps1 file
+in the update cache). That command waits at most 120 seconds for AntiOS to exit
+and then verifies SHA-256 and Authenticode again before launching Setup.
+Until release signing is enabled, unsigned Setup cannot be installed automatically.
 
 ## Native pre-execution boundary
 
