@@ -88,9 +88,30 @@ def test_dashboard_startup_task_is_separate_elevated_logon_task():
 
     assert "AntiOS Control Center" in source
     assert "New-ScheduledTaskTrigger -AtLogOn" in source
-    assert "-RunLevel Highest" in source
+    assert "-RunLevel Limited" in source
     assert "Arguments = '--background'" in source
     assert "Resident Guard protection is managed separately" in source
     assert "S-1-5-18" in source
     assert "Win32_ComputerSystem" in source
     assert "current elevated identity differs from the interactive user" in source
+    assert "-RunLevel Limited" in source
+    assert "-RunLevel Highest" not in source
+    assert "run_level" in source
+
+
+
+def test_dashboard_startup_migrates_legacy_elevated_task(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        dashboard_startup, "dashboard_startup_status",
+        lambda: {"enabled": True, "state": "Ready", "run_level": "Highest"},
+    )
+    monkeypatch.setattr(
+        dashboard_startup, "set_dashboard_startup",
+        lambda enabled: called.append(enabled) or {
+            "enabled": True, "state": "Ready", "run_level": "Limited",
+        },
+    )
+    result = dashboard_startup.reconcile_dashboard_startup(True)
+    assert called == [True]
+    assert result["run_level"] == "Limited"

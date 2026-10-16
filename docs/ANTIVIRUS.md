@@ -96,6 +96,18 @@ not equivalent to kernel pre-execution interception.
 The tray state follows the actual Guard state. A tray failure is cosmetic and
 cannot stop the protection loop.
 
+The dashboard and its logon task run as the interactive user (asInvoker /
+Limited), not permanently as administrator. Scanning and the user's DPAPI
+quarantine therefore stay under that user's identity. A missing/damaged
+machine-wide ClamD installation is **not** silently repaired during background
+startup. Clicking Repair protection explicitly asks Windows to elevate the
+separate installed AntiOS CLI for an allowlisted repair/bootstrap operation.
+The GUI reports this as a request, not a completed repair; refresh protection
+status after it finishes. Automatic privileged repair from user-writable portable
+directories is not supported. The installer and command-line utility retain
+their privileged operations. Re-register an older Highest logon task as Limited
+when reconciling the startup preference.
+
 ## Quarantine
 
 Only a confirmed threat is eligible for quarantine.

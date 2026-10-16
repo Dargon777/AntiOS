@@ -58,6 +58,7 @@ if ($Status) {
         enabled = ($null -ne $task)
         task = $taskName
         state = if ($task) { [string]$task.State } else { 'Absent' }
+        run_level = if ($task) { [string]$task.Principal.RunLevel } else { 'Absent' }
         user = $identity.Name
     }
     if ($Json) {
@@ -98,7 +99,7 @@ $signature = Get-AuthenticodeSignature -LiteralPath $exe
     Arguments = '--background'
     Signature = $signature.Status
     Signer = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '(none)' }
-    Privilege = 'Highest'
+    Privilege = 'Limited'
     Trigger = 'Current user logon'
 } | Format-List
 
@@ -124,7 +125,7 @@ if ($signature.Status -ne 'Valid') {
 
 $action = New-ScheduledTaskAction -Execute $exe -Argument '--background' -WorkingDirectory ([IO.Path]::GetDirectoryName($exe))
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
-$principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Highest
+$principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Starts the AntiOS Control Center in the notification area at user logon. Resident Guard protection is managed separately.' -Force | Out-Null

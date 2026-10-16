@@ -81,5 +81,8 @@ def set_dashboard_startup(enabled: bool) -> dict[str, Any]:
 def reconcile_dashboard_startup(enabled: bool) -> dict[str, Any]:
     current = dashboard_startup_status()
     if bool(current.get("enabled")) == bool(enabled):
-        return current
+        # Migrate tasks from older releases that ran the GUI as administrator.
+        # Missing metadata from older mocks/readers must not trigger writes.
+        if not enabled or str(current.get("run_level") or "").casefold() != "highest":
+            return current
     return set_dashboard_startup(enabled)

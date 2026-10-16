@@ -1094,6 +1094,16 @@ class AntivirusPanel:
                 self._sync_protection_ui(value)
             elif kind == "guard-action":
                 self.last_guard_probe = 0
+                engine = value.get("engine") if isinstance(value, dict) else None
+                if isinstance(engine, dict) and engine.get("action") == "elevation-requested":
+                    self.status.configure(
+                        text=(
+                            "Запущено отдельное восстановление с запросом UAC. Проверь статус после его завершения."
+                            if self.app.language == "ru"
+                            else "Administrator repair was requested separately. Recheck protection status after it finishes."
+                        ),
+                        fg=self.palette["warn"],
+                    )
             elif kind == "incident-history":
                 from .incident_viewer import IncidentViewer
 

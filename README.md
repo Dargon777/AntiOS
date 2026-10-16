@@ -312,7 +312,7 @@ Build both Windows executables:
 ```powershell
 python -m pip install pyinstaller
 pyinstaller --clean --noconfirm --onedir --contents-directory _cli --uac-admin --version-file release/windows-cli-version.txt --console --name AntiOS antios_entry.py
-pyinstaller --clean --noconfirm --onedir --contents-directory _gui --uac-admin --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
+pyinstaller --clean --noconfirm --onedir --contents-directory _gui --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
 ```
 
 CI validates Windows/Linux Python matrices, CodeQL, wheel/sdist metadata, clean wheel installation, GUI entry points, both PyInstaller executables, smoke tests, release metadata and provenance attestations.

@@ -169,7 +169,7 @@ def test_manual_guard_enable_repairs_engine_before_resident_start(monkeypatch):
     dashboard = Dashboard.__new__(Dashboard)
     dashboard.config = AppConfig()
     dashboard._persist_config = lambda: calls.append("persist")
-    dashboard._heal_managed_engine = lambda: calls.append("engine") or {"action": "ready"}
+    dashboard._heal_managed_engine = lambda **_kwargs: calls.append("engine") or {"action": "ready"}
     monkeypatch.setattr(
         resident,
         "ensure_resident_guard",
@@ -183,3 +183,94 @@ def test_manual_guard_enable_repairs_engine_before_resident_start(monkeypatch):
     assert result["engine"]["action"] == "ready"
     assert result["guard"]["state"] == "monitoring"
     assert dashboard.config.protection.resident_enabled is True
+
+
+
+def test_dashboard_entry_no_longer_relaunches_every_window_with_uac():
+    import inspect
+    from antios import dashboard
+
+    source = inspect.getsource(dashboard.main)
+    assert "ensure_administrator(" not in source
+    assert "return launch(args.lang, background=args.background)" in source
+
+
+def test_background_protection_repair_never_triggers_uac(monkeypatch):
+    from antios.dashboard import Dashboard
+    from antios import elevation, protection
+
+    dashboard = Dashboard.__new__(Dashboard)
+    monkeypatch.setattr(
+        protection, "collect_protection_status",
+        lambda: {"capabilities": {"standalone_detection_engine": False},
+                 "managed_runtime": {"files": {"clamd": True}}},
+    )
+    monkeypatch.setattr(elevation, "is_administrator", lambda: False)
+    monkeypatch.setattr(
+        elevation, "request_protection_elevation",
+        lambda operation: (_ for _ in ()).throw(AssertionError("No background UAC")),
+    )
+    assert dashboard._heal_managed_engine()["action"] == "requires-elevation"
+
+
+def test_manual_protection_repair_requests_only_allowlisted_elevation(monkeypatch):
+    from antios.dashboard import Dashboard
+    from antios import elevation, protection, resident
+
+    dashboard = Dashboard.__new__(Dashboard)
+    monkeypatch.setattr(
+        protection, "collect_protection_status",
+        lambda: {"capabilities": {"standalone_detection_engine": False},
+                 "managed_runtime": {"files": {"clamd": True}}},
+    )
+    monkeypatch.setattr(elevation, "is_administrator", lambda: False)
+    actions = []
+    monkeypatch.setattr(elevation, "request_protection_elevation", actions.append)
+    monkeypatch.setattr(
+        resident, "ensure_resident_guard",
+        lambda: (_ for _ in ()).throw(AssertionError("Repair not complete")),
+    )
+    result = dashboard.repair_protection()
+    assert actions == ["repair"]
+    assert result["engine"]["action"] == "elevation-requested"
+    assert result["guard"]["changed"] is False
+
+
+def test_manual_missing_engine_requests_bootstrap_not_silent_repair(monkeypatch):
+    from antios.dashboard import Dashboard
+    from antios import elevation, protection
+
+    dashboard = Dashboard.__new__(Dashboard)
+    monkeypatch.setattr(
+        protection, "collect_protection_status",
+        lambda: {"capabilities": {"standalone_detection_engine": False},
+                 "managed_runtime": {"files": {}}},
+    )
+    monkeypatch.setattr(elevation, "is_administrator", lambda: False)
+    actions = []
+    monkeypatch.setattr(elevation, "request_protection_elevation", actions.append)
+    result = dashboard._heal_managed_engine(interactive=True)
+    assert actions == ["bootstrap"]
+    assert result["action"] == "elevation-requested"
+
+
+
+def test_guard_preference_rolls_back_when_uac_is_denied(monkeypatch):
+    import pytest
+    from antios.config import AppConfig, ProtectionConfig
+    from antios.dashboard import Dashboard
+
+    dashboard = Dashboard.__new__(Dashboard)
+    dashboard.config = AppConfig(protection=ProtectionConfig(resident_enabled=False))
+    original = dashboard.config.protection.resident_enabled
+    saves = []
+    dashboard._persist_config = lambda: saves.append(
+        dashboard.config.protection.resident_enabled
+    )
+    dashboard._heal_managed_engine = lambda **kwargs: (
+        (_ for _ in ()).throw(PermissionError("UAC denied"))
+    )
+    with pytest.raises(PermissionError, match="UAC denied"):
+        Dashboard.set_resident_protection_enabled(dashboard, not original)
+    assert dashboard.config.protection.resident_enabled == original
+    assert saves == [not original, original]
