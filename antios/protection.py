@@ -218,6 +218,15 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         guard.get("running") and
         guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
     )
+    # A live Guard process can still have incomplete filesystem, engine or
+    # process telemetry coverage. Do not count a degraded Guard as a verified
+    # resident protection layer in the headline capability/coexistence status.
+    guard_operational = bool(
+        guard_running and guard.get("state") in {"monitoring", "attention", "scanning"}
+        and not guard.get("capacity_exceeded")
+        and not guard.get("inventory_issues")
+        and not guard.get("behavior_alerts_dropped", 0)
+    )
     behavior = guard.get("behavior", {}) if isinstance(guard.get("behavior"), dict) else {}
     risk = guard.get("risk", {}) if isinstance(guard.get("risk"), dict) else {}
     last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
@@ -235,7 +244,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     native_health = _native_coexistence_health(native_running, driver)
     native_coexistence = native_health["configured"]
     pre_execution = native_pre_execution_active(native) is True
-    antios_resident = bool(engine_ready and (guard_running or pre_execution))
+    antios_resident = bool(engine_ready and (guard_operational or pre_execution))
     defender_realtime = defender.get("realtime_active") is True
     layered_active = bool(defender_realtime and antios_resident)
     amsi_registered = bool(amsi.get("registered") and amsi.get("module_exists"))
@@ -249,7 +258,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     blockers = []
     if not engine_ready:
         blockers.append("trusted-current-engine")
-    if not guard_running:
+    if not guard_operational:
         blockers.append("resident-post-write-guard")
     if not pre_execution:
         blockers.append("signed-native-pre-execution-enforcement")
@@ -271,7 +280,8 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "incidents": incidents,
         "capabilities": {
             "standalone_detection_engine": engine_ready,
-            "resident_post_write_detection": guard_running and engine_ready,
+            "resident_post_write_detection": guard_operational and engine_ready,
+            "resident_post_write_partial": guard_running and not guard_operational,
             "behavior_monitoring": behavior_monitoring,
             "behavior_process_visibility": behavior_process_visibility,
             "risk_fusion": guard_running and risk.get("mode") == "fusion",

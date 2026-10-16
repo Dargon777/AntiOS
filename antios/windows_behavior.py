@@ -112,10 +112,13 @@ class WindowsProcessSampler:
         new_pids = []
         for pid, process in list(current.items()):
             old = previous.get(pid)
-            if old is not None:
+            if old is not None and old.image == process.image and old.ppid == process.ppid:
                 current[pid] = _SnapshotProcess(
                     process.pid, process.ppid, process.image, old.path)
             else:
+                # A recycled PID can now belong to a different process. Never
+                # inherit the old path or silently suppress an event when its
+                # image or parent process has changed since the last snapshot.
                 new_pids.append(pid)
                 current[pid] = _SnapshotProcess(
                     process.pid, process.ppid, process.image, self._path(pid))

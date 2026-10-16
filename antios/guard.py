@@ -137,7 +137,7 @@ class Guard:
     def __init__(self, policy, state_dir=None, *, scanner=None,
                  probe=None, quarantine_factory=Quarantine, watcher_factory=None,
                  status_observer=None, behavior_engine=None, process_sampler=None,
-                 native_probe=None, incident_graph=None):
+                 process_sampler_factory=None, native_probe=None, incident_graph=None):
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
@@ -160,22 +160,36 @@ class Guard:
         self.watcher_factory = watcher_factory or (DirectoryNotifications if os.name == 'nt' else PollNotifications)
         self.status_observer = status_observer
         self.behavior = behavior_engine or BehaviorEngine()
+        # Process sampling is read-only, but may temporarily fail when Windows
+        # cannot supply a process snapshot. Never silently disable it forever.
+        self._process_sampler_factory = process_sampler_factory
+        self._process_collector_name = 'injected'
+        self._process_visibility_required = os.name == 'nt' or process_sampler_factory is not None
+        if process_sampler is None and self._process_sampler_factory is None and os.name == 'nt':
+            from .windows_behavior import WindowsProcessSampler
+            self._process_sampler_factory = WindowsProcessSampler
+            self._process_collector_name = 'toolhelp-snapshot'
+        self._collector_errors = 0
+        self._collector_recoveries = 0
+        self._collector_detail = ''
+        self._process_retry_at = float('inf')
         if process_sampler is not None:
             self.process_sampler = process_sampler
-            behavior_collector = 'injected'
-        elif os.name == 'nt':
+        elif self._process_sampler_factory is not None:
             try:
-                from .windows_behavior import WindowsProcessSampler
-                self.process_sampler = WindowsProcessSampler()
-                behavior_collector = 'toolhelp-snapshot'
-            except OSError:
+                self.process_sampler = self._process_sampler_factory()
+            except OSError as exc:
                 self.process_sampler = None
-                behavior_collector = 'file-correlation-only'
+                self._collector_errors += 1
+                self._collector_detail = str(exc)[:500]
+                self._process_retry_at = time.monotonic() + 30
         else:
             self.process_sampler = None
-            behavior_collector = 'file-correlation-only'
         self._behavior_events = []
-        self._behavior_collector = behavior_collector
+        self._behavior_collector = (
+            self._process_collector_name if self.process_sampler is not None
+            else 'file-correlation-only'
+        )
         self.incidents = incident_graph or IncidentGraph()
         if native_probe is not None:
             self.native_probe = native_probe
@@ -204,25 +218,34 @@ class Guard:
                        'errors': 0, 'pending': 0, 'unresolved': 0, 'inventory_issues': [],
                        'capacity_exceeded': False, 'notifications': 'starting',
                        'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS,
-                       'transient_deferrals': 0,
-                       'behavior': dict(self.behavior.status(), collector=behavior_collector,
-                                        collector_errors=0),
+                       'transient_deferrals': 0, 'behavior_alerts_dropped': 0,
+                       'behavior': dict(self.behavior.status(), collector=self._behavior_collector,
+                                        collector_errors=self._collector_errors,
+                                        collector_recoveries=0, alerts_dropped=0,
+                                        collector_detail=self._collector_detail),
                        'risk': {'mode': 'fusion', 'evaluations': 0, 'highest_score': 0,
                                 'last': None, 'native_pre_execution': 'unknown',
                                 'native_probe_errors': 0},
                        'incidents': self.incidents.status()}
 
-    def _queue_behavior_findings(self, findings):
-        for finding in findings:
-            self._behavior_events.append(finding.to_dict())
-        if len(self._behavior_events) > 100:
-            del self._behavior_events[:-100]
-        previous = self.status.get('behavior', {})
+    def _refresh_behavior_status(self):
         self.status['behavior'] = dict(
             self.behavior.status(),
             collector=self._behavior_collector,
-            collector_errors=previous.get('collector_errors', 0),
+            collector_errors=self._collector_errors,
+            collector_recoveries=self._collector_recoveries,
+            collector_detail=self._collector_detail,
+            alerts_dropped=self.status['behavior_alerts_dropped'],
         )
+
+    def _queue_behavior_findings(self, findings):
+        for finding in findings:
+            self._behavior_events.append(finding.to_dict())
+        overflow = max(0, len(self._behavior_events) - 100)
+        if overflow:
+            del self._behavior_events[:overflow]
+            self.status['behavior_alerts_dropped'] += overflow
+        self._refresh_behavior_status()
 
     def _publish_incidents(self, store: GuardState):
         self.status['incidents'] = self.incidents.status()
@@ -328,12 +351,37 @@ class Guard:
         watcher = None
         last_heartbeat, last_probe, last_inventory = 0.0, float('-inf'), float('-inf')
         last_process_poll = float('-inf')
+        last_alert_loss_reported = 0
         version, changed, notification_error = None, True, False
         next_notification_retry = 0.0
 
         def cancelled():
             nonlocal last_heartbeat, last_process_poll
             now = time.monotonic()
+
+            # Restore a failed Windows process sampler, including one that
+            # failed to initialize. The first snapshot is a safe baseline.
+            if (self.process_sampler is None and self._process_sampler_factory is not None
+                    and now >= self._process_retry_at):
+                self._process_retry_at = now + 30
+                try:
+                    self.process_sampler = self._process_sampler_factory()
+                    self._behavior_collector = self._process_collector_name
+                    self._collector_detail = ''
+                    self._collector_recoveries += 1
+                    last_process_poll = float('-inf')
+                    store.event('behavior-collector-recovered', {
+                        'collector': self._behavior_collector,
+                        'recoveries': self._collector_recoveries,
+                    })
+                except OSError as exc:
+                    self._collector_errors += 1
+                    self._collector_detail = str(exc)[:500]
+                    store.event('behavior-collector-error', {
+                        'error': self._collector_detail,
+                        'retry_seconds': 30,
+                    })
+                self._refresh_behavior_status()
 
             # run_scan_process invokes this callback while its worker is busy,
             # so process correlation stays live even during a long file scan.
@@ -348,25 +396,20 @@ class Guard:
                             behavior_findings=(finding.to_dict() for finding in behavior_findings),
                         )
                 except OSError as exc:
-                    previous_behavior = self.status.get('behavior', {})
                     self._behavior_collector = 'file-correlation-only'
                     self.process_sampler = None
-                    self.status['behavior'] = dict(
-                        self.behavior.status(),
-                        collector=self._behavior_collector,
-                        collector_errors=previous_behavior.get('collector_errors', 0) + 1,
-                        collector_detail=str(exc)[:500],
-                    )
-                    store.event('behavior-collector-error', {'error': str(exc)[:500]})
+                    self._process_retry_at = now + 30
+                    self._collector_errors += 1
+                    self._collector_detail = str(exc)[:500]
+                    self._refresh_behavior_status()
+                    store.event('behavior-collector-error', {
+                        'error': self._collector_detail,
+                        'retry_seconds': 30 if self._process_sampler_factory is not None else None,
+                    })
 
             if now - last_heartbeat >= 0.5:
                 last_heartbeat = now
-                previous_behavior = self.status.get('behavior', {})
-                self.status['behavior'] = dict(
-                    self.behavior.status(),
-                    collector=self._behavior_collector,
-                    collector_errors=previous_behavior.get('collector_errors', 0),
-                )
+                self._refresh_behavior_status()
                 self.status.update(heartbeat=time.time(), pending=len(self.pending),
                                    unresolved=len(self.failures), active_threats=len(self.threats))
                 self._publish_incidents(store)
@@ -384,6 +427,12 @@ class Guard:
 
                 while self._behavior_events:
                     store.event('behavior-alert', self._behavior_events.pop(0))
+                if self.status['behavior_alerts_dropped'] > last_alert_loss_reported:
+                    last_alert_loss_reported = self.status['behavior_alerts_dropped']
+                    store.event('behavior-alert-loss', {
+                        'dropped_total': last_alert_loss_reported,
+                        'reason': 'behavior-event-queue-overflow',
+                    })
 
                 if watcher is None and now >= next_notification_retry:
                     next_notification_retry = now + 30
@@ -419,7 +468,8 @@ class Guard:
                         excluded=self.excluded, cancelled=cancelled)
                     self.status['inventory_issues'] = issues
                     self.status['capacity_exceeded'] = limited
-                    for mapping in (self.pending, self.known, self.failures, self.threats):
+                    for mapping in (self.pending, self.known, self.failures,
+                                    self.threats, self.transient_retries):
                         for path in list(mapping):
                             if path not in files and not limited and not issues:
                                 del mapping[path]
@@ -428,6 +478,8 @@ class Guard:
                     for path, (identity, _) in list(self.pending.items()):
                         current = files.get(path)
                         if current is not None and current != identity:
+                            # A new file version gets its own transient retry budget.
+                            self.transient_retries.pop(path, None)
                             self.pending[path] = (current, now + self._settle_delay(path))
                     # Continue after the last admission. Repeated writes/cache
                     # resets in the first entries must not starve the backlog.
@@ -453,7 +505,10 @@ class Guard:
                 if ready and self.status['engine'].get('available') and not cancelled():
                     path, (identity, _) = ready
                     del self.pending[path]
-                    self.status.update(state='scanning', current_path=str(path))
+                    # A degraded Guard must not look fully healthy merely because
+                    # it entered a scanning phase.
+                    scan_state = 'degraded' if self.status['state'] == 'degraded' else 'scanning'
+                    self.status.update(state=scan_state, current_path=str(path))
                     store.publish(self.status)
                     self._notify_status()
                     try:
@@ -522,6 +577,8 @@ class Guard:
                                 self.transient_retries.pop(path, None)
                                 self.status['errors'] += 1
                                 self.failures[path] = str(exc)[:500]
+                                if len(self.known) >= self.policy.max_files and path not in self.known:
+                                    self.known.pop(next(iter(self.known)))
                                 self.known[path] = (identity, time.monotonic(), 30)
                                 store.event('scan-error', {'path': str(path), 'error': str(exc)[:500]})
                         else:
@@ -537,7 +594,9 @@ class Guard:
                     raise RuntimeError('Guard incident capacity exceeded; review history and reduce watched scope')
                 degraded = (notification_error or self.failures or self.status['inventory_issues'] or
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
-                            self.status['engine'].get('database_freshness') != 'current')
+                            self.status['engine'].get('database_freshness') != 'current' or
+                            (self._process_visibility_required and self.process_sampler is None) or
+                            self.status['behavior_alerts_dropped'] > 0)
                 behavior_attention = self.status.get('behavior', {}).get('state') in {'attention', 'alert'}
                 incident_attention = self.status.get('incidents', {}).get('state') in {'attention', 'alert'}
                 self.status['state'] = (

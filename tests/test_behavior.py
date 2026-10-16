@@ -125,3 +125,32 @@ def test_findings_for_subject_returns_only_fresh_exact_path():
     assert behavior.findings_for_subject(r"C:\Other\payload.exe", max_age=30) == []
     clock.advance(31)
     assert behavior.findings_for_subject(path, max_age=30) == []
+
+
+
+def test_windows_process_sampler_detects_observable_pid_reuse_without_windows():
+    """Image/parent changes at the same PID are a new execution, not a cache hit."""
+    from antios.windows_behavior import WindowsProcessSampler, _SnapshotProcess
+
+    parent = _SnapshotProcess(100, 4, "WINWORD.EXE", "")
+    views = [
+        {100: parent, 55: _SnapshotProcess(55, 100, "calc.exe", "")},
+        {100: parent, 55: _SnapshotProcess(55, 100, "powershell.exe", "")},
+        {100: parent, 55: _SnapshotProcess(55, 100, "powershell.exe", "")},
+        {100: parent, 55: _SnapshotProcess(55, 101, "powershell.exe", "")},
+    ]
+    sampler = WindowsProcessSampler.__new__(WindowsProcessSampler)
+    sampler._known = None
+    sampler.snapshot = lambda: views.pop(0)
+    sampler._path = lambda _pid: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+    assert sampler.poll() == []  # baseline
+    replaced = sampler.poll()
+    assert len(replaced) == 1
+    assert replaced[0].image == "powershell.exe"
+    assert replaced[0].parent_image == "WINWORD.EXE"
+    assert replaced[0].path.endswith("powershell.exe")
+    assert sampler.poll() == []  # unchanged, not a new process
+    reparented = sampler.poll()
+    assert len(reparented) == 1
+    assert reparented[0].ppid == 101

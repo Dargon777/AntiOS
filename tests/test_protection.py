@@ -388,3 +388,45 @@ def test_amsi_provider_is_reported_without_changing_layered_semantics(monkeypatc
     assert status["production_primary_antivirus"] is False
     rendered = protection.render_protection_status(status)
     assert "AntiOS AMSI provider: registered" in rendered
+
+
+
+def test_degraded_guard_is_not_counted_as_full_layered_protection(monkeypatch):
+    """A running process does not prove complete resident detection coverage."""
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(
+        protection, "read_guard_state",
+        lambda: {
+            "running": True,
+            "state": "degraded",
+            "capacity_exceeded": True,
+            "behavior_alerts_dropped": 4,
+        },
+    )
+    monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    status = protection.collect_protection_status("clamd")
+    assert status["capabilities"]["standalone_detection_engine"] is True
+    assert status["capabilities"]["resident_post_write_detection"] is False
+    assert status["capabilities"]["resident_post_write_partial"] is True
+    assert status["capabilities"]["layered_with_defender"] is False
+    assert "resident-post-write-guard" in status["remaining_gates"]
+
+
+def test_guard_scanning_does_not_mask_active_queue_loss(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+    monkeypatch.setattr(
+        protection, "read_guard_state",
+        lambda: {
+            "running": True,
+            "state": "scanning",
+            "capacity_exceeded": False,
+            "inventory_issues": [],
+            "behavior_alerts_dropped": 1,
+        },
+    )
+    monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    status = protection.collect_protection_status()
+    assert status["capabilities"]["resident_post_write_detection"] is False
+    assert status["capabilities"]["layered_with_defender"] is False

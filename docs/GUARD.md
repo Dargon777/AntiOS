@@ -102,7 +102,11 @@ files. Quarantine and history stay in the user's data directory.
 - No overall `clean` or `fully protected` verdict is produced. States describe
   activity: `starting`, `scanning`, `monitoring`, `attention`, `degraded`,
   `stopped`, `failed`. Unknown/stale database age, unresolved scans and traversal
-  limits prevent a normal monitoring status.
+  limits prevent a normal monitoring status. On Windows, unavailable process
+  correlation or dropped behavior events also marks the Guard as degraded.
+  A running but degraded Guard is **not** presented as a verified layered
+  protection capability; the protection report exposes partial post-write
+  monitoring separately.
 - Heartbeats identify an unresponsive process after 90 seconds. A forced task
   termination can leave its previous state visible until that threshold. This
   is a liveness indication, not tamper protection.
@@ -130,7 +134,12 @@ events and are summarized in Guard/protection status and the Antivirus UI. They
 do **not** become ClamAV threat verdicts, do not trigger automatic quarantine,
 do not terminate processes and do not claim pre-execution blocking. If process
 sampling fails, Guard falls back to file-only behavior correlation and continues
-normal antivirus scanning.
+file scanning while reporting **degraded** protection. Failed process snapshots
+are retried after 30 seconds; recovery and failures are written to the local
+journal. Behavior-alert queue overflow increments `behavior_alerts_dropped`
+and records an `behavior-alert-loss` journal event; the loss remains visible
+until Guard restarts. Transient file-scan retry counters are cleared when files
+vanish from a complete inventory or their identity changes.
 
 The complete rule IDs, scores, memory/time bounds and known visibility limits are
 documented in [BEHAVIOR.md](BEHAVIOR.md).
@@ -165,12 +174,11 @@ The portable workflow builds all three EXEs, verifies manifests (Guard must be
 `asInvoker`), checks Authenticode when signing is enabled, and tests each frozen
 scan worker. These Windows checks must run before publishing this branch.
 
-Recorded local validation (2026-10-03): Ubuntu 24.04, Python 3.12, Tk 9/Xvfb and
-ClamAV 1.5.3: **234 tests passed**. Four native Windows tests are skipped here:
-two notification tests, AMSI and DPAPI. Task Scheduler installation, Authenticode,
-Windows packaging and installed-MSIX behavior remain unverified in this environment.
-No new branch or release has been published to GitHub; the earlier remote-write
-request was rejected. Stop Guard before replacing an existing installation.
+The CI test matrix covers Python tests on Windows and Linux, integration checks,
+Windows portable packaging, MSIX packaging and code analysis. Passing CI is not
+a substitute for interactive Windows 10/11 testing, sustained event-storm
+benchmarks or real-world antivirus efficacy measurements. Stop Guard before
+replacing an existing installation.
 
 Native API references: [directory change reads](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw),
 [notification records](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-file_notify_information),
