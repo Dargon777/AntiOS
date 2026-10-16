@@ -322,9 +322,50 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $installDir "AntiOS-GUI.exe") --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # A junction replacing a packaged runtime directory must abort the
+          # privileged uninstaller before deleting a single external file.
+          $ownedRuntime = Join-Path $installDir "_cli"
+          $savedRuntime = Join-Path $installDir "_cli-before-junction"
+          $externalTarget = Join-Path $env:RUNNER_TEMP "AntiOS-Uninstall-Junction-Trap"
+          New-Item -ItemType Directory -Force $externalTarget | Out-Null
+          "must-preserve" | Set-Content -LiteralPath (Join-Path $externalTarget "Sentinel.txt")
+          Move-Item -LiteralPath $ownedRuntime -Destination $savedRuntime
+          New-Item -ItemType Junction -Path $ownedRuntime -Target $externalTarget | Out-Null
+          try {
+            $reject = Start-Process -FilePath (Join-Path $installDir "Uninstall.exe") -ArgumentList "/S" -PassThru -Wait
+            if ($reject.ExitCode -eq 0) {
+              throw "Uninstaller accepted a substituted runtime junction"
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $externalTarget "Sentinel.txt"))) {
+              throw "Uninstaller modified a junction target outside AntiOS"
+            }
+          }
+          finally {
+            Remove-Item -LiteralPath $ownedRuntime -Force -ErrorAction SilentlyContinue
+            Move-Item -LiteralPath $savedRuntime -Destination $ownedRuntime -ErrorAction Stop
+            Remove-Item -LiteralPath $externalTarget -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          # An administrator-level uninstaller must not recursively delete
+          # unrelated user-owned data from a custom installation directory.
+          $unrelated = Join-Path $installDir "Keep-my-file.txt"
+          $unrelatedFolder = Join-Path $installDir "Keep-my-folder"
+          New-Item -ItemType Directory -Force $unrelatedFolder | Out-Null
+          "foreign-file" | Set-Content -LiteralPath $unrelated -Encoding utf8
+          "foreign-folder" | Set-Content -LiteralPath (Join-Path $unrelatedFolder "data.txt") -Encoding utf8
           & (Join-Path $installDir "Uninstall.exe") /S
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Start-Sleep -Seconds 2
+          if (-not (Test-Path -LiteralPath $unrelated) -or
+              -not (Test-Path -LiteralPath (Join-Path $unrelatedFolder "data.txt"))) {
+            throw "Uninstaller deleted files that AntiOS did not install"
+          }
+          if (Test-Path -LiteralPath (Join-Path $installDir "_cli")) {
+            throw "Uninstaller did not remove the bundled CLI runtime"
+          }
+          Remove-Item -LiteralPath $unrelated -Force
+          Remove-Item -LiteralPath $unrelatedFolder -Recurse -Force
+          Remove-Item -LiteralPath $installDir -Force -ErrorAction SilentlyContinue
           if (Test-Path -LiteralPath (Join-Path $installDir "AntiOS-GUI.exe")) {
             throw "Installer smoke uninstall left AntiOS-GUI.exe behind"
           }

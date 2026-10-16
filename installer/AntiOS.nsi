@@ -69,6 +69,7 @@ Var RollbackFailed
   !insertmacro ${OP} "CODE_OF_CONDUCT.md"
   !insertmacro ${OP} "LICENSE"
   !insertmacro ${OP} "NOTICE"
+  !insertmacro ${OP} "uninstall-manifest.nsh"
 !macroend
 
 !macro ANTIOS_CHECK_STAGED ITEM
@@ -103,6 +104,10 @@ Var RollbackFailed
     IfErrors 0 +2
       StrCpy $RollbackFailed "1"
 !macroend
+
+; Compiler-generated from exactly the files shipped by stage-installer.ps1.
+; Individual deletes/empty-directory removals preserve unrelated user data.
+!include "${SOURCE_DIR}\uninstall-manifest.nsh"
 
 Name "${PRODUCT_NAME} ${APP_VERSION}"
 OutFile "${OUTPUT_FILE}"
@@ -368,6 +373,11 @@ SectionEnd
 
 Section "Uninstall"
   SetRegView 64
+  ; Check the install root and every packaged subdirectory before invoking
+  ; elevated lifecycle scripts or deleting files. A substituted junction
+  ; would otherwise redirect deletion into an unrelated directory.
+  !insertmacro ANTIOS_UNINSTALL_CHECK_PATHS
+  SetOutPath "$TEMP"
   IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 +3
     nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -Uninstall -Apply'
     Pop $0
@@ -385,11 +395,18 @@ Section "Uninstall"
     Pop $0
 
   Delete "$COMMONDESKTOP\AntiOS.lnk"
-  RMDir /r "$SMPROGRAMS\AntiOS"
+  Delete "$SMPROGRAMS\AntiOS\AntiOS.lnk"
+  Delete "$SMPROGRAMS\AntiOS\AntiOS Command Line.lnk"
+  Delete "$SMPROGRAMS\AntiOS\Uninstall AntiOS.lnk"
+  RMDir "$SMPROGRAMS\AntiOS"
 
   DeleteRegKey HKLM "${APP_PATH_KEY}"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
   DeleteRegKey HKLM "${INSTALL_KEY}"
 
-  RMDir /r "$INSTDIR"
+  ; Delete only filenames from the trusted build manifest. Non-recursive
+  ; RMDir preserves unknown files, recovery trees and any user-added folders.
+  !insertmacro ANTIOS_UNINSTALL_OWNED_PAYLOAD
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR"
 SectionEnd
