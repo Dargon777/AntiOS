@@ -115,9 +115,16 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         assert not panel.advanced_frame.place_info()
 
         panel._scan()
+        # The diagnostics window must not disappear or retain destroyed Tk
+        # widgets when users switch theme during a live antivirus scan.
+        app.open_diagnostics()
+        first_console = app._diagnostics_window
+        assert first_console.win.winfo_exists()
         # Rebuild while a job is running: no destroyed-widget callback may fire.
         app.theme_mode = "light"
         app._rebuild_ui("antivirus")
+        assert app._diagnostics_window is not first_console
+        assert app._diagnostics_window.win.winfo_exists()
         deadline = time.monotonic() + 10
         while app.antivirus_busy and time.monotonic() < deadline:
             root.update()

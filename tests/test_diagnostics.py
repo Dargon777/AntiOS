@@ -1,0 +1,221 @@
+import importlib.util
+import json
+import os
+from pathlib import Path
+from types import SimpleNamespace
+from zipfile import ZipFile
+
+import pytest
+
+from antios import diagnostics
+
+
+def test_engine_authenticode_error_is_actionable():
+    code = diagnostics.classify_error(
+        "Production engine setup requires valid Authenticode signatures on clamd.exe and freshclam.exe.",
+        component="ClamAV",
+    )
+    assert code == "ENGINE_SIGNATURE_INVALID"
+    ru = diagnostics.explanation(code, "ru")
+    en = diagnostics.explanation(code, "en")
+    assert "ClamAV" in ru[0] and "подпись" in ru[0]
+    assert "Восстановить защиту" in ru[2]
+    assert "Do not disable" in en[2]
+    assert diagnostics.explanation("UNKNOWN", "ru") == diagnostics.explanation("OPERATION_FAILED", "ru")
+    assert diagnostics.classify_error("Guard unresponsive", component="Guard") == "GUARD_UNRESPONSIVE"
+
+
+def test_events_written_read_with_bounded_schema(tmp_path):
+    first = diagnostics.record_event(
+        "ClamAV", "ERROR", "Authenticode failed", code="ENGINE_SIGNATURE_INVALID",
+        details="RuntimeException: Invalid certificate", context={"operation": "repair", "password": "do-not-store"},
+        directory=tmp_path,
+    )
+    assert first["schema"] == 1
+    assert first["component"] == "ClamAV"
+    assert "password" not in first["context"]
+    diagnostics.record_event("weird-component", "invalid-level", "unexpected", code="../../../", directory=tmp_path)
+    loaded = diagnostics.recent_events(directory=tmp_path)
+    assert len(loaded) == 2
+    assert any(row["id"] == first["id"] for row in loaded)
+    assert any(row["component"] == "System" and row["level"] == "ERROR" for row in loaded)
+    assert diagnostics.recent_events(directory=tmp_path, limit=1)
+    assert len(diagnostics.recent_events(directory=tmp_path, limit=1)) == 1
+    assert all(row["id"] for row in loaded)
+
+
+def test_no_bearer_tokens_emails_or_query_secrets_written(tmp_path):
+    diagnostics.record_event(
+        "Updater", "ERROR",
+        "failed password=topsecret Authorization: Bearer token-123 someone@example.com",
+        details="https://example.test/path?token=unsafe&mode=1",
+        directory=tmp_path,
+    )
+    stored = "".join(p.read_text(encoding="utf-8") for p in tmp_path.iterdir())
+    assert "topsecret" not in stored
+    assert "token-123" not in stored
+    assert "someone@example.com" not in stored
+    assert "unsafe" not in stored
+    assert "[REDACTED]" in stored
+    assert "[EMAIL]" in stored
+
+
+def test_invalid_lines_and_symlink_data_are_not_read(tmp_path):
+    target = tmp_path / "elsewhere.txt"
+    target.write_text('{"schema":1,"level":"ERROR","message":"unsafe","timestamp":"2026-01-01"}\n')
+    own = tmp_path / "events-111.jsonl"
+    own.write_text('not json\n{"schema":2}\n{"schema":1,"level":"INFO","timestamp":"2026-01-01T00:00:00Z","message":"safe","id":"ok"}\n')
+    spy = tmp_path / "events-spy.jsonl"
+    try:
+        spy.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pass
+    loaded = diagnostics.recent_events(directory=tmp_path)
+    assert len(loaded) == 1
+    assert loaded[0]["message"] == "safe"
+
+
+def test_rotation_preserves_current_tail_without_unbounded_growth(tmp_path, monkeypatch):
+    monkeypatch.setattr(diagnostics, "_MAX_BYTES", 160)
+    for n in range(7):
+        diagnostics.record_event("UI", "INFO", "event " + str(n), directory=tmp_path)
+    names = {p.name for p in tmp_path.iterdir()}
+    assert any(".old.jsonl" in name for name in names)
+    assert len(names) <= 2
+    assert any(e["message"] == "event 6" for e in diagnostics.recent_events(directory=tmp_path))
+
+
+def test_write_failure_is_best_effort_and_not_a_scan_failure(tmp_path):
+    not_a_folder = tmp_path / "occupied"
+    not_a_folder.write_text("inert")
+    event = diagnostics.record_event("Scanner", "ERROR", "still-return-event", directory=not_a_folder)
+    assert event["message"] == "still-return-event"
+    assert not_a_folder.is_file()
+
+
+def test_export_support_bundle_contains_only_redacted_whitelist(tmp_path):
+    store = tmp_path / "events"
+    diagnostics.record_event(
+        "ClamAV", "ERROR",
+        r"Can't access C:\Users\Alice\Downloads\sample.txt - someone@example.com",
+        code="ENGINE_SIGNATURE_INVALID",
+        details="API_KEY=very-private-secrets",
+        directory=store,
+    )
+    target = tmp_path / "support.zip"
+    assert diagnostics.export_report(
+        target, directory=store, metadata={
+            "app_version": "2.0.0a27", "os_release": "11",
+            "private_key": "hidden-value", "language": "ru",
+        }) == 1
+    with ZipFile(target) as archive:
+        assert set(archive.namelist()) == {"README.txt", "summary.json", "events.json"}
+        events = json.loads(archive.read("events.json"))
+        info = json.loads(archive.read("summary.json"))
+        assert info["metadata"] == {"app_version": "2.0.0a27", "os_release": "11", "language": "ru"}
+        dump = json.dumps(events, ensure_ascii=False)
+        assert "Alice" not in dump
+        assert "someone@example.com" not in dump
+        assert "very-private-secrets" not in dump
+        assert "hidden-value" not in dump
+        assert "[USER]" in dump
+
+
+def test_antivirus_panel_error_records_classified_event(monkeypatch):
+    from antios.antivirus_ui import AntivirusPanel
+    import antios.antivirus_ui as mod
+
+    records = []
+    monkeypatch.setattr(mod, "record_event", lambda *a, **kw:
+                        records.append((a, kw)) or {"component": a[0]})
+
+    class Label:
+        def __init__(self):
+            self.props = {}
+        def configure(self, **kwargs):
+            self.props.update(kwargs)
+
+    panel = SimpleNamespace(
+        status=Label(), last_error_label=Label(),
+        palette={"warn": "red"},
+        app=SimpleNamespace(language="ru"),
+    )
+    panel.t = lambda key, **kwargs: key
+    AntivirusPanel._error(panel, {
+        "component": "ClamAV",
+        "message": "Production engine setup requires valid Authenticode signatures on clamd.exe and freshclam.exe.",
+        "details": "RuntimeException",
+        "operation": "repair",
+    })
+    assert records[0][0][:2] == ("ClamAV", "ERROR")
+    assert records[0][1]["code"] == "ENGINE_SIGNATURE_INVALID"
+    assert "ClamAV" in panel.status.props["text"]
+    assert panel.last_error_label.props["fg"] == "red"
+
+
+@pytest.mark.skipif(importlib.util.find_spec("tkinter") is None or
+                    (os.name != "nt" and not os.environ.get("DISPLAY")),
+                    reason="Native Tk display unavailable")
+def test_real_diagnostics_window_filters_inspects_and_closes(monkeypatch):
+    import tkinter as tk
+    from tkinter import ttk
+    from antios import diagnostics_ui
+    from antios.dashboard import DARK_THEME
+
+    events = [
+        diagnostics.record_event("ClamAV", "ERROR", "bad signature",
+                                 code="ENGINE_SIGNATURE_INVALID", directory=Path(os.devnull) / "invalid"),
+        diagnostics.record_event("Guard", "INFO", "monitoring",
+                                 code="GUARD_STATE_CHANGED", directory=Path(os.devnull) / "invalid"),
+    ]
+    monkeypatch.setattr(diagnostics_ui, "recent_events", lambda **_kwargs: events)
+    root = tk.Tk()
+    root.withdraw()
+    app = SimpleNamespace(root=root, language="ru", _diagnostics_window=None)
+    try:
+        console = diagnostics_ui.open_diagnostics(app, DARK_THEME)
+        root.update()
+        assert len(console.tree.get_children()) == 2
+        console.severity_var.set("ERROR")
+        root.update()
+        assert len(console.tree.get_children()) == 1
+        console._toggle_mode()
+        assert "ENGINE_SIGNATURE_INVALID" in console.details.get("1.0", "end")
+        console._copy()
+        assert "подпись" in root.clipboard_get()
+        console.search_var.set("totally absent event")
+        root.update()
+        assert len(console.tree.get_children()) == 0
+        assert diagnostics_ui.open_diagnostics(app, DARK_THEME) is console
+        console.close()
+        assert app._diagnostics_window is None
+    finally:
+        root.destroy()
+
+
+
+def test_malformed_context_is_ignored_even_during_support_export(tmp_path):
+    store = tmp_path / "store"
+    entry = diagnostics.record_event("UI", "ERROR", "bad operation",
+                                     context="malformed", directory=store)
+    assert entry["context"] == {}
+    path = next(store.glob("events-*.jsonl"))
+    data = json.loads(path.read_text(encoding="utf-8").strip())
+    data["context"] = ["not", "a", "mapping"]
+    path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    target = tmp_path / "no-crash.zip"
+    assert diagnostics.export_report(target, directory=store) == 1
+    with ZipFile(target) as report:
+        saved = json.loads(report.read("events.json"))
+        assert saved[0]["context"] == {}
+
+
+def test_every_supported_diagnostic_locale_has_complete_labels():
+    from antios.diagnostics_ui import _I18N
+    from antios.i18n import SUPPORTED_LANGUAGES
+
+    assert set(SUPPORTED_LANGUAGES) <= set(_I18N)
+    standard = set(_I18N["en"])
+    for name in SUPPORTED_LANGUAGES:
+        assert set(_I18N[name]) == standard, name
+        assert _I18N[name]["status"].format(shown=3, total=7)
