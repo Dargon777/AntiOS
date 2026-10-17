@@ -2646,6 +2646,15 @@ class Dashboard:
         existing = self.data
         target_page = active_page or self.active_page
         self._storage_cancel.set()
+        diagnostics_open = False
+        previous_console = getattr(self, "_diagnostics_window", None)
+        if previous_console is not None:
+            try:
+                diagnostics_open = bool(previous_console.win.winfo_exists())
+                if diagnostics_open:
+                    previous_console.close()
+            except Exception:
+                pass
 
         for child in self.root.winfo_children():
             child.destroy()
@@ -2659,6 +2668,8 @@ class Dashboard:
         self._build_shell()
         self._build_pages()
         self.show_page(target_page)
+        if diagnostics_open:
+            self.open_diagnostics()
 
         if existing:
             localized = {
