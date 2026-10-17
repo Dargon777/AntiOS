@@ -195,13 +195,13 @@ class DiagnosticsWindow:
         )
         self.details.pack(fill="both", expand=True, padx=1, pady=(8, 12))
         self.details.configure(state="disabled")
-        self.status = tk.Label(
-            self.win, text="", bg=p["bg"], fg=p["muted"],
-            font=("Segoe UI", 8), anchor="w",
-        )
         bottom = tk.Frame(self.win, bg=p["bg"])
         bottom.pack(fill="x", padx=24, pady=(10, 16))
-        self.status.pack(in_=bottom, side="left", fill="x", expand=True)
+        self.status = tk.Label(
+            bottom, text="", bg=p["bg"], fg=p["muted"],
+            font=("Segoe UI", 8), anchor="w",
+        )
+        self.status.pack(side="left", fill="x", expand=True)
         self._button(bottom, tr["close"], self.close).pack(side="right")
         self._button(bottom, tr["export"], self._export, primary=True).pack(
             side="right", padx=(0, 8))
