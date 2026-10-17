@@ -209,6 +209,8 @@ def record_event(
 ) -> dict:
     """Best-effort journal write; must never interrupt protection operations."""
     name = _safe_component(component)
+    if not isinstance(context, dict):
+        context = {}
     severity = str(level).upper()
     if severity not in _LEVELS:
         severity = "ERROR"
@@ -309,6 +311,9 @@ def export_report(destination: Path, *, directory: Path | None = None, metadata:
     events = recent_events(limit=500, directory=directory)
     clean = []
     for event in events:
+        event_context = event.get("context")
+        if not isinstance(event_context, dict):
+            event_context = {}
         clean.append({
             "timestamp": str(event.get("timestamp", ""))[:60],
             "level": str(event.get("level", ""))[:20],
@@ -318,7 +323,7 @@ def export_report(destination: Path, *, directory: Path | None = None, metadata:
             "details": redact(event.get("details", ""), exported=True),
             "context": {
                 str(k)[:50]: redact(v, exported=True)[:250]
-                for k, v in (event.get("context") or {}).items()
+                for k, v in event_context.items()
                 if str(k) in {"operation", "state", "action", "exit_code", "source"}
             },
         })
