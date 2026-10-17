@@ -233,7 +233,10 @@ def recent_events(*, limit: int = 300, directory: Path | None = None) -> list[di
                 with path.open("rb") as stream:
                     stream.seek(0, os.SEEK_END)
                     end = stream.tell()
-                    stream.seek(max(0, end - min(end, _MAX_BYTES)), os.SEEK_SET)
+                    # Allow one extra maximum row when reading the bounded tail.
+                    # A single valid event can be longer than the rollover
+                    # threshold in tiny test stores or after a rotation.
+                    stream.seek(max(0, end - min(end, _MAX_BYTES + 16384)), os.SEEK_SET)
                     if stream.tell() > 0:
                         stream.readline()  # skip truncated leading line
                     for line in stream:
