@@ -48,6 +48,7 @@ class AntivirusPanel:
         self.advanced_visible = False
         self._last_guard_state_logged: str | None = None
         self._last_engine_failure: str | None = None
+        self._last_engine_ready: bool | None = None
         self.labels: list[Any] = []
         self.buttons: list[Any] = []
         # ClamAV is the product engine. AMSI remains a CLI compatibility path.
@@ -1087,6 +1088,21 @@ class AntivirusPanel:
             self._last_engine_failure = reason
         if not reason:
             self._last_engine_failure = None
+        if hasattr(self, "app"):
+            ready = bool(caps.get("standalone_detection_engine"))
+            if ready != getattr(self, "_last_engine_ready", None):
+                record_event(
+                    "ClamAV", "INFO" if ready else "WARNING",
+                    "Managed ClamAV ready" if ready else "Managed ClamAV not ready",
+                    code="OPERATION_COMPLETED" if ready else "ENGINE_NOT_READY",
+                    context={"state": "ready" if ready else "unavailable"},
+                )
+                self._last_engine_ready = ready
+                if not ready and hasattr(self, "last_error_label"):
+                    self.last_error_label.configure(
+                        text=explanation("ENGINE_NOT_READY", self.app.language)[0],
+                        fg=self.palette["review"],
+                    )
         layered = bool(
             caps.get("standalone_detection_engine") and
             caps.get("layered_with_defender") and
