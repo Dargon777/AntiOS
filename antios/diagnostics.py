@@ -247,6 +247,22 @@ def record_event(
     return event
 
 
+def journal_fingerprint(*, directory: Path | None = None) -> tuple[tuple[str, int, int], ...]:
+    """Cheap change detector, so an open GUI does not reread megabytes every 2 s."""
+    root = Path(directory) if directory is not None else diagnostics_directory()
+    result = []
+    try:
+        for path in root.glob("events-*.jsonl"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            info = path.stat()
+            result.append((path.name, info.st_size, info.st_mtime_ns))
+        result.sort(key=lambda item: item[2], reverse=True)
+    except OSError:
+        pass
+    return tuple(result[:_MAX_FILES])
+
+
 def recent_events(*, limit: int = 300, directory: Path | None = None) -> list[dict]:
     """Read a bounded tail of each process journal; skip corrupt/oversize rows."""
     root = Path(directory) if directory is not None else diagnostics_directory()
