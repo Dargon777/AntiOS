@@ -142,6 +142,15 @@ _I18N.update({
 })
 
 
+def _local_time(value: object) -> str:
+    """Journal timestamps are UTC; show local wall time in the GUI."""
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError, OSError):
+        return str(value).replace("T", " ")[:19]
+
+
+
 class DiagnosticsWindow:
     def __init__(self, app: Any, palette: dict[str, str]):
         import tkinter as tk
@@ -335,7 +344,7 @@ class DiagnosticsWindow:
         for i, event in enumerate(matches):
             iid = str(i)
             self._rows[iid] = event
-            when = str(event.get("timestamp", ""))[11:19]
+            when = _local_time(event.get("timestamp", ""))[11:19]
             self.tree.insert("", "end", iid=iid, tags=(event.get("level", ""),),
                              values=(when, event.get("level"), event.get("component"),
                                      str(event.get("message", ""))[:125]))
@@ -367,7 +376,7 @@ class DiagnosticsWindow:
         self.title.configure(text=title)
         self.summary.configure(
             text="{}  ·  {}  ·  {}".format(
-                str(event.get("timestamp", "")).replace("T", " ")[:23],
+                _local_time(event.get("timestamp", "")),
                 event.get("component", "System"), event.get("level", "INFO"))
         )
         if self.mode == "technical":
