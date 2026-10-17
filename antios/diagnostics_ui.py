@@ -15,7 +15,7 @@ import sys
 from typing import Any
 
 from . import __version__
-from .diagnostics import explanation, export_report, recent_events, redact
+from .diagnostics import explanation, export_report, journal_fingerprint, recent_events, redact
 
 _SEVERITIES = ("ALL", "CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 _COMPONENTS = ("ALL", "Guard", "ClamAV", "Scanner", "Quarantine", "Updater", "Protection", "UI", "Installer", "Defender", "System")
@@ -161,6 +161,7 @@ class DiagnosticsWindow:
         self.win.bind("<Control-c>", self._copy_shortcut)
         self.win.bind("<F5>", lambda _event: self.refresh())
         self._after_id = None
+        self._journal_signature = None
         self._all: list[dict] = []
         self._rows: dict[str, dict] = {}
         self._selected: dict | None = None
@@ -299,7 +300,10 @@ class DiagnosticsWindow:
 
     def _tick(self) -> None:
         if self.win.winfo_exists():
-            self.refresh()
+            state = journal_fingerprint()
+            if state != self._journal_signature:
+                self._journal_signature = state
+                self.refresh()
             self._after_id = self.win.after(2300, self._tick)
 
     def refresh(self) -> None:
