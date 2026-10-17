@@ -191,3 +191,31 @@ def test_real_diagnostics_window_filters_inspects_and_closes(monkeypatch):
         assert app._diagnostics_window is None
     finally:
         root.destroy()
+
+
+
+def test_malformed_context_is_ignored_even_during_support_export(tmp_path):
+    store = tmp_path / "store"
+    entry = diagnostics.record_event("UI", "ERROR", "bad operation",
+                                     context="malformed", directory=store)
+    assert entry["context"] == {}
+    path = next(store.glob("events-*.jsonl"))
+    data = json.loads(path.read_text(encoding="utf-8").strip())
+    data["context"] = ["not", "a", "mapping"]
+    path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    target = tmp_path / "no-crash.zip"
+    assert diagnostics.export_report(target, directory=store) == 1
+    with ZipFile(target) as report:
+        saved = json.loads(report.read("events.json"))
+        assert saved[0]["context"] == {}
+
+
+def test_every_supported_diagnostic_locale_has_complete_labels():
+    from antios.diagnostics_ui import _I18N
+    from antios.i18n import SUPPORTED_LANGUAGES
+
+    assert set(SUPPORTED_LANGUAGES) <= set(_I18N)
+    standard = set(_I18N["en"])
+    for name in SUPPORTED_LANGUAGES:
+        assert set(_I18N[name]) == standard, name
+        assert _I18N[name]["status"].format(shown=3, total=7)
