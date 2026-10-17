@@ -27,6 +27,8 @@ _IO_LOCK = threading.RLock()
 
 # Never persist bearer tokens, email addresses or credentials in a support log.
 _PRIVATE = (
+    (re.compile(r"(?i)\bAuthorization\s*[:=]\s*(?:Bearer\s+)?[A-Za-z0-9._~+/\-]+=*"), "Authorization: [REDACTED]"),
+    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/\-]{8,}=*"), "Bearer [REDACTED]"),
     (re.compile(r"(?i)\b(authorization|bearer|password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token)\s*[:=]\s*[^\s,;]+"), r"\1=[REDACTED]"),
     (re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"), "[EMAIL]"),
     (re.compile(r"(?i)\b([?&](?:token|code|key|secret|password|auth|sig|signature)=)[^&\s]+"), r"\1[REDACTED]"),
@@ -105,7 +107,7 @@ def redact(text: object, *, exported: bool = False) -> str:
     for pattern, replacement in _PRIVATE:
         result = pattern.sub(replacement, result)
     if exported:
-        result = _WINDOWS_HOME.sub(r"C:\Users\[USER]", result)
+        result = _WINDOWS_HOME.sub(lambda _: r"C:\Users\[USER]", result)
         result = _POSIX_HOME.sub("/home/[USER]", result)
         try:
             home = str(Path.home())
