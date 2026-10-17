@@ -56,13 +56,99 @@ _I18N = {
 }
 
 
+# Complete interface labels for the other supported dashboard languages.
+# English remains the fallback for future optional locales.
+_I18N.update({
+    "es": {
+        "title": "Centro de diagnóstico", "subtitle": "Eventos y errores de AntiOS · Solo lectura",
+        "search": "Buscar eventos", "search_hint": "Código, componente o mensaje…",
+        "filter": "Gravedad", "source": "Componente", "events": "EVENTOS",
+        "when": "HORA", "level": "NIVEL", "component": "COMPONENTE",
+        "message": "MENSAJE", "details": "Detalles", "friendly": "Explicación",
+        "technical": "Datos técnicos", "cause": "Qué ocurrió", "action": "Qué hacer",
+        "copy": "Copiar", "export": "Exportar informe", "refresh": "Actualizar",
+        "close": "Cerrar", "empty": "No hay eventos con estos filtros",
+        "select": "Seleccione un evento para ver los detalles.",
+        "saved": "Informe guardado. Revíselo antes de compartirlo.",
+        "error": "No se pudo guardar el informe", "copied": "Detalles copiados.",
+        "status": "Mostrados: {shown} · En el registro: {total}",
+        "private": "La exportación oculta rutas personales, correos y secretos.",
+        "unfiltered": "Todos", "default_title": "Evento de diagnóstico",
+    },
+    "zh-CN": {
+        "title": "诊断中心", "subtitle": "AntiOS 组件事件与错误 · 只读",
+        "search": "搜索事件", "search_hint": "代码、组件或消息…",
+        "filter": "级别", "source": "组件", "events": "事件",
+        "when": "时间", "level": "级别", "component": "组件",
+        "message": "消息", "details": "详细信息", "friendly": "通俗说明",
+        "technical": "技术详情", "cause": "发生了什么", "action": "建议操作",
+        "copy": "复制", "export": "导出报告", "refresh": "刷新",
+        "close": "关闭", "empty": "没有符合筛选条件的事件",
+        "select": "请在左侧选择事件以查看详情。",
+        "saved": "诊断报告已保存。分享前请先检查。",
+        "error": "无法保存报告", "copied": "诊断详情已复制。",
+        "status": "显示：{shown} · 日志总数：{total}",
+        "private": "导出时将隐藏个人路径、邮箱和密钥。",
+        "unfiltered": "全部", "default_title": "诊断事件",
+    },
+    "fi": {
+        "title": "Diagnostiikkakeskus", "subtitle": "AntiOS:n tapahtumat ja virheet · Vain luku",
+        "search": "Hae tapahtumia", "search_hint": "Koodi, osa tai viesti…",
+        "filter": "Vakavuus", "source": "Osa", "events": "TAPAHTUMAT",
+        "when": "AIKA", "level": "TASO", "component": "OSA",
+        "message": "VIESTI", "details": "Tiedot", "friendly": "Selitys",
+        "technical": "Tekniset tiedot", "cause": "Mitä tapahtui", "action": "Mitä tehdä",
+        "copy": "Kopioi", "export": "Vie raportti", "refresh": "Päivitä",
+        "close": "Sulje", "empty": "Hakuehdoilla ei löytynyt tapahtumia",
+        "select": "Valitse vasemmalta tapahtuma nähdäksesi lisätiedot.",
+        "saved": "Raportti tallennettu. Tarkista se ennen jakamista.",
+        "error": "Raportin tallennus epäonnistui", "copied": "Tiedot kopioitu.",
+        "status": "Näytetään: {shown} · Lokissa: {total}",
+        "private": "Viennissä peitetään henkilökohtaiset polut ja tunnisteet.",
+        "unfiltered": "Kaikki", "default_title": "Diagnostiikkatapahtuma",
+    },
+    "pl": {
+        "title": "Centrum diagnostyki", "subtitle": "Zdarzenia i błędy AntiOS · Tylko do odczytu",
+        "search": "Szukaj zdarzeń", "search_hint": "Kod, komponent lub komunikat…",
+        "filter": "Poziom", "source": "Komponent", "events": "ZDARZENIA",
+        "when": "CZAS", "level": "POZIOM", "component": "KOMPONENT",
+        "message": "KOMUNIKAT", "details": "Szczegóły", "friendly": "Wyjaśnienie",
+        "technical": "Dane techniczne", "cause": "Co się stało", "action": "Co zrobić",
+        "copy": "Kopiuj", "export": "Eksportuj raport", "refresh": "Odśwież",
+        "close": "Zamknij", "empty": "Brak zdarzeń pasujących do filtrów",
+        "select": "Wybierz zdarzenie z lewej, aby zobaczyć szczegóły.",
+        "saved": "Zapisano raport. Sprawdź go przed udostępnieniem.",
+        "error": "Nie można zapisać raportu", "copied": "Skopiowano szczegóły.",
+        "status": "Wyświetlono: {shown} · W dzienniku: {total}",
+        "private": "Eksport ukrywa prywatne ścieżki, adresy e-mail i sekrety.",
+        "unfiltered": "Wszystkie", "default_title": "Zdarzenie diagnostyczne",
+    },
+    "mn": {
+        "title": "Оношилгооны төв", "subtitle": "AntiOS бүрэлдэхүүний үйл явдал, алдаа · Зөвхөн унших",
+        "search": "Үйл явдал хайх", "search_hint": "Код, бүрэлдэхүүн, мессеж…",
+        "filter": "Түвшин", "source": "Бүрэлдэхүүн", "events": "ҮЙЛ ЯВДАЛ",
+        "when": "ЦАГ", "level": "ТҮВШИН", "component": "БҮРЭЛДЭХҮҮН",
+        "message": "МЭДЭЭЛЭЛ", "details": "Дэлгэрэнгүй", "friendly": "Тайлбар",
+        "technical": "Техникийн мэдээлэл", "cause": "Юу болсон", "action": "Яах хэрэгтэй",
+        "copy": "Хуулах", "export": "Тайлан гаргах", "refresh": "Шинэчлэх",
+        "close": "Хаах", "empty": "Шүүлтүүрт тохирох үйл явдал алга",
+        "select": "Дэлгэрэнгүйг үзэхийн тулд зүүнээс үйл явдал сонгоно уу.",
+        "saved": "Тайлан хадгалагдлаа. Илгээхээс өмнө шалгана уу.",
+        "error": "Тайлан хадгалж чадсангүй", "copied": "Мэдээллийг хууллаа.",
+        "status": "Харагдаж буй: {shown} · Нийт: {total}",
+        "private": "Экспортод хувийн зам, шуудан болон нууц өгөгдлийг халхална.",
+        "unfiltered": "Бүгд", "default_title": "Оношилгооны үйл явдал",
+    },
+})
+
+
 class DiagnosticsWindow:
     def __init__(self, app: Any, palette: dict[str, str]):
         import tkinter as tk
         from tkinter import ttk
 
         self.app, self.tk, self.ttk, self.palette = app, tk, ttk, palette
-        self.tr = _I18N["ru" if app.language == "ru" else "en"]
+        self.tr = _I18N.get(app.language, _I18N["en"])
         self.win = tk.Toplevel(app.root)
         self.win.title("AntiOS · " + self.tr["title"])
         self.win.geometry("1170x725")
