@@ -70,6 +70,30 @@ _HELP = {
                "A component could not complete its operation. The technical details are in the journal.",
                "Check the component and timestamp. Export a redacted report if the error recurs."),
     },
+    "OPERATION_STARTED": {
+        "ru": ("Операция запущена", "AntiOS выполняет запрошенное действие.",
+               "Дождитесь завершения или остановите проверку штатной кнопкой."),
+        "en": ("Operation started", "AntiOS is performing the requested action.",
+               "Wait for completion or use the normal Cancel action."),
+    },
+    "OPERATION_COMPLETED": {
+        "ru": ("Операция завершена", "Запрошенное действие завершилось без исключения.",
+               "Проверьте фактическое состояние компонента перед оценкой защищённости."),
+        "en": ("Operation completed", "The requested operation returned without an exception.",
+               "Check the component's actual state before assuming protection is active."),
+    },
+    "ACCESS_DENIED": {
+        "ru": ("Доступ запрещён", "Windows отказала в доступе к ресурсу или операции.",
+               "Проверьте права доступа. Для обслуживания движка используйте отдельное подтверждение UAC."),
+        "en": ("Access denied", "Windows denied access to a resource or operation.",
+               "Check file permissions. Use the separate UAC flow for engine maintenance."),
+    },
+    "OPERATION_TIMEOUT": {
+        "ru": ("Истекло время ожидания", "Ответ компонента не поступил вовремя; результат операции неизвестен.",
+               "Обновите состояние компонента перед повторной попыткой, не считайте действие завершённым."),
+        "en": ("Operation timed out", "The component did not respond in time; the outcome is unknown.",
+               "Refresh component status before retrying; do not assume it completed."),
+    },
     "GUARD_UNRESPONSIVE": {
         "ru": ("Guard не отвечает",
                "Нет подтверждения, что фоновый мониторинг работает. Нельзя считать защиту активной.",
@@ -133,6 +157,10 @@ def classify_error(message: str, *, component: str = "") -> str:
         "require" in lower or "deny" in lower or "cancel" in lower
     ):
         return "ELEVATION_REQUIRED"
+    if "access denied" in lower or "permission denied" in lower or "доступ запрещ" in lower:
+        return "ACCESS_DENIED"
+    if "timed out" in lower or "timeout" in lower or "время ожидания" in lower:
+        return "OPERATION_TIMEOUT"
     if ("unresponsive" in lower or "не отвечает" in lower) and component == "Guard":
         return "GUARD_UNRESPONSIVE"
     if ("clamav" in lower or "clamd" in lower or "engine" in lower) and (
