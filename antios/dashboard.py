@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from . import __version__
 from .antivirus_ui import AntivirusPanel
+from .diagnostics import classify_error, record_event
 from .config import (
     AppConfig,
     CleanupConfig,
@@ -387,6 +388,7 @@ class Dashboard:
         self.antivirus_busy = False
         self.antivirus_cancelable = False
         self.guard_probe_busy = False
+        self._diagnostics_window = None
         self.update_busy = False
         self.update_payload: dict[str, Any] | None = None
         self._tray_enabled = tray_enabled
@@ -411,6 +413,9 @@ class Dashboard:
     def t(self, key: str, **values: Any) -> str:
         return self.tr.t(key, **values)
 
+    def open_diagnostics(self) -> None:
+        from .diagnostics_ui import open_diagnostics
+        open_diagnostics(self, THEME)
 
     def _configure_root(self) -> None:
         root = self.root
@@ -428,6 +433,8 @@ class Dashboard:
         root.bind("<Control-4>", lambda _event: self.show_page("system"))
         root.bind("<Control-5>", lambda _event: self.show_page("cleanup"))
         root.bind("<Control-comma>", lambda _event: self.show_page("settings"))
+        root.bind("<Control-Shift-D>", lambda _event: self.open_diagnostics())
+        root.bind("<Control-Shift-d>", lambda _event: self.open_diagnostics())
         root.protocol("WM_DELETE_WINDOW", self._close)
         _enable_dark_titlebar(root, self.resolved_theme == "dark")
 
@@ -3146,6 +3153,9 @@ class Dashboard:
         self.root.after(0, lambda: self._render(data))
 
     def _show_error(self, message: str) -> None:
+        record_event("UI", "ERROR", message,
+                     code=classify_error(message, component="UI"),
+                     context={"operation": "dashboard-refresh"})
         self.refresh_button.configure(
             state="normal",
             text=f"↻  {self.t('button.refresh')}",
