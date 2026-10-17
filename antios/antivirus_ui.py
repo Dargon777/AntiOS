@@ -605,9 +605,22 @@ class AntivirusPanel:
         self.status.configure(text=self.t("working"), fg=self.palette["muted"])
         self._set_busy()
 
+        source = {
+            "scan": "Scanner", "guard-action": "Protection",
+            "quarantined": "Quarantine", "restored": "Quarantine",
+            "defender": "Defender", "items": "Quarantine",
+        }.get(kind, "UI")
+        if kind not in {"items", "incident-history"}:
+            record_event(source, "INFO", "Operation started: " + kind,
+                         code="OPERATION_STARTED", context={"operation": kind})
+
         def worker() -> None:
             try:
                 value = operation()
+                if kind not in {"items", "incident-history", "scan"}:
+                    record_event(source, "INFO", "Operation returned: " + kind,
+                                 code="OPERATION_COMPLETED",
+                                 context={"operation": kind})
                 self.app.antivirus_queue.put((kind, value))
             except Exception as exc:
                 self.app.antivirus_queue.put(("error", {
