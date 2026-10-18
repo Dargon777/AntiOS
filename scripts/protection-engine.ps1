@@ -163,6 +163,16 @@ if ($TrustedArchivePath) {
     # Only the shipped SHA256-pinned archive and byte-identical extracted EXEs
     # can use archive trust. Manual/third-party sources need Authenticode.
     $manifest = Get-AntiOSPinnedManifest
+    $stagingRoot = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($TrustedArchivePath))
+    $programFiles = [IO.Path]::GetFullPath([Environment]::GetFolderPath('ProgramFiles'))
+    $stagingName = [IO.Path]::GetFileName($stagingRoot)
+    $expectedSource = Join-Path (Join-Path $stagingRoot 'extract') ([string]$manifest.extract_dir)
+    if ([IO.Path]::GetDirectoryName($stagingRoot) -ine $programFiles -or
+        $stagingName -cnotmatch '^AntiOS-ClamAV-Staging-[a-f0-9]{32}$' -or
+        $Source -ine [IO.Path]::GetFullPath($expectedSource)) {
+        throw 'Archive-based ClamAV trust requires the exact protected AntiOS staging directory.'
+    }
+    if (Test-Path -LiteralPath $stagingRoot) { Assert-NoReparseTree $stagingRoot }
     $trustedReceipt = Assert-AntiOSArchivePair -ArchivePath $TrustedArchivePath -SourceDirectory $Source -Manifest $manifest
     $signature = [pscustomobject]@{
         ClamdStatus = 'ArchivePinned'
