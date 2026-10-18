@@ -206,6 +206,23 @@ def _rotate(path: Path) -> None:
         path.replace(older)
 
 
+def _safe_to_write_default_journal() -> bool:
+    """Never use a user-controlled LocalAppData path as a privileged writer.
+
+    On Windows an unelevated user can arrange filesystem redirections inside
+    their profile. Python on Windows does not provide O_NOFOLLOW. An elevated
+    child therefore must not open a log there with its administrator token.
+    The interactive non-elevated GUI remains the durable error collector.
+    """
+    if os.name != "nt":
+        return True
+    try:
+        from .elevation import is_administrator
+        return not is_administrator()
+    except (OSError, RuntimeError, AttributeError):
+        return False
+
+
 def record_event(
     component: str, level: str, message: str, *,
     code: str = "OPERATION_FAILED",
@@ -237,6 +254,8 @@ def record_event(
         },
     }
     try:
+        if directory is None and not _safe_to_write_default_journal():
+            return event
         root = Path(directory) if directory is not None else diagnostics_directory()
         with _IO_LOCK:
             if _prepare(root):
