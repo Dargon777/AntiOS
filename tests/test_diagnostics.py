@@ -330,3 +330,32 @@ def test_explicit_local_test_directory_still_accepts_events(tmp_path, monkeypatc
                                      directory=tmp_path)
     assert any(event.get("id") == entry["id"] for event in
                diagnostics.recent_events(directory=tmp_path))
+
+
+
+def test_support_export_is_atomic_and_preserves_previous_zip_on_error(tmp_path, monkeypatch):
+    store = tmp_path / "events"
+    diagnostics.record_event("System", "ERROR", "report event", directory=store)
+    destination = tmp_path / "existing.zip"
+    destination.write_bytes(b"existing artifact")
+
+    def deny_replace(*_args):
+        raise OSError("simulated disk/filesystem failure")
+
+    monkeypatch.setattr(diagnostics.os, "replace", deny_replace)
+    with pytest.raises(OSError, match="simulated"):
+        diagnostics.export_report(destination, directory=store)
+    assert destination.read_bytes() == b"existing artifact"
+    assert not list(tmp_path.glob(".antios-diagnostics-*.tmp"))
+
+
+def test_support_export_replaces_target_only_after_zip_is_complete(tmp_path):
+    store = tmp_path / "events"
+    diagnostics.record_event("System", "INFO", "good report", directory=store)
+    destination = tmp_path / "existing.zip"
+    destination.write_bytes(b"old")
+    assert diagnostics.export_report(destination, directory=store) == 1
+    with ZipFile(destination) as bundle:
+        assert bundle.testzip() is None
+        assert json.loads(bundle.read("summary.json"))["events"] == 1
+    assert not list(tmp_path.glob(".antios-diagnostics-*.tmp"))
