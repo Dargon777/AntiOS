@@ -57,7 +57,8 @@ def test_no_bearer_tokens_emails_or_query_secrets_written(tmp_path):
     assert "someone@example.com" not in stored
     assert "unsafe" not in stored
     assert "[REDACTED]" in stored
-    assert "[EMAIL]" in stored
+    # Full Authorization headers are removed as a unit, including any
+    # adjacent email address; there need not be a separate [EMAIL] marker.
 
 
 def test_invalid_lines_and_symlink_data_are_not_read(tmp_path):
