@@ -35,7 +35,8 @@ jobs:
         with:
           name: complete-source-audit-linux
           path: .audit/
-          if-no-files-found: warn
+          if-no-files-found: error
+          include-hidden-files: true
 
   powershell-grammar:
     name: Every tracked PowerShell script - grammar
