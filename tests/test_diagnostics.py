@@ -118,7 +118,7 @@ def test_export_support_bundle_contains_only_redacted_whitelist(tmp_path):
         assert "someone@example.com" not in dump
         assert "very-private-secrets" not in dump
         assert "hidden-value" not in dump
-        assert "[USER]" in dump
+        assert "[PATH]" in dump
 
 
 def test_antivirus_panel_error_records_classified_event(monkeypatch):
@@ -263,3 +263,50 @@ def test_engine_failure_returned_inside_scan_result_is_logged(monkeypatch):
         "detail": "ClamAV engine stopped while scanning",
     }})
     assert len(captured) == 2
+
+
+def test_export_redacts_spaced_usernames_custom_drives_unc_and_basic_auth(tmp_path):
+    store = tmp_path / "events"
+    diagnostics.record_event(
+        "ClamAV", "ERROR",
+        r'C:\Users\Jane Doe\Desktop\example.txt D:\Private Folder\Project.docx',
+        details=(
+            r'UNC \\NAS\PrivateShare\My secret.txt' + "\n"
+            + 'Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==' + "\n"
+            + 'password="this is a very secret phrase"' + "\n"
+            + "source=/home/Private Name/documents/report.txt"
+        ), directory=store,
+    )
+    target = tmp_path / "redacted.zip"
+    assert diagnostics.export_report(target, directory=store) == 1
+    with ZipFile(target) as z:
+        data = z.read("events.json").decode("utf-8")
+    for secret in ("Jane Doe", "Private Folder", "PrivateShare", "My secret.txt",
+                   "QWxhZGRpbjpvcGVuIHNlc2FtZQ==",
+                   "this is a very secret phrase", "Private Name"):
+        assert secret not in data, secret
+    assert "[REDACTED]" in data
+    assert "[PATH]" in data
+
+
+def test_corrupted_journal_does_not_hide_other_processes(tmp_path):
+    good = tmp_path / "events-101.jsonl"
+    bad = tmp_path / "events-102.jsonl"
+    diagnostics.record_event("UI", "INFO", "safe event", directory=tmp_path)
+    good.write_text(
+        '{"schema":1,"level":"ERROR","component":"Guard",'
+        '"message":"guard failed","timestamp":"2026-10-01T07:00:00Z"}' + "\n",
+        encoding="utf-8",
+    )
+    bad.write_bytes(b'\\x00not-json\n' + b'{' + b'[' * 2000 + b']' * 2000 + b'}\n')
+    items = diagnostics.recent_events(directory=tmp_path)
+    assert any(e.get("message") == "guard failed" for e in items)
+    assert any(e.get("message") == "safe event" for e in items)
+
+
+def test_successful_scan_result_does_not_create_false_clamav_alarm():
+    from antios.antivirus_ui import AntivirusPanel
+
+    panel = AntivirusPanel.__new__(AntivirusPanel)
+    panel._diagnose_scan_result({"engine": {"available": True, "version": "1.4"}})
+    panel._diagnose_scan_result({"engine": {"provider": "ClamAV"}})
