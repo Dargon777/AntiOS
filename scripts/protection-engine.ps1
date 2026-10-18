@@ -89,29 +89,57 @@ function Remove-OwnedRegistry {
     }
 }
 
+function Assert-ManagedClamdService {
+    $registered = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction Stop
+    $expectedExe = Join-Path $InstallRoot 'clamd.exe'
+    $escapedExe = [regex]::Escape($expectedExe)
+    # Match the actual SCM image path, not a substring that could be present
+    # in an unrelated command argument or a similarly named installation.
+    $imagePattern = ('^\s*(?:"{0}"|{0})(?=\s|$)' -f $escapedExe)
+    if (-not $registered -or $registered.ServiceType -ne 'Own Process' -or
+        $registered.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM') -or
+        [string]$registered.PathName -notmatch $imagePattern) {
+        throw "Refusing to modify a ClamD service not owned by AntiOS: $($registered.PathName)"
+    }
+}
+
 if ($Uninstall) {
     if (-not $Apply) {
         Write-Output "Preview: stop/remove '$EngineServiceName', unregister '$UpdaterTaskName', remove AntiOS-owned ClamAV registry bindings and managed engine/data directories."
         return
     }
     Assert-Administrator
+    # Check *all* managed targets before stopping tasks/services or touching
+    # registry state. Recursive deletion must not traverse a junction.
+    if (Test-Path -LiteralPath $InstallRoot) { Assert-NoReparseTree $InstallRoot }
+    if (Test-Path -LiteralPath $DataRoot) { Assert-NoReparseTree $DataRoot }
+    $service = Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue
+    if ($service) { Assert-ManagedClamdService }
     $task = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        $actions = @($task.Actions)
+        $managedFresh = Join-Path $InstallRoot 'freshclam.exe'
+        if ($actions.Count -ne 1 -or
+            [IO.Path]::GetFullPath([string]$actions[0].Execute) -ine
+                [IO.Path]::GetFullPath($managedFresh)) {
+            throw 'Refusing to unregister a non-AntiOS ClamAV update task.'
+        }
+    }
     if ($task) {
         Stop-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $UpdaterTaskName -Confirm:$false
     }
-    $service = Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue
     if ($service) {
         if ($service.Status -ne 'Stopped') {
             Stop-Service -Name $EngineServiceName -Force
             $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
         }
-        $managedClamd = Join-Path $InstallRoot 'clamd.exe'
-        if (-not (Test-Path -LiteralPath $managedClamd)) {
-            throw 'The clamd service exists but the AntiOS-managed executable is missing; refusing ambiguous removal.'
+        # Do not execute an on-disk ClamAV binary with administrator rights
+        # during uninstall. The verified SCM service identity is sufficient.
+        & "$env:SystemRoot\System32\sc.exe" delete $EngineServiceName | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not delete the verified AntiOS ClamD service (sc.exe exit $LASTEXITCODE)"
         }
-        & $managedClamd --uninstall-service
-        if ($LASTEXITCODE -ne 0) { throw "clamd --uninstall-service failed with exit code $LASTEXITCODE" }
     }
     Remove-OwnedRegistry
     if (Test-Path -LiteralPath $InstallRoot) { Remove-Item -LiteralPath $InstallRoot -Recurse -Force }
@@ -207,9 +235,7 @@ try {
         $engine.StartName -notin @('LocalSystem','NT AUTHORITY\SYSTEM')) {
         throw 'Installed clamd service is not an own-process LocalSystem service.'
     }
-    if ($engine.PathName -notlike "*$ManagedClamd*") {
-        throw "Installed clamd service does not reference the managed executable: $($engine.PathName)"
-    }
+    Assert-ManagedClamdService
     & "$env:SystemRoot\System32\sc.exe" config $EngineServiceName start= auto | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure automatic ClamD startup.' }
     & "$env:SystemRoot\System32\sc.exe" description $EngineServiceName 'AntiOS managed ClamAV scanning engine' | Out-Null
@@ -238,7 +264,13 @@ try {
         if (Test-Path -LiteralPath $managed) { & $managed --uninstall-service | Out-Null }
     }
     Remove-OwnedRegistry
-    if ($createdInstall -and (Test-Path -LiteralPath $InstallRoot)) { Remove-Item -LiteralPath $InstallRoot -Recurse -Force }
-    if ($createdData -and (Test-Path -LiteralPath $DataRoot)) { Remove-Item -LiteralPath $DataRoot -Recurse -Force }
+    if ($createdInstall -and (Test-Path -LiteralPath $InstallRoot)) {
+        Assert-NoReparseTree $InstallRoot
+        Remove-Item -LiteralPath $InstallRoot -Recurse -Force
+    }
+    if ($createdData -and (Test-Path -LiteralPath $DataRoot)) {
+        Assert-NoReparseTree $DataRoot
+        Remove-Item -LiteralPath $DataRoot -Recurse -Force
+    }
     throw
 }
