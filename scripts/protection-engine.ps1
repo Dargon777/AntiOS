@@ -177,7 +177,7 @@ if ($TrustedArchivePath) {
     $signature = [pscustomobject]@{
         ClamdStatus = 'ArchivePinned'
         FreshClamStatus = 'ArchivePinned'
-        Signer = 'Cisco Talos release archive pinned by AntiOS'
+        Signer = '(pinned release archive SHA-256; PE publisher not asserted)'
     }
 } else {
     if (-not $RequireValidSignature) {
