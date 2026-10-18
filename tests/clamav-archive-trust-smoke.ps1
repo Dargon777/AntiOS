@@ -36,6 +36,12 @@ try {
 
     $installed = Join-Path $root 'installed'
     Copy-Item $folder $installed -Recurse
+    # The test fixture is intentionally in an unprivileged temporary folder.
+    # Verify the production receipt check rejects it *before* we replace the
+    # ACL preflight with a test-only stub for later hash-specific assertions.
+    Must-Throw { Assert-AntiOSProtectedEngineRoot -Root $installed } 'unprotected test directory'
+    function Assert-AntiOSProtectedEngineRoot { param([string]$Root) }
+
     $receiptPath = Join-Path $installed 'engine-trust.json'
     [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json))
     Assert-AntiOSInstalledPair -Root $installed -Manifest $fixture | Out-Null
