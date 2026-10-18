@@ -219,3 +219,47 @@ def test_every_supported_diagnostic_locale_has_complete_labels():
     for name in SUPPORTED_LANGUAGES:
         assert set(_I18N[name]) == standard, name
         assert _I18N[name]["status"].format(shown=3, total=7)
+
+
+def test_engine_failure_returned_inside_scan_result_is_logged(monkeypatch):
+    """ClamAV can fail closed by returning limited coverage without raising."""
+    from antios.antivirus_ui import AntivirusPanel
+    import antios.antivirus_ui as ui
+
+    captured = []
+    monkeypatch.setattr(ui, "record_event", lambda *args, **kwargs: (
+        captured.append((args, kwargs)) or {"component": args[0]}
+    ))
+
+    class Label:
+        def __init__(self):
+            self.values = {}
+        def configure(self, **kwargs):
+            self.values.update(kwargs)
+
+    panel = AntivirusPanel.__new__(AntivirusPanel)
+    panel.app = SimpleNamespace(language="ru")
+    panel.palette = {"warn": "red"}
+    panel.status = Label()
+    panel.last_error_label = Label()
+    failure = {
+        "engine": {
+            "available": False,
+            "detail": "Production engine setup requires valid Authenticode signatures on clamd.exe and freshclam.exe.",
+        },
+        "coverage": "limited",
+        "verdict": "incomplete",
+    }
+    panel._diagnose_scan_result(failure)
+    assert len(captured) == 1
+    assert captured[0][0][:2] == ("ClamAV", "ERROR")
+    assert captured[0][1]["code"] == "ENGINE_SIGNATURE_INVALID"
+    assert "подпись" in panel.status.values["text"]
+    assert panel.last_error_label.values["fg"] == "red"
+    panel._diagnose_scan_result({"engine": {"available": True, "version": "ok"}})
+    assert len(captured) == 1
+    panel._diagnose_scan_result({"engine": {
+        "available": True, "failed_during_scan": True,
+        "detail": "ClamAV engine stopped while scanning",
+    }})
+    assert len(captured) == 2
