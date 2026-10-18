@@ -5,11 +5,13 @@ param(
     [string]$ClamAVDirectory,
     [switch]$Uninstall,
     [switch]$Apply,
-    [bool]$RequireValidSignature = $true
+    [bool]$RequireValidSignature = $true,
+    [string]$TrustedArchivePath
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'clamav-trust.ps1')
 
 $EngineServiceName = 'clamd'
 $UpdaterTaskName = 'AntiOS ClamAV Signature Update'
@@ -156,7 +158,23 @@ $SourceFresh = Join-Path $Source 'freshclam.exe'
 foreach ($required in @($SourceClamd, $SourceFresh)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required ClamAV binary is missing: $required" }
 }
-$signature = Assert-SignedPair $SourceClamd $SourceFresh
+$trustedReceipt = $null
+if ($TrustedArchivePath) {
+    # Only the shipped SHA256-pinned archive and byte-identical extracted EXEs
+    # can use archive trust. Manual/third-party sources need Authenticode.
+    $manifest = Get-AntiOSPinnedManifest
+    $trustedReceipt = Assert-AntiOSArchivePair -ArchivePath $TrustedArchivePath -SourceDirectory $Source -Manifest $manifest
+    $signature = [pscustomobject]@{
+        ClamdStatus = 'ArchivePinned'
+        FreshClamStatus = 'ArchivePinned'
+        Signer = 'Cisco Talos release archive pinned by AntiOS'
+    }
+} else {
+    if (-not $RequireValidSignature) {
+        throw 'Unsigned arbitrary ClamAV sources are not supported. Use the pinned official archive installer.'
+    }
+    $signature = Assert-SignedPair $SourceClamd $SourceFresh
+}
 $configSource = Get-ConfigSource
 
 if (Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue) {
@@ -204,7 +222,24 @@ try {
 
     $ManagedClamd = Join-Path $InstallRoot 'clamd.exe'
     $ManagedFresh = Join-Path $InstallRoot 'freshclam.exe'
-    Assert-SignedPair $ManagedClamd $ManagedFresh | Out-Null
+    if ($trustedReceipt) {
+        foreach ($name in @('clamd.exe', 'freshclam.exe')) {
+            $field = if ($name -eq 'clamd.exe') { 'clamd_sha256' } else { 'freshclam_sha256' }
+            if ((Get-AntiOSSha256 (Join-Path $InstallRoot $name)) -cne [string]$trustedReceipt.$field) {
+                throw "Installed $name differs from the verified official archive."
+            }
+        }
+        # Receipt is stored in protected Program Files; hash checking replaces
+        # PE signing *only* for this authenticated, immutable vendor ZIP.
+        [IO.File]::WriteAllText(
+            (Join-Path $InstallRoot 'engine-trust.json'),
+            ($trustedReceipt | ConvertTo-Json -Depth 4),
+            [Text.UTF8Encoding]::new($false)
+        )
+        Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest $manifest | Out-Null
+    } else {
+        Assert-SignedPair $ManagedClamd $ManagedFresh | Out-Null
+    }
 
     New-Item -ItemType Directory -Path $ConfigRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $DatabaseRoot -Force | Out-Null
@@ -260,8 +295,8 @@ try {
     }
     if ($serviceInstalled) {
         Stop-Service -Name $EngineServiceName -Force -ErrorAction SilentlyContinue
-        $managed = Join-Path $InstallRoot 'clamd.exe'
-        if (Test-Path -LiteralPath $managed) { & $managed --uninstall-service | Out-Null }
+        # Never execute a possibly modified copy to delete its service.
+        & "$env:SystemRoot\System32\sc.exe" delete $EngineServiceName | Out-Null
     }
     Remove-OwnedRegistry
     if ($createdInstall -and (Test-Path -LiteralPath $InstallRoot)) {
