@@ -27,15 +27,19 @@ _IO_LOCK = threading.RLock()
 
 # Never persist bearer tokens, email addresses or credentials in a support log.
 _PRIVATE = (
-    (re.compile(r"(?i)\bAuthorization\s*[:=]\s*(?:Bearer\s+)?[A-Za-z0-9._~+/\-]+=*"), "Authorization: [REDACTED]"),
-    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/\-]{8,}=*"), "Bearer [REDACTED]"),
+    (re.compile(r"(?i)\bAuthorization[ \t]*[:=][ \t]*[^\r\n,;]+"), "Authorization: [REDACTED]"),
+    (re.compile(r"(?i)\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/\-]{8,}=*"), "[AUTH_CREDENTIAL]"),
     (re.compile(r"(?i)\b(authorization|bearer|password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token)\s*[:=]\s*[^\s,;]+"), r"\1=[REDACTED]"),
     (re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"), "[EMAIL]"),
     (re.compile(r"(?i)\b([?&](?:token|code|key|secret|password|auth|sig|signature)=)[^&\s]+"), r"\1[REDACTED]"),
 )
-_WINDOWS_HOME = re.compile(r"(?i)(?:[A-Z]:\\Users\\|/Users/)[^\\/\s]+")
-_POSIX_HOME = re.compile(r"/home/[^/\s]+")
-_SUPPORTED = {"ru", "en"}
+# Export masking deliberately favours privacy over verbatim file locations.
+# Unlike ordinary journal display, support ZIPs must not contain usernames in
+# paths with spaces or expose custom drive letters / UNC shares.
+_WINDOWS_HOME = re.compile(r"(?i)(?:[A-Z]:\\Users\\|/Users/)[^\\/\r\n\"<>|]+")
+_WINDOWS_PATH = re.compile(r"(?i)(?<![A-Z0-9])(?:[A-Z]:\\|\\\\[^\\\s]+\\[^\\\s]+\\)[^\r\n,;\"<>|]+")
+_POSIX_HOME = re.compile(r"/home/[^/\r\n]+")
+_POSIX_PATH = re.compile(r"(?<![A-Za-z0-9:/])/(?:[^/\s]+/)*[^/\s]+")
 
 _HELP = {
     "ENGINE_SIGNATURE_INVALID": {
@@ -133,6 +137,8 @@ def redact(text: object, *, exported: bool = False) -> str:
     if exported:
         result = _WINDOWS_HOME.sub(lambda _: r"C:\Users\[USER]", result)
         result = _POSIX_HOME.sub("/home/[USER]", result)
+        result = _WINDOWS_PATH.sub("[PATH]", result)
+        result = _POSIX_PATH.sub("[PATH]", result)
         try:
             home = str(Path.home())
             if home and len(home) > 3:
