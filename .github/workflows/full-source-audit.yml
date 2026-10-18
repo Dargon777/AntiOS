@@ -62,3 +62,6 @@ jobs:
           Write-Host ("Parsed {0} PowerShell scripts" -f $scripts.Count)
           foreach ($issue in $errors) { Write-Error $issue -ErrorAction Continue }
           if ($errors.Count -gt 0) { exit 1 }
+      - name: Per-user installer / safe-uninstall Windows acceptance
+        shell: pwsh
+        run: ./tests/user-install-uninstall-smoke.ps1
