@@ -49,3 +49,28 @@ def test_managed_clamd_uninstall_refuses_foreign_scm_services():
     assert uninstall.index("Assert-ManagedClamdService") < uninstall.index("Stop-Service")
     assert uninstall.index("Assert-NoReparseTree") < uninstall.index("Stop-Service")
     assert source.count("Assert-ManagedClamdService") >= 3
+
+
+
+def test_elevated_bootstrap_never_extracts_clamav_into_user_temp():
+    source = (ROOT / "scripts/protection-bootstrap.ps1").read_text("utf-8")
+    assert "[IO.Path]::GetTempPath()" not in source
+    assert "AntiOS-ClamAV-Staging-" in source
+    assert "GetFolderPath('ProgramFiles')" in source
+    assert "SetSecurityDescriptorSddlForm" in source
+    assert "ReparsePoint" in source
+    assert "SHA256" in source
+    assert "RequireValidSignature $true" in source
+
+
+def test_build_scripts_deny_arbitrary_recursive_cleanup_locations():
+    for filename, approved in (
+        ("scripts/stage-installer.ps1", "installer-stage"),
+        ("scripts/build-hardened-windows.ps1", "hardened-dist"),
+    ):
+        source = (ROOT / filename).read_text("utf-8")
+        assert "cnotmatch" in source
+        assert approved in source
+        assert "ReparsePoint" in source
+        assert "refusing recursive cleanup" in source
+        assert source.count("param(") >= 1
