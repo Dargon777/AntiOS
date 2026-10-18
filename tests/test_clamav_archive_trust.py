@@ -40,6 +40,9 @@ def test_repair_rechecks_installed_hashes_or_code_signatures():
     assert "if ($engineTrust -eq 'none')" in script
     assert "clamd-service-path-mismatch" in script
     assert "engine_trust = $engineTrust" in script
+    assert "freshclam-task-path-mismatch" in script
+    assert "'freshclam-task-path-mismatch')" in script
+    assert "Cannot repair ClamAV through a reparse-point tree" in script
 
 
 def test_engine_trust_receipt_is_archive_sha256_bound():
