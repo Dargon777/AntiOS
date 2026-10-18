@@ -28,6 +28,13 @@ try {
         sha256=(Get-AntiOSSha256 $zip);
         size=(Get-Item $zip).Length
     }
+    # Explicitly disabling Authenticode is not an escape hatch for an
+    # arbitrary local source; it must be backed by the pinned official ZIP.
+    $engineScript = Join-Path $PSScriptRoot '..\scripts\protection-engine.ps1'
+    Must-Throw {
+        & $engineScript -ClamAVDirectory $folder -RequireValidSignature:$false
+    } 'unauthenticated manual ClamAV source'
+
     $receipt = Assert-AntiOSArchivePair -ArchivePath $zip -SourceDirectory $folder -Manifest $fixture
     if ($receipt.mode -ne 'pinned-archive-sha256' -or
         $receipt.clamd_sha256 -ne (Get-AntiOSSha256 $clamd)) {
