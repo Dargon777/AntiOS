@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   tracked-source-audit:
@@ -65,3 +66,18 @@ jobs:
       - name: Per-user installer / safe-uninstall Windows acceptance
         shell: pwsh
         run: ./tests/user-install-uninstall-smoke.ps1
+
+  native-codeql:
+    name: C/C++ CodeQL with pinned WDK native build
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: manual
+      - name: Compile the native driver and service while CodeQL traces the build
+        shell: pwsh
+        run: ./native/windows/build.ps1 -Restore
+      - uses: github/codeql-action/analyze@v4
