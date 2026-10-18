@@ -170,7 +170,16 @@ def test_real_diagnostics_window_filters_inspects_and_closes(monkeypatch):
                                  code="GUARD_STATE_CHANGED", directory=Path(os.devnull) / "invalid"),
     ]
     monkeypatch.setattr(diagnostics_ui, "recent_events", lambda **_kwargs: events)
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        # Some hosted Windows Python installs intermittently cannot read
+        # their own Tcl init.tcl before any application/UI code is executed.
+        # This is an unavailable display runtime, not a diagnostics failure.
+        # Keep all other Tk failures visible and do not bypass any assertions.
+        if "init.tcl" in str(exc):
+            pytest.skip("Hosted runner has an unusable Tcl/Tk runtime")
+        raise
     root.withdraw()
     app = SimpleNamespace(root=root, language="ru", _diagnostics_window=None)
     try:
