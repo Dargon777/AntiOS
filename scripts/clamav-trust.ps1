@@ -93,11 +93,63 @@ function Assert-AntiOSArchivePair {
     }
 }
 
+function Assert-AntiOSProtectedEngineRoot {
+    param([Parameter(Mandatory)][string]$Root)
+    $programFiles = [IO.Path]::GetFullPath(
+        [Environment]::GetFolderPath('ProgramFiles')
+    ).TrimEnd('\')
+    $expected = Join-Path $programFiles 'AntiOS\ClamAV'
+    $actual = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    if ($actual -ine $expected) {
+        throw 'Managed ClamAV archive trust requires the exact Program Files installation path.'
+    }
+    $allowed = @(
+        'S-1-5-18',       # SYSTEM
+        'S-1-5-32-544',   # Administrators
+        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464' # TrustedInstaller
+    )
+    $dangerous = [Security.AccessControl.FileSystemRights]::Write -bor
+                 [Security.AccessControl.FileSystemRights]::Modify -bor
+                 [Security.AccessControl.FileSystemRights]::FullControl -bor
+                 [Security.AccessControl.FileSystemRights]::Delete -bor
+                 [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+                 [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $current = $actual
+    while ($true) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Managed ClamAV ancestor is a reparse point.'
+        }
+        $acl = Get-Acl -LiteralPath $current -ErrorAction Stop
+        foreach ($rule in $acl.Access) {
+            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
+                continue
+            }
+            if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) {
+                continue
+            }
+            $sid = $rule.IdentityReference.Translate(
+                [Security.Principal.SecurityIdentifier]).Value
+            if ((($rule.FileSystemRights -band $dangerous) -ne 0) -and $sid -notin $allowed) {
+                throw 'Unprivileged write permissions found on the managed ClamAV installation.'
+            }
+        }
+        if ($current -ieq $programFiles) { break }
+        $parent = Split-Path -Parent $current
+        if (-not $parent -or $parent -ieq $current) {
+            throw 'Managed ClamAV installation escapes trusted Program Files.'
+        }
+        $current = $parent
+    }
+}
+
+
 function Assert-AntiOSInstalledPair {
     param(
         [Parameter(Mandatory)][string]$Root,
         [Parameter(Mandatory)]$Manifest
     )
+    Assert-AntiOSProtectedEngineRoot -Root $Root
     $receiptPath = Join-Path $Root 'engine-trust.json'
     if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
         throw 'ClamAV archive trust receipt is missing.'
