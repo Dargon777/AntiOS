@@ -310,3 +310,22 @@ def test_successful_scan_result_does_not_create_false_clamav_alarm():
     panel = AntivirusPanel.__new__(AntivirusPanel)
     panel._diagnose_scan_result({"engine": {"available": True, "version": "1.4"}})
     panel._diagnose_scan_result({"engine": {"provider": "ClamAV"}})
+
+
+
+def test_privileged_windows_default_journal_is_never_written(tmp_path, monkeypatch):
+    # On Windows an elevated child must not follow a user-supplied LocalAppData
+    # path, even when given a valid-looking diagnostic event.
+    monkeypatch.setattr(diagnostics, "_safe_to_write_default_journal", lambda: False)
+    monkeypatch.setattr(diagnostics, "diagnostics_directory", lambda: tmp_path / "forbidden")
+    entry = diagnostics.record_event("UI", "ERROR", "privileged operation failed")
+    assert entry["message"] == "privileged operation failed"
+    assert not (tmp_path / "forbidden").exists()
+
+
+def test_explicit_local_test_directory_still_accepts_events(tmp_path, monkeypatch):
+    monkeypatch.setattr(diagnostics, "_safe_to_write_default_journal", lambda: False)
+    entry = diagnostics.record_event("System", "INFO", "unit test",
+                                     directory=tmp_path)
+    assert any(event.get("id") == entry["id"] for event in
+               diagnostics.recent_events(directory=tmp_path))
