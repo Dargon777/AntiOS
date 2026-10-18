@@ -29,7 +29,7 @@ _IO_LOCK = threading.RLock()
 _PRIVATE = (
     (re.compile(r"(?i)\bAuthorization[ \t]*[:=][ \t]*[^\r\n,;]+"), "Authorization: [REDACTED]"),
     (re.compile(r"(?i)\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/\-]{8,}=*"), "[AUTH_CREDENTIAL]"),
-    (re.compile(r"(?i)\b(authorization|bearer|password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token)\s*[:=]\s*[^\s,;]+"), r"\1=[REDACTED]"),
+    (re.compile(r"""(?i)\b(authorization|bearer|password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?token|refresh[_-]?token)[ \t]*[:=][ \t]*(?:"[^"]*"|'[^']*'|[^\s,;]+)"""), r"\1=[REDACTED]"),
     (re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"), "[EMAIL]"),
     (re.compile(r"(?i)\b([?&](?:token|code|key|secret|password|auth|sig|signature)=)[^&\s]+"), r"\1[REDACTED]"),
 )
