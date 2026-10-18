@@ -12,9 +12,12 @@ import queue
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Callable
 
+from .diagnostics import classify_error, explanation, record_event, recent_events
+from .diagnostics_ui import open_diagnostics
 from .quarantine import Quarantine
 from .scan_process import run_scan_process
 from .windows_antivirus import defender_action
@@ -43,6 +46,9 @@ class AntivirusPanel:
         self.layered_active = False
         self.guard_state = "not-running"
         self.advanced_visible = False
+        self._last_guard_state_logged: str | None = None
+        self._last_engine_failure: str | None = None
+        self._last_engine_ready: bool | None = None
         self.labels: list[Any] = []
         self.buttons: list[Any] = []
         # ClamAV is the product engine. AMSI remains a CLI compatibility path.
@@ -357,6 +363,26 @@ class AntivirusPanel:
         )
         self.provider_status.pack(fill="x")
 
+        # Persistent hint for the most recent actionable error. Unlike a
+        # transient scan-status label it survives Guard polling and tab swaps.
+        self.last_diagnostic = tk.Frame(state_body, bg=self.palette["surface"])
+        self.last_diagnostic.pack(fill="x", pady=(9, 0))
+        self.last_error_label = tk.Label(
+            self.last_diagnostic,
+            text=("Журнал событий готов" if self.app.language == "ru"
+                  else "Event journal ready"),
+            bg=self.palette["surface"], fg=self.palette["muted"],
+            font=("Segoe UI", 8), anchor="w", justify="left",
+            wraplength=380,
+        )
+        self.last_error_label.pack(side="left", fill="x", expand=True)
+        self.app._button(
+            self.last_diagnostic,
+            "Диагностика ↗" if self.app.language == "ru" else "Diagnostics ↗",
+            self._open_diagnostics, kind="secondary",
+        ).pack(side="right", padx=(10, 0))
+        self._restore_diagnostic_hint()
+
         # Results and quarantine.
         results = self._card(outer)
         results.grid(row=3, column=0, sticky="nsew", pady=(0, 10))
@@ -424,6 +450,12 @@ class AntivirusPanel:
             actions, self.t("export"), self._export, kind="ghost"
         )
         self.export_button.pack(side="right", padx=(0, 7))
+        self.diagnostics_button = self.app._button(
+            actions,
+            "Журнал ошибок" if self.app.language == "ru" else "Error journal",
+            self._open_diagnostics, kind="secondary"
+        )
+        self.diagnostics_button.pack(side="right", padx=(0, 7))
 
         # Advanced diagnostics stay available but visually secondary.
         self.advanced_frame = self._card(outer)
@@ -574,12 +606,37 @@ class AntivirusPanel:
         self.status.configure(text=self.t("working"), fg=self.palette["muted"])
         self._set_busy()
 
+        source = {
+            "scan": "Scanner", "guard-action": "Protection",
+            "quarantined": "Quarantine", "restored": "Quarantine",
+            "defender": "Defender", "items": "Quarantine",
+        }.get(kind, "UI")
+        if kind not in {"items", "incident-history"}:
+            record_event(source, "INFO", "Operation started: " + kind,
+                         code="OPERATION_STARTED", context={"operation": kind})
+
         def worker() -> None:
             try:
                 value = operation()
+                if kind not in {"items", "incident-history", "scan"}:
+                    record_event(source, "INFO", "Operation returned: " + kind,
+                                 code="OPERATION_COMPLETED",
+                                 context={"operation": kind})
                 self.app.antivirus_queue.put((kind, value))
             except Exception as exc:
-                self.app.antivirus_queue.put(("error", str(exc)))
+                self.app.antivirus_queue.put(("error", {
+                    "message": str(exc),
+                    "component": {
+                        "scan": "Scanner",
+                        "guard-action": "Protection",
+                        "items": "Quarantine",
+                        "quarantined": "Quarantine",
+                        "restored": "Quarantine",
+                        "defender": "Defender",
+                    }.get(kind, "UI"),
+                    "details": traceback.format_exc(),
+                    "operation": kind,
+                }))
             finally:
                 self.app.antivirus_queue.put(("idle", None))
 
@@ -860,15 +917,78 @@ class AntivirusPanel:
             except OSError as exc:
                 self._error(str(exc))
 
-    def _error(self, message: str) -> None:
+    def _diagnose_scan_result(self, result: dict) -> None:
+        """Surface engine failures returned as data, not only raised exceptions.
+
+        scan_files intentionally returns a limited-coverage result when ClamAV
+        refuses an unsigned engine. That must still create an ERROR event,
+        otherwise the console can miss the exact failure reported in the UI.
+        """
+        engine = result.get("engine")
+        if not isinstance(engine, dict):
+            return
+        detail = str(engine.get("detail") or "").strip()
+        if engine.get("available") is False:
+            self._error({
+                "message": detail or "ClamAV engine unavailable",
+                "component": "ClamAV",
+                "operation": "scan-engine-start",
+            })
+        elif engine.get("failed_during_scan") is True:
+            self._error({
+                "message": detail or "ClamAV failed while scanning files",
+                "component": "ClamAV",
+                "operation": "scan-engine-runtime",
+            })
+
+    def _open_diagnostics(self) -> None:
+        open_diagnostics(self.app, self.palette)
+
+    def _restore_diagnostic_hint(self) -> None:
+        for event in recent_events(limit=30):
+            if event.get("level") in {"ERROR", "CRITICAL"}:
+                label = explanation(str(event.get("code", "")), self.app.language)[0]
+                self.last_error_label.configure(
+                    text=label + " · " + str(event.get("component", "")),
+                    fg=self.palette["warn"],
+                )
+                return
+
+    def _error(self, message: str | dict) -> None:
+        payload = message if isinstance(message, dict) else {"message": str(message)}
+        text = str(payload.get("message", "") or "Unknown error")
+        component = str(payload.get("component") or "Protection")
+        code = classify_error(text, component=component)
+        event = record_event(
+            component, "ERROR", text, code=code,
+            details=str(payload.get("details") or ""),
+            context={"operation": str(payload.get("operation") or "antivirus")},
+        )
+        heading, _cause, recommended = explanation(code, self.app.language)
         self.status.configure(
-            text=self.t("error", error=message),
+            text=heading + " · " + recommended,
             fg=self.palette["warn"],
         )
+        if hasattr(self, "last_error_label"):
+            self.last_error_label.configure(
+                text=heading + " · " + event["component"], fg=self.palette["warn"]
+            )
 
     def _sync_guard_ui(self, value: dict) -> None:
         state = str(value.get("state") or "unavailable")
         self.guard_state = state
+        if state != self._last_guard_state_logged:
+            # Poll every 3 s, but never flood the journal with unchanged state.
+            record_event(
+                "Guard",
+                "ERROR" if state in {"failed", "unresponsive"} else
+                "WARNING" if state in {"degraded", "attention"} else "INFO",
+                "Resident Guard: " + state,
+                code="GUARD_UNRESPONSIVE" if state in {"unresponsive", "failed"}
+                else "GUARD_STATE_CHANGED",
+                context={"state": state},
+            )
+            self._last_guard_state_logged = state
         self.app.set_protection_state(value)
         healthy = state in _HEALTHY_GUARD_STATES
 
@@ -983,6 +1103,30 @@ class AntivirusPanel:
         caps = value.get("capabilities") if isinstance(value, dict) else {}
         if not isinstance(caps, dict):
             caps = {}
+        # Engine probe failures are recorded once per distinct reason; a
+        # twenty-second heartbeat must never generate a flood of duplicates.
+        reason = str(value.get("error") or "") if isinstance(value, dict) else ""
+        if reason and reason != self._last_engine_failure:
+            self._error({"message": reason, "component": "ClamAV",
+                         "operation": "engine-probe"})
+            self._last_engine_failure = reason
+        if not reason:
+            self._last_engine_failure = None
+        if hasattr(self, "app"):
+            ready = bool(caps.get("standalone_detection_engine"))
+            if ready != getattr(self, "_last_engine_ready", None):
+                record_event(
+                    "ClamAV", "INFO" if ready else "WARNING",
+                    "Managed ClamAV ready" if ready else "Managed ClamAV not ready",
+                    code="OPERATION_COMPLETED" if ready else "ENGINE_NOT_READY",
+                    context={"state": "ready" if ready else "unavailable"},
+                )
+                self._last_engine_ready = ready
+                if not ready and hasattr(self, "last_error_label"):
+                    self.last_error_label.configure(
+                        text=explanation("ENGINE_NOT_READY", self.app.language)[0],
+                        fg=self.palette["review"],
+                    )
         layered = bool(
             caps.get("standalone_detection_engine") and
             caps.get("layered_with_defender") and
@@ -1121,10 +1265,23 @@ class AntivirusPanel:
                     fg=self.palette["muted"],
                 )
             elif kind == "scan":
+                result_summary = value.get("summary", {}) if isinstance(value, dict) else {}
+                record_event(
+                    "Scanner",
+                    "WARNING" if value.get("coverage") == "limited"
+                    or result_summary.get("errors") else "INFO",
+                    "On-demand file scan finished",
+                    code="SCAN_COMPLETED",
+                    context={
+                        "state": str(value.get("verdict") or "unknown"),
+                        "exit_code": str(result_summary.get("errors", 0)),
+                    },
+                )
                 self.app.antivirus_result = value
                 self.mode = "findings"
                 self._sync_tabs()
                 self._render_result()
+                self._diagnose_scan_result(value)
             elif kind == "defender":
                 self.status.configure(
                     text=self.t("defender_done"),
