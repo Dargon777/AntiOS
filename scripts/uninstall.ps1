@@ -120,12 +120,22 @@ function Remove-OwnShortcut([string]$Path, [string]$ExpectedTarget) {
 }
 
 $GuiTarget = Join-Path $root 'AntiOS-GUI.exe'
+if (Test-Path -LiteralPath $StartMenuDir) {
+    Assert-NoReparsePoint $StartMenuDir
+}
 Remove-OwnShortcut (Join-Path $StartMenuDir 'AntiOS.lnk') $GuiTarget
 Remove-OwnShortcut $DesktopLink $GuiTarget
-if (Test-Path -LiteralPath $StartMenuDir -PathType Container) {
-    Assert-NoReparsePoint $StartMenuDir
-    Remove-Item -LiteralPath $StartMenuDir -ErrorAction SilentlyContinue
+function Remove-EmptyDirectory([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
+    Assert-NoReparsePoint $Path
+    # Windows PowerShell can raise an internal provider error when attempting
+    # non-recursive Remove-Item on a nonempty folder. Never attempt it.
+    if ($null -eq (Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1)) {
+        try { [IO.Directory]::Delete($Path, $false) }
+        catch [IO.IOException] { } # concurrent user-created file: keep it
+    }
 }
+Remove-EmptyDirectory $StartMenuDir
 
 # Remove only payload files listed during installation, deepest directories
 # first and always non-recursively. Preserve unknown content on disk.
@@ -136,11 +146,9 @@ foreach ($path in $ownedFiles) {
 }
 Remove-Item -LiteralPath $ManifestFile -Force
 foreach ($directory in @($ownedDirs | Sort-Object { ($_.TrimEnd('\') -split '\\').Count } -Descending)) {
-    if (Test-Path -LiteralPath $directory -PathType Container) {
-        Remove-Item -LiteralPath $directory -ErrorAction SilentlyContinue
-    }
+    Remove-EmptyDirectory $directory
 }
-Remove-Item -LiteralPath $root -ErrorAction SilentlyContinue
+Remove-EmptyDirectory $root
 Write-Host 'AntiOS owned payload removed. Unknown files and folders were preserved.'
 
 if ($RemoveFromPath) {
