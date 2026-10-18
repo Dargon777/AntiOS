@@ -97,14 +97,18 @@ $task = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContin
 if (-not $task) {
     $issues.Add('freshclam-task-missing')
 } else {
-    $taskExecute = [string]$task.Actions[0].Execute
-    if ([IO.Path]::GetFullPath($taskExecute) -ne [IO.Path]::GetFullPath($ManagedFresh)) {
+    $taskActions = @($task.Actions)
+    if ($taskActions.Count -ne 1 -or
+        -not $taskActions[0].Execute -or
+        [IO.Path]::GetFullPath([string]$taskActions[0].Execute) -ine
+            [IO.Path]::GetFullPath($ManagedFresh)) {
         $issues.Add('freshclam-task-path-mismatch')
     }
 }
 
 $unsafeService = $issues | Where-Object {
-    $_ -in @('clamd-service-not-own-process', 'clamd-service-not-system', 'clamd-service-path-mismatch')
+    $_ -in @('clamd-service-not-own-process', 'clamd-service-not-system', 'clamd-service-path-mismatch',
+               'freshclam-task-path-mismatch')
 }
 if ($Apply -and $unsafeService) {
     throw "Refusing to repair an ambiguous clamd service: $($unsafeService -join ', ')"
@@ -117,6 +121,19 @@ if ($Apply) {
         -not (Test-Path -LiteralPath $ClamdConfig -PathType Leaf) -or
         -not (Test-Path -LiteralPath $FreshConfig -PathType Leaf)) {
         throw 'Managed ClamAV files/configuration are incomplete. Re-bootstrap the engine instead of repairing it.'
+    }
+    # A data-folder junction could otherwise redirect elevated ACL repair or
+    # FreshClam updates into an unrelated directory. Refuse all such trees.
+    foreach ($target in @($InstallRoot, $DataRoot)) {
+        if (Test-Path -LiteralPath $target) {
+            $items = @(Get-Item -LiteralPath $target -Force) +
+                     @(Get-ChildItem -LiteralPath $target -Force -Recurse)
+            if (@($items | Where-Object {
+                $_.Attributes -band [IO.FileAttributes]::ReparsePoint
+            }).Count) {
+                throw "Cannot repair ClamAV through a reparse-point tree: $target"
+            }
+        }
     }
     if ($engineTrust -eq 'none') {
         throw 'Managed ClamAV binaries failed authenticated archive/Authenticode validation. Re-bootstrap from the pinned official package.'
