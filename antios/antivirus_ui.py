@@ -917,6 +917,30 @@ class AntivirusPanel:
             except OSError as exc:
                 self._error(str(exc))
 
+    def _diagnose_scan_result(self, result: dict) -> None:
+        """Surface engine failures returned as data, not only raised exceptions.
+
+        scan_files intentionally returns a limited-coverage result when ClamAV
+        refuses an unsigned engine. That must still create an ERROR event,
+        otherwise the console can miss the exact failure reported in the UI.
+        """
+        engine = result.get("engine")
+        if not isinstance(engine, dict):
+            return
+        detail = str(engine.get("detail") or "").strip()
+        if engine.get("available") is False:
+            self._error({
+                "message": detail or "ClamAV engine unavailable",
+                "component": "ClamAV",
+                "operation": "scan-engine-start",
+            })
+        elif engine.get("failed_during_scan") is True:
+            self._error({
+                "message": detail or "ClamAV failed while scanning files",
+                "component": "ClamAV",
+                "operation": "scan-engine-runtime",
+            })
+
     def _open_diagnostics(self) -> None:
         open_diagnostics(self.app, self.palette)
 
@@ -1257,6 +1281,7 @@ class AntivirusPanel:
                 self.mode = "findings"
                 self._sync_tabs()
                 self._render_result()
+                self._diagnose_scan_result(value)
             elif kind == "defender":
                 self.status.configure(
                     text=self.t("defender_done"),
