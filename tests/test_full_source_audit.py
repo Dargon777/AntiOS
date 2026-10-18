@@ -60,7 +60,8 @@ def test_elevated_bootstrap_never_extracts_clamav_into_user_temp():
     assert "SetSecurityDescriptorSddlForm" in source
     assert "ReparsePoint" in source
     assert "SHA256" in source
-    assert "RequireValidSignature $true" in source
+    assert "-TrustedArchivePath $zip" in source
+    assert "ClamAV package SHA-256 mismatch" in source
 
 
 def test_build_scripts_deny_arbitrary_recursive_cleanup_locations():
