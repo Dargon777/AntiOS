@@ -66,6 +66,9 @@ jobs:
       - name: Per-user installer / safe-uninstall Windows acceptance
         shell: pwsh
         run: ./tests/user-install-uninstall-smoke.ps1
+      - name: Official ClamAV archive SHA256 and installed receipt trust smoke
+        shell: powershell
+        run: ./tests/clamav-archive-trust-smoke.ps1
 
   native-codeql:
     name: C/C++ CodeQL with pinned WDK native build

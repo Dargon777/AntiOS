@@ -141,7 +141,10 @@ try {
     }
 
     $engineScript = Resolve-EngineScript
-    & $engineScript -ClamAVDirectory $source -Apply -RequireValidSignature $true | Out-Null
+    # The bootstrap has verified the publisher-pinned archive hash and size;
+    # the engine revalidates the ZIP and SHA-256 of each extracted EXE before
+    # installing, rather than demanding embedded PE Authenticode from the ZIP.
+    & $engineScript -ClamAVDirectory $source -Apply -TrustedArchivePath $zip | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Managed engine installation failed with exit code $LASTEXITCODE" }
 
     $plan['action'] = 'installed'

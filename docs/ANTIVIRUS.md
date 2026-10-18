@@ -19,9 +19,22 @@ claim Windows Security Center primary-antivirus registration.
 ## Normal Windows setup
 
 `AntiOS-Setup.exe` installs the app and then bootstraps the pinned official
-ClamAV x64 package. Before the engine is installed, AntiOS verifies the package
-size and SHA-256 and the Authenticode signatures of `clamd.exe` and
-`freshclam.exe`.
+ClamAV x64 package. AntiOS verifies the ZIP's exact size and SHA-256
+against the version pinned in its own installer. The engine then re-verifies
+the ZIP and compares extracted `clamd.exe` and `freshclam.exe` byte-for-byte
+against their archived copies before executing them. Their SHA-256 fingerprints
+are recorded in an ACL-protected `engine-trust.json` under the managed engine
+directory, and checked again during repair. Modified binaries or a mismatched
+receipt fail closed. This is **pinned artifact trust anchored in the authentic
+AntiOS release**, not separate Cisco Talos GPG verification. The pinned digest
+for ClamAV 1.5.4 matches Cisco Talos's official GitHub release metadata.
+
+Arbitrary manually selected ClamAV directories still require valid, matching
+Authenticode signatures. There is no general unsigned-executable bypass.
+An official release ZIP can be authenticated without assuming every portable
+PE inside it independently carries Authenticode. Future vendor key pinning,
+GPG detached-signature verification, rollovers and real Windows service
+acceptance are separate release gates.
 
 The managed runtime is placed under `Program Files\AntiOS\ClamAV`. Databases,
 configuration and temporary engine data live under

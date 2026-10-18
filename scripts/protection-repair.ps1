@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'clamav-trust.ps1')
 
 $EngineServiceName = 'clamd'
 $UpdaterTaskName = 'AntiOS ClamAV Signature Update'
@@ -60,10 +61,21 @@ foreach ($path in @($ManagedClamd, $ManagedFresh, $ClamdConfig, $FreshConfig)) {
 
 $clamdSigner = Get-Signer $ManagedClamd
 $freshSigner = Get-Signer $ManagedFresh
-if ($clamdSigner.Status -ne 'Valid' -or $freshSigner.Status -ne 'Valid') {
+$engineTrust = 'none'
+$receiptFile = Join-Path $InstallRoot 'engine-trust.json'
+if (Test-Path -LiteralPath $receiptFile) {
+    try {
+        $pinnedManifest = Get-AntiOSPinnedManifest
+        Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest $pinnedManifest | Out-Null
+        $engineTrust = 'pinned-archive-sha256'
+    } catch {
+        $issues.Add('engine-archive-attestation-invalid')
+    }
+} elseif ($clamdSigner.Status -eq 'Valid' -and $freshSigner.Status -eq 'Valid' -and
+          $clamdSigner.Thumbprint -and $clamdSigner.Thumbprint -eq $freshSigner.Thumbprint) {
+    $engineTrust = 'authenticode'
+} else {
     $issues.Add('engine-signature-invalid')
-} elseif (-not $clamdSigner.Thumbprint -or $clamdSigner.Thumbprint -ne $freshSigner.Thumbprint) {
-    $issues.Add('engine-signers-do-not-match')
 }
 
 $service = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction SilentlyContinue
@@ -72,7 +84,11 @@ if (-not $service) {
 } else {
     if ($service.ServiceType -ne 'Own Process') { $issues.Add('clamd-service-not-own-process') }
     if ($service.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM')) { $issues.Add('clamd-service-not-system') }
-    if ($service.PathName -notlike "*$ManagedClamd*") { $issues.Add('clamd-service-path-mismatch') }
+    $exactClamd = [regex]::Escape($ManagedClamd)
+    $expectedImage = ('^\s*(?:"{0}"|{0})(?=\s|$)' -f $exactClamd)
+    if ([string]$service.PathName -notmatch $expectedImage) {
+        $issues.Add('clamd-service-path-mismatch')
+    }
     if ($service.StartMode -ne 'Auto') { $issues.Add('clamd-service-not-auto') }
     if ($service.State -ne 'Running') { $issues.Add('clamd-service-not-running') }
 }
@@ -81,14 +97,18 @@ $task = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContin
 if (-not $task) {
     $issues.Add('freshclam-task-missing')
 } else {
-    $taskExecute = [string]$task.Actions[0].Execute
-    if ([IO.Path]::GetFullPath($taskExecute) -ne [IO.Path]::GetFullPath($ManagedFresh)) {
+    $taskActions = @($task.Actions)
+    if ($taskActions.Count -ne 1 -or
+        -not $taskActions[0].Execute -or
+        [IO.Path]::GetFullPath([string]$taskActions[0].Execute) -ine
+            [IO.Path]::GetFullPath($ManagedFresh)) {
         $issues.Add('freshclam-task-path-mismatch')
     }
 }
 
 $unsafeService = $issues | Where-Object {
-    $_ -in @('clamd-service-not-own-process', 'clamd-service-not-system', 'clamd-service-path-mismatch')
+    $_ -in @('clamd-service-not-own-process', 'clamd-service-not-system', 'clamd-service-path-mismatch',
+               'freshclam-task-path-mismatch')
 }
 if ($Apply -and $unsafeService) {
     throw "Refusing to repair an ambiguous clamd service: $($unsafeService -join ', ')"
@@ -102,9 +122,24 @@ if ($Apply) {
         -not (Test-Path -LiteralPath $FreshConfig -PathType Leaf)) {
         throw 'Managed ClamAV files/configuration are incomplete. Re-bootstrap the engine instead of repairing it.'
     }
-    if ($clamdSigner.Status -ne 'Valid' -or $freshSigner.Status -ne 'Valid' -or
-        -not $clamdSigner.Thumbprint -or $clamdSigner.Thumbprint -ne $freshSigner.Thumbprint) {
-        throw 'Managed ClamAV binaries failed Authenticode validation. Re-bootstrap from the pinned official package.'
+    # A data-folder junction could otherwise redirect elevated ACL repair or
+    # FreshClam updates into an unrelated directory. Refuse all such trees.
+    foreach ($target in @($InstallRoot, $DataRoot)) {
+        if (Test-Path -LiteralPath $target) {
+            $items = @(Get-Item -LiteralPath $target -Force) +
+                     @(Get-ChildItem -LiteralPath $target -Force -Recurse)
+            if (@($items | Where-Object {
+                $_.Attributes -band [IO.FileAttributes]::ReparsePoint
+            }).Count) {
+                throw "Cannot repair ClamAV through a reparse-point tree: $target"
+            }
+        }
+    }
+    if ($engineTrust -eq 'none') {
+        throw 'Managed ClamAV binaries failed authenticated archive/Authenticode validation. Re-bootstrap from the pinned official package.'
+    }
+    if ($engineTrust -eq 'pinned-archive-sha256') {
+        Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest (Get-AntiOSPinnedManifest) | Out-Null
     }
 
     $engineAcl = New-Object Security.AccessControl.DirectorySecurity
@@ -158,6 +193,7 @@ $result = [ordered]@{
     data_root = $DataRoot
     clamd_signature = $clamdSigner.Status
     freshclam_signature = $freshSigner.Status
+    engine_trust = $engineTrust
     signer = $clamdSigner.Subject
     updater_task = $UpdaterTaskName
     defender = 'unchanged'
