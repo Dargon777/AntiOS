@@ -25,7 +25,6 @@ def test_per_user_uninstaller_never_recursively_erases_unknown_files():
     assert "GetFullPath" in source
     assert "Remove-EmptyDirectory" in source
     assert "Refusing a reparse point" in source
-    assert source.index("Validate") if False else True  # checks below use real boundaries
     assert source.index("foreach ($entry in @($manifest.files))") < source.index("& $Guard stop")
 
 
