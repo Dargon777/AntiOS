@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 import threading
 import uuid
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -364,8 +365,36 @@ def export_report(destination: Path, *, directory: Path | None = None, metadata:
         })
     approved = {"app_version", "os_name", "os_release", "python_version", "language"}
     header = {k: redact(v, exported=True)[:100] for k, v in (metadata or {}).items() if k in approved}
-    with ZipFile(destination, "w", ZIP_DEFLATED, compresslevel=6) as archive:
-        archive.writestr("README.txt", "AntiOS diagnostics — redacted support bundle.\nNo settings, binaries, samples or quarantine files are included.\nReview before sharing.\n")
-        archive.writestr("summary.json", json.dumps({"schema": 1, "metadata": header, "events": len(clean)}, ensure_ascii=False, indent=2))
-        archive.writestr("events.json", json.dumps(clean, ensure_ascii=False, indent=2))
+    # Never truncate an existing support ZIP before the replacement is fully
+    # written. A disk-full error or interrupted export must leave the previous
+    # file intact and not advertise a partially generated diagnostics bundle.
+    destination = Path(destination)
+    staged: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=".antios-diagnostics-",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            staged = Path(temporary.name)
+        with ZipFile(staged, "w", ZIP_DEFLATED, compresslevel=6) as archive:
+            archive.writestr(
+                "README.txt",
+                "AntiOS diagnostics — redacted support bundle.\n"
+                "No settings, binaries, samples or quarantine files are included.\n"
+                "Review before sharing.\n",
+            )
+            archive.writestr(
+                "summary.json",
+                json.dumps(
+                    {"schema": 1, "metadata": header, "events": len(clean)},
+                    ensure_ascii=False, indent=2,
+                ),
+            )
+            archive.writestr("events.json", json.dumps(clean, ensure_ascii=False, indent=2))
+        os.replace(staged, destination)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
     return len(clean)
