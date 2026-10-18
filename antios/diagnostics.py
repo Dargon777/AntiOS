@@ -272,31 +272,40 @@ def journal_fingerprint(*, directory: Path | None = None) -> tuple[tuple[str, in
 
 
 def recent_events(*, limit: int = 300, directory: Path | None = None) -> list[dict]:
-    """Read a bounded tail of each process journal; skip corrupt/oversize rows."""
+    """Read bounded journal tails and isolate corrupted/inaccessible files."""
     root = Path(directory) if directory is not None else diagnostics_directory()
     limit = max(1, min(1000, int(limit)))
     found: list[dict] = []
-    try:
-        with _IO_LOCK:
-            paths = sorted(root.glob("events-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:_MAX_FILES]
-            for path in paths:
-                if path.is_symlink() or not path.is_file():
+    with _IO_LOCK:
+        candidates = []
+        try:
+            for path in root.glob("events-*.jsonl"):
+                try:
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    candidates.append((path.stat().st_mtime_ns, path))
+                except OSError:
+                    # A different process may rotate a file during enumeration.
+                    continue
+        except OSError:
+            return []
+        for _modified, path in sorted(candidates, reverse=True)[:_MAX_FILES]:
+            try:
+                # Do not follow a link inserted between enumeration and open.
+                if path.is_symlink():
                     continue
                 with path.open("rb") as stream:
                     stream.seek(0, os.SEEK_END)
                     end = stream.tell()
-                    # Allow one extra maximum row when reading the bounded tail.
-                    # A single valid event can be longer than the rollover
-                    # threshold in tiny test stores or after a rotation.
                     stream.seek(max(0, end - min(end, _MAX_BYTES + 16384)), os.SEEK_SET)
                     if stream.tell() > 0:
-                        stream.readline()  # skip truncated leading line
+                        stream.readline()
                     for line in stream:
                         if len(line) > 16000:
                             continue
                         try:
                             entry = json.loads(line)
-                        except (ValueError, UnicodeDecodeError):
+                        except (ValueError, UnicodeDecodeError, RecursionError, TypeError):
                             continue
                         if (
                             isinstance(entry, dict)
@@ -306,8 +315,9 @@ def recent_events(*, limit: int = 300, directory: Path | None = None) -> list[di
                             and isinstance(entry.get("timestamp"), str)
                         ):
                             found.append(entry)
-    except (OSError, ValueError):
-        pass
+            except (OSError, ValueError):
+                # One inaccessible or changing log must not hide all other logs.
+                continue
     found.sort(key=lambda item: (item["timestamp"], str(item.get("id", ""))), reverse=True)
     return found[:limit]
 
