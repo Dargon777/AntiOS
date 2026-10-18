@@ -100,12 +100,23 @@ if ($existingManaged) {
     return
 }
 
-$tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('AntiOS-ClamAV-' + [Guid]::NewGuid().ToString('N'))
+# Bootstrapping is elevated. A temporary directory under the interactive
+# user's profile can be modified by a medium-integrity process, which must
+# not be able to replace downloaded/extracted payload during this operation.
+# Program Files is machine-protected; use a fresh random directory there.
+$tempRoot = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) (
+    'AntiOS-ClamAV-Staging-' + [Guid]::NewGuid().ToString('N')
+)
 $zip = Join-Path $tempRoot 'clamav.zip'
 $extract = Join-Path $tempRoot 'extract'
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $tempRoot -ErrorAction Stop | Out-Null
 
 try {
+    $stageAcl = New-Object Security.AccessControl.DirectorySecurity
+    $stageAcl.SetSecurityDescriptorSddlForm(
+        'O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
+    )
+    Set-Acl -LiteralPath $tempRoot -AclObject $stageAcl
     if ($PackagePath) {
         $sourceZip = (Resolve-Path -LiteralPath $PackagePath).Path
         Copy-Item -LiteralPath $sourceZip -Destination $zip
@@ -136,5 +147,14 @@ try {
     $plan['action'] = 'installed'
     if ($Json) { $plan | ConvertTo-Json -Depth 4 } else { [pscustomobject]$plan | Format-List }
 } finally {
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $tempRoot) {
+        # Refuse cleanup through any unexpected archive-created link; never
+        # recursively delete an outside directory from an elevated process.
+        $tree = @(Get-Item -LiteralPath $tempRoot -Force) +
+                @(Get-ChildItem -LiteralPath $tempRoot -Force -Recurse)
+        if (@($tree | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
+            throw 'ClamAV staging contains a reparse point; preserve for administrator inspection.'
+        }
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force
+    }
 }

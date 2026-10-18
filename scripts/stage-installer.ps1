@@ -4,9 +4,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$stage = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
-
-Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+# Restrict recursive cleanup to the dedicated generated staging folder.
+$stageName = $OutputDirectory -replace '^[.][\\/]', ''
+if ($stageName -cnotmatch '^installer-stage(?:-[A-Za-z0-9_-]{1,40})?$') {
+    throw 'Installer staging must be installer-stage or installer-stage-SUFFIX under the repository.'
+}
+$stage = [IO.Path]::GetFullPath((Join-Path $repoRoot $stageName))
+if (Test-Path -LiteralPath $stage) {
+    $tree = @(Get-Item -LiteralPath $stage -Force) +
+            @(Get-ChildItem -LiteralPath $stage -Force -Recurse)
+    if (@($tree | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
+        throw 'Installer stage contains a junction/symlink; refusing recursive cleanup.'
+    }
+}
+Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage | Out-Null
 
 foreach ($source in @(
