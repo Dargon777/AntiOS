@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'clamav-trust.ps1')
+. (Join-Path $PSScriptRoot 'clamav-repair-validation.ps1')
 
 $EngineServiceName = 'clamd'
 $UpdaterTaskName = 'AntiOS ClamAV Signature Update'
@@ -84,9 +85,7 @@ if (-not $service) {
 } else {
     if ($service.ServiceType -ne 'Own Process') { $issues.Add('clamd-service-not-own-process') }
     if ($service.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM')) { $issues.Add('clamd-service-not-system') }
-    $exactClamd = [regex]::Escape($ManagedClamd)
-    $expectedImage = ('^\s*(?:"{0}"|{0})(?=\s|$)' -f $exactClamd)
-    if ([string]$service.PathName -notmatch $expectedImage) {
+    if (-not (Test-AntiOSRepairService -Service $service -ManagedExecutable $ManagedClamd)) {
         $issues.Add('clamd-service-path-mismatch')
     }
     if ($service.StartMode -ne 'Auto') { $issues.Add('clamd-service-not-auto') }
@@ -97,11 +96,7 @@ $task = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContin
 if (-not $task) {
     $issues.Add('freshclam-task-missing')
 } else {
-    $taskActions = @($task.Actions)
-    if ($taskActions.Count -ne 1 -or
-        -not $taskActions[0].Execute -or
-        [IO.Path]::GetFullPath([string]$taskActions[0].Execute) -ine
-            [IO.Path]::GetFullPath($ManagedFresh)) {
+    if (-not (Test-AntiOSRepairTask -Task $task -ManagedExecutable $ManagedFresh)) {
         $issues.Add('freshclam-task-path-mismatch')
     }
 }
@@ -219,21 +214,8 @@ if ($Apply) {
     # commands execute. ClamAV VERSION/peer readiness is checked separately by
     # the GUI/Guard and is not implied by this system-maintenance outcome.
     $afterService = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction Stop
-    $expectedImage = ('^\s*(?:"{0}"|{0})(?=\s|$)' -f [regex]::Escape($ManagedClamd))
-    if (-not $afterService -or $afterService.State -ne 'Running' -or
-        $afterService.ServiceType -ne 'Own Process' -or
-        $afterService.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM') -or
-        [string]$afterService.PathName -notmatch $expectedImage -or
-        $afterService.StartMode -ne 'Auto') {
-        throw 'ClamD failed post-repair SCM identity/running-state verification.'
-    }
     $afterTask = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction Stop
-    $afterActions = @($afterTask.Actions)
-    if ($afterActions.Count -ne 1 -or -not $afterActions[0].Execute -or
-        [IO.Path]::GetFullPath([string]$afterActions[0].Execute) -ine
-        [IO.Path]::GetFullPath($ManagedFresh)) {
-        throw 'FreshClam update task failed post-repair ownership verification.'
-    }
+    Assert-AntiOSRepairPostconditions -Service $afterService -Task $afterTask -ManagedClamd $ManagedClamd -ManagedFresh $ManagedFresh
     if ($engineTrust -eq 'pinned-archive-sha256') {
         Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest (Get-AntiOSPinnedManifest) | Out-Null
     }
@@ -245,11 +227,8 @@ if ($Apply) {
         if ($taskWriteAttempted) {
             try {
                 $rollbackTask = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
-                $rollbackActions = if ($rollbackTask) { @($rollbackTask.Actions) } else { @() }
                 if ($rollbackTask -and
-                    ($rollbackActions.Count -ne 1 -or -not $rollbackActions[0].Execute -or
-                     [IO.Path]::GetFullPath([string]$rollbackActions[0].Execute) -ine
-                     [IO.Path]::GetFullPath($ManagedFresh))) {
+                    -not (Test-AntiOSRepairTask -Task $rollbackTask -ManagedExecutable $ManagedFresh)) {
                     throw 'Task ownership changed during repair; refusing rollback of a foreign task.'
                 }
                 if ($taskSnapshot) {
@@ -265,10 +244,7 @@ if ($Apply) {
             try {
                 $rollbackService = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction SilentlyContinue
                 if ($rollbackService) {
-                    $trustedImage = ('^\s*(?:"{0}"|{0})(?=\s|$)' -f [regex]::Escape($ManagedClamd))
-                    if ([string]$rollbackService.PathName -notmatch $trustedImage -or
-                        $rollbackService.ServiceType -ne 'Own Process' -or
-                        $rollbackService.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM')) {
+                    if (-not (Test-AntiOSRepairService -Service $rollbackService -ManagedExecutable $ManagedClamd)) {
                         throw 'Service ownership changed; refusing rollback of a foreign service.'
                     }
                     if ($serviceInstallAttempted -and -not $service) {
