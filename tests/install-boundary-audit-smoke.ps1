@@ -17,7 +17,7 @@ function Import-OneFunction([string]$Script, [string]$FunctionName) {
     }, $true))
     if ($matched.Count -ne 1) { throw "Expected exactly one $FunctionName function" }
     # Imported functions must outlive this helper's local function scope.
-    $definition = $matched[0].Extent.Text -replace '^function\\s+', 'function script:'
+    $definition = $matched[0].Extent.Text -replace '^function\s+', 'function script:'
     . ([scriptblock]::Create($definition))
 }
 
