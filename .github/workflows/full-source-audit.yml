@@ -69,6 +69,9 @@ jobs:
       - name: Official ClamAV archive SHA256 and installed receipt trust smoke
         shell: powershell
         run: ./tests/clamav-archive-trust-smoke.ps1
+      - name: ClamAV repair SCM/task ownership and postcondition behavioral smoke
+        shell: powershell
+        run: ./tests/clamav-repair-validation-smoke.ps1
 
   native-codeql:
     name: C/C++ CodeQL with pinned WDK native build
