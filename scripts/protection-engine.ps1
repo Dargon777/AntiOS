@@ -105,6 +105,36 @@ function Assert-ManagedClamdService {
     }
 }
 
+function Assert-FreshEngineInstallTargets {
+    # Run before preview and repeat *after UAC* immediately before writing.
+    # The destination folders and scheduler task must be newly owned, not
+    # pre-existing objects whose contents or configuration could be destroyed.
+    if (Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue) {
+        throw "A service named '$EngineServiceName' already exists. AntiOS will not replace an existing ClamAV service."
+    }
+    if (Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue) {
+        throw 'FreshClam updater task already exists; refusing to replace a potentially foreign scheduled task.'
+    }
+    foreach ($destination in @($InstallRoot, $DataRoot)) {
+        if (Test-Path -LiteralPath $destination) {
+            throw "Managed engine destination already exists: $destination"
+        }
+    }
+    if (Test-Path $AntiOSRegistry) {
+        $existingService = Get-ItemPropertyValue -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue
+        if ($existingService) {
+            throw 'Existing AntiOS engine registry binding found; use an explicit repair/uninstall workflow.'
+        }
+    }
+    if (Test-Path $ClamRegistry) {
+        $existingConf = Get-ItemPropertyValue -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
+        $existingData = Get-ItemPropertyValue -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
+        if ($existingConf -or $existingData) {
+            throw 'Existing machine-wide ClamAV ConfDir/DataDir registry configuration was found; refusing to overwrite another installation.'
+        }
+    }
+}
+
 if ($Uninstall) {
     if (-not $Apply) {
         Write-Output "Preview: stop/remove '$EngineServiceName', unregister '$UpdaterTaskName', remove AntiOS-owned ClamAV registry bindings and managed engine/data directories."
@@ -187,18 +217,7 @@ if ($TrustedArchivePath) {
 }
 $configSource = Get-ConfigSource
 
-if (Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue) {
-    throw "A service named '$EngineServiceName' already exists. AntiOS will not replace an existing ClamAV service."
-}
-if (Test-Path -LiteralPath $InstallRoot) { throw "Managed engine destination already exists: $InstallRoot" }
-if (Test-Path -LiteralPath $DataRoot) { throw "Managed engine data destination already exists: $DataRoot" }
-if (Test-Path $ClamRegistry) {
-    $existingConf = Get-ItemPropertyValue -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
-    $existingData = Get-ItemPropertyValue -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
-    if ($existingConf -or $existingData) {
-        throw 'Existing machine-wide ClamAV ConfDir/DataDir registry configuration was found; refusing to overwrite another installation.'
-    }
-}
+Assert-FreshEngineInstallTargets
 
 [pscustomobject]@{
     Source = $Source
@@ -218,12 +237,15 @@ if (-not $Apply) {
 }
 
 Assert-Administrator
+# Do not trust a pre-elevation dry-run: a directory or updater task may have
+# appeared while UAC was displayed or another installer was active.
+Assert-FreshEngineInstallTargets
 $createdInstall = $false
 $createdData = $false
 $serviceInstalled = $false
 $taskInstalled = $false
 try {
-    New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $InstallRoot -ErrorAction Stop | Out-Null
     $createdInstall = $true
     $engineAcl = New-Object Security.AccessControl.DirectorySecurity
     $engineAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)')
@@ -251,13 +273,20 @@ try {
         Assert-SignedPair $ManagedClamd $ManagedFresh | Out-Null
     }
 
-    New-Item -ItemType Directory -Path $ConfigRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $DatabaseRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $TempRoot -Force | Out-Null
+    # Create the machine-wide folder without -Force. Ownership is recorded
+    # as soon as creation succeeds, so even a later subfolder failure can be
+    # cleaned up. Harden the root ACL before creating its children.
+    if (Test-Path -LiteralPath $DataRoot) {
+        throw "Managed engine data destination appeared during installation: $DataRoot"
+    }
+    New-Item -ItemType Directory -Path $DataRoot -ErrorAction Stop | Out-Null
     $createdData = $true
     $dataAcl = New-Object Security.AccessControl.DirectorySecurity
     $dataAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)')
     Set-Acl -LiteralPath $DataRoot -AclObject $dataAcl
+    New-Item -ItemType Directory -Path $ConfigRoot -ErrorAction Stop | Out-Null
+    New-Item -ItemType Directory -Path $DatabaseRoot -ErrorAction Stop | Out-Null
+    New-Item -ItemType Directory -Path $TempRoot -ErrorAction Stop | Out-Null
 
     Copy-Item -LiteralPath (Join-Path $configSource 'clamd.conf.example') -Destination $ClamdConfig
     Copy-Item -LiteralPath (Join-Path $configSource 'freshclam.conf.example') -Destination $FreshConfig
@@ -295,7 +324,12 @@ try {
     $periodic = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(17) -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 3650)
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
-    Register-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -Force | Out-Null
+    # Installing a new engine must NEVER take ownership of someone else's
+    # root-scheduler task, even if it appeared after the preflight.
+    if (Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue) {
+        throw 'FreshClam updater task appeared during installation; refusing to overwrite it.'
+    }
+    Register-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -ErrorAction Stop | Out-Null
     $taskInstalled = $true
 
     Write-Output "AntiOS managed ClamAV is running as '$EngineServiceName'. FreshClam is scheduled and Guard can verify the loopback peer through SCM."
