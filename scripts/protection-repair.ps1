@@ -146,7 +146,6 @@ if ($Apply) {
         Export-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction Stop
     } else { $null }
     $originalServiceStart = if ($service) { [string]$service.StartMode } else { $null }
-    $originalServiceDescription = if ($service) { [string]$service.Description } else { $null }
     $serviceWasRunning = [bool]($service -and $service.State -eq 'Running')
     $originalServiceSddl = $null
     $sc = Join-Path $env:SystemRoot 'System32\sc.exe'
@@ -187,7 +186,11 @@ if ($Apply) {
     $servicePolicyWriteAttempted = $true
     & "$env:SystemRoot\System32\sc.exe" config $EngineServiceName start= auto | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure ClamD automatic startup.' }
-    & "$env:SystemRoot\System32\sc.exe" description $EngineServiceName 'AntiOS managed ClamAV scanning engine' | Out-Null
+    # Existing service descriptions are not relevant to readiness. Avoid
+    # changing unrelated metadata and making rollback harder than necessary.
+    if (-not $service) {
+        & "$env:SystemRoot\System32\sc.exe" description $EngineServiceName 'AntiOS managed ClamAV scanning engine' | Out-Null
+    }
     & "$env:SystemRoot\System32\sc.exe" sdset $EngineServiceName 'D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCLORC;;;BU)' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to harden the ClamD service ACL.' }
     $actions.Add('clamd-service-policy-reset')
@@ -264,8 +267,6 @@ if ($Apply) {
                         if ($LASTEXITCODE -ne 0) { throw 'Could not restore ClamD startup mode.' }
                         & $sc sdset $EngineServiceName $originalServiceSddl | Out-Null
                         if ($LASTEXITCODE -ne 0) { throw 'Could not restore ClamD service permissions.' }
-                        & $sc description $EngineServiceName $originalServiceDescription | Out-Null
-                        if ($LASTEXITCODE -ne 0) { throw 'Could not restore ClamD description.' }
                         if (-not $serviceWasRunning -and $rollbackService.State -eq 'Running') {
                             Stop-Service -Name $EngineServiceName -ErrorAction Stop
                         }
