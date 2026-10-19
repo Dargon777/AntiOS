@@ -142,6 +142,36 @@ if ($Apply) {
         Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest (Get-AntiOSPinnedManifest) | Out-Null
     }
 
+    # Snapshot recoverable state BEFORE the first mutation. A repair can fail
+    # after the service starts or the updater task is replaced; that must not
+    # leave a new half-configured SYSTEM component behind.
+    $oldEngineAcl = Get-Acl -LiteralPath $InstallRoot -ErrorAction Stop
+    $oldDataAcl = Get-Acl -LiteralPath $DataRoot -ErrorAction Stop
+    $taskSnapshot = if ($task) {
+        Export-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction Stop
+    } else { $null }
+    $originalServiceStart = if ($service) { [string]$service.StartMode } else { $null }
+    $originalServiceDescription = if ($service) { [string]$service.Description } else { $null }
+    $serviceWasRunning = [bool]($service -and $service.State -eq 'Running')
+    $originalServiceSddl = $null
+    $sc = Join-Path $env:SystemRoot 'System32\sc.exe'
+    if ($service) {
+        $sddlOutput = @(& $sc sdshow $EngineServiceName)
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to snapshot ClamD service security descriptor before repair.'
+        }
+        $originalServiceSddl = @($sddlOutput | Where-Object { $_ -match '^\s*D:' } |
+            Select-Object -First 1)
+        if ($originalServiceSddl.Count -ne 1) {
+            throw 'Could not parse the ClamD service security descriptor for rollback.'
+        }
+        $originalServiceSddl = $originalServiceSddl[0].Trim()
+    }
+    $serviceInstallAttempted = $false
+    $taskWriteAttempted = $false
+    $servicePolicyWriteAttempted = $false
+
+    try {
     $engineAcl = New-Object Security.AccessControl.DirectorySecurity
     $engineAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)')
     Set-Acl -LiteralPath $InstallRoot -AclObject $engineAcl
@@ -153,11 +183,13 @@ if ($Apply) {
     $actions.Add('data-acl-reset')
 
     if (-not $service) {
+        $serviceInstallAttempted = $true
         & $ManagedClamd --install-service
         if ($LASTEXITCODE -ne 0) { throw "clamd --install-service failed with exit code $LASTEXITCODE" }
         $actions.Add('clamd-service-installed')
     }
 
+    $servicePolicyWriteAttempted = $true
     & "$env:SystemRoot\System32\sc.exe" config $EngineServiceName start= auto | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure ClamD automatic startup.' }
     & "$env:SystemRoot\System32\sc.exe" description $EngineServiceName 'AntiOS managed ClamAV scanning engine' | Out-Null
@@ -172,6 +204,7 @@ if ($Apply) {
         $actions.Add('clamd-service-started')
     }
 
+    $taskWriteAttempted = $true
     New-UpdaterTask
     $actions.Add('freshclam-task-reset')
 
@@ -180,6 +213,108 @@ if ($Apply) {
         if ($LASTEXITCODE -ne 0) { throw "FreshClam update failed with exit code $LASTEXITCODE" }
         $actions.Add('freshclam-update')
     }
+
+    # Do not report repair success based solely on Start-Service returning.
+    # Re-query SCM and the scheduled task, since their state can change while
+    # commands execute. ClamAV VERSION/peer readiness is checked separately by
+    # the GUI/Guard and is not implied by this system-maintenance outcome.
+    $afterService = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction Stop
+    $expectedImage = ('^\s*(?:"{0}"|{0})(?=\s|$)' -f [regex]::Escape($ManagedClamd))
+    if (-not $afterService -or $afterService.State -ne 'Running' -or
+        $afterService.ServiceType -ne 'Own Process' -or
+        $afterService.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM') -or
+        [string]$afterService.PathName -notmatch $expectedImage -or
+        $afterService.StartMode -ne 'Auto') {
+        throw 'ClamD failed post-repair SCM identity/running-state verification.'
+    }
+    $afterTask = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction Stop
+    $afterActions = @($afterTask.Actions)
+    if ($afterActions.Count -ne 1 -or -not $afterActions[0].Execute -or
+        [IO.Path]::GetFullPath([string]$afterActions[0].Execute) -ine
+        [IO.Path]::GetFullPath($ManagedFresh)) {
+        throw 'FreshClam update task failed post-repair ownership verification.'
+    }
+    if ($engineTrust -eq 'pinned-archive-sha256') {
+        Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest (Get-AntiOSPinnedManifest) | Out-Null
+    }
+    $actions.Add('post-repair-service-and-task-verified')
+    } catch {
+        $originalFailure = $_
+        # Rollback is best effort. Never remove/modify a foreign service or a
+        # task whose executable no longer matches the AntiOS-owned path.
+        if ($taskWriteAttempted) {
+            try {
+                $rollbackTask = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+                $rollbackActions = if ($rollbackTask) { @($rollbackTask.Actions) } else { @() }
+                if ($rollbackTask -and
+                    ($rollbackActions.Count -ne 1 -or -not $rollbackActions[0].Execute -or
+                     [IO.Path]::GetFullPath([string]$rollbackActions[0].Execute) -ine
+                     [IO.Path]::GetFullPath($ManagedFresh))) {
+                    throw 'Task ownership changed during repair; refusing rollback of a foreign task.'
+                }
+                if ($taskSnapshot) {
+                    Register-ScheduledTask -TaskName $UpdaterTaskName -Xml $taskSnapshot -Force -ErrorAction Stop | Out-Null
+                } elseif ($rollbackTask) {
+                    Unregister-ScheduledTask -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction Stop
+                }
+            } catch {
+                Write-Warning "ClamAV updater-task rollback failed: $($_.Exception.Message)"
+            }
+        }
+        if ($serviceInstallAttempted -or $servicePolicyWriteAttempted) {
+            try {
+                $rollbackService = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction SilentlyContinue
+                if ($rollbackService) {
+                    $trustedImage = ('^\s*(?:"{0}"|{0})(?=\s|$)' -f [regex]::Escape($ManagedClamd))
+                    if ([string]$rollbackService.PathName -notmatch $trustedImage -or
+                        $rollbackService.ServiceType -ne 'Own Process' -or
+                        $rollbackService.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM')) {
+                        throw 'Service ownership changed; refusing rollback of a foreign service.'
+                    }
+                    if ($serviceInstallAttempted -and -not $service) {
+                        if ($rollbackService.State -ne 'Stopped') {
+                            Stop-Service -Name $EngineServiceName -Force -ErrorAction Stop
+                        }
+                        & $sc delete $EngineServiceName | Out-Null
+                        if ($LASTEXITCODE -ne 0) { throw 'Could not delete newly created ClamD service.' }
+                    } elseif ($service) {
+                        $oldStart = switch ($originalServiceStart) {
+                            'Auto' { 'auto' }
+                            'Manual' { 'demand' }
+                            'Disabled' { 'disabled' }
+                            default { throw 'Unknown previous ClamD service startup mode.' }
+                        }
+                        & $sc config $EngineServiceName start= $oldStart | Out-Null
+                        if ($LASTEXITCODE -ne 0) { throw 'Could not restore ClamD startup mode.' }
+                        & $sc sdset $EngineServiceName $originalServiceSddl | Out-Null
+                        if ($LASTEXITCODE -ne 0) { throw 'Could not restore ClamD service permissions.' }
+                        & $sc description $EngineServiceName $originalServiceDescription | Out-Null
+                        if ($LASTEXITCODE -ne 0) { throw 'Could not restore ClamD description.' }
+                        if (-not $serviceWasRunning -and $rollbackService.State -eq 'Running') {
+                            Stop-Service -Name $EngineServiceName -ErrorAction Stop
+                        }
+                    }
+                }
+            } catch {
+                Write-Warning "ClamAV service rollback failed: $($_.Exception.Message)"
+            }
+        }
+        foreach ($item in @(
+            @{ Path = $InstallRoot; Acl = $oldEngineAcl },
+            @{ Path = $DataRoot; Acl = $oldDataAcl }
+        )) {
+            try {
+                $current = Get-Item -LiteralPath $item.Path -Force -ErrorAction Stop
+                if ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                    throw 'Directory became a reparse point during repair.'
+                }
+                Set-Acl -LiteralPath $item.Path -AclObject $item.Acl -ErrorAction Stop
+            } catch {
+                Write-Warning "ClamAV directory ACL rollback failed: $($_.Exception.Message)"
+            }
+        }
+        throw $originalFailure
+    }
 }
 
 $result = [ordered]@{
@@ -187,6 +322,7 @@ $result = [ordered]@{
     kind = 'antios-protection-repair'
     dry_run = -not [bool]$Apply
     healthy_before = ($issues.Count -eq 0)
+    maintenance_verified_after = if ($Apply) { $true } else { $null }
     issues = @($issues)
     actions = @($actions)
     engine_root = $InstallRoot
