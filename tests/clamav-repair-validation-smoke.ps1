@@ -6,13 +6,13 @@ Set-StrictMode -Version Latest
 
 function Should-Be($Actual, $Expected, [string]$Description) {
     if ([bool]$Actual -ne [bool]$Expected) {
-        throw "FAILED $Description: expected $Expected, got $Actual"
+        throw "FAILED ${Description}: expected $Expected, got $Actual"
     }
 }
 function Should-Throw([scriptblock]$Block, [string]$Description) {
     $caught = $false
     try { & $Block | Out-Null } catch { $caught = $true }
-    if (-not $caught) { throw "FAILED $Description: expected explicit refusal" }
+    if (-not $caught) { throw "FAILED ${Description}: expected explicit refusal" }
 }
 
 $clamd = 'C:\Program Files\AntiOS\ClamAV\clamd.exe'
