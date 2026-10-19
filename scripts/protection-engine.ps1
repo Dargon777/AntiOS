@@ -117,7 +117,7 @@ if ($Uninstall) {
     if (Test-Path -LiteralPath $DataRoot) { Assert-NoReparseTree $DataRoot }
     $service = Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue
     if ($service) { Assert-ManagedClamdService }
-    $task = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+    $task = Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
     if ($task) {
         $actions = @($task.Actions)
         $managedFresh = Join-Path $InstallRoot 'freshclam.exe'
@@ -128,8 +128,8 @@ if ($Uninstall) {
         }
     }
     if ($task) {
-        Stop-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $UpdaterTaskName -Confirm:$false
+        Stop-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false
     }
     if ($service) {
         if ($service.Status -ne 'Stopped') {
@@ -295,13 +295,13 @@ try {
     $periodic = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(17) -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 3650)
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
-    Register-ScheduledTask -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -Force | Out-Null
+    Register-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -Force | Out-Null
     $taskInstalled = $true
 
     Write-Output "AntiOS managed ClamAV is running as '$EngineServiceName'. FreshClam is scheduled and Guard can verify the loopback peer through SCM."
 } catch {
     if ($taskInstalled) {
-        Unregister-ScheduledTask -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction SilentlyContinue
     }
     if ($serviceInstalled) {
         Stop-Service -Name $EngineServiceName -Force -ErrorAction SilentlyContinue
