@@ -242,8 +242,9 @@ Assert-Administrator
 Assert-FreshEngineInstallTargets
 $createdInstall = $false
 $createdData = $false
-$serviceInstalled = $false
-$taskInstalled = $false
+$serviceInstallAttempted = $false
+$taskInstallAttempted = $false
+$registryTouched = $false
 try {
     New-Item -ItemType Directory -Path $InstallRoot -ErrorAction Stop | Out-Null
     $createdInstall = $true
@@ -291,6 +292,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $configSource 'clamd.conf.example') -Destination $ClamdConfig
     Copy-Item -LiteralPath (Join-Path $configSource 'freshclam.conf.example') -Destination $FreshConfig
 
+    $registryTouched = $true
     New-Item -Path $ClamRegistry -Force | Out-Null
     New-ItemProperty -Path $ClamRegistry -Name ConfDir -PropertyType String -Value $ConfigRoot -Force | Out-Null
     New-ItemProperty -Path $ClamRegistry -Name DataDir -PropertyType String -Value $DatabaseRoot -Force | Out-Null
@@ -300,9 +302,9 @@ try {
     & $ManagedFresh "--config-file=$FreshConfig"
     if ($LASTEXITCODE -ne 0) { throw "Initial FreshClam update failed with exit code $LASTEXITCODE" }
 
+    $serviceInstallAttempted = $true
     & $ManagedClamd --install-service
     if ($LASTEXITCODE -ne 0) { throw "clamd --install-service failed with exit code $LASTEXITCODE" }
-    $serviceInstalled = $true
 
     $engine = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'"
     if (-not $engine -or $engine.ServiceType -ne 'Own Process' -or
@@ -329,27 +331,82 @@ try {
     if (Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue) {
         throw 'FreshClam updater task appeared during installation; refusing to overwrite it.'
     }
+    $taskInstallAttempted = $true
     Register-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -ErrorAction Stop | Out-Null
-    $taskInstalled = $true
 
     Write-Output "AntiOS managed ClamAV is running as '$EngineServiceName'. FreshClam is scheduled and Guard can verify the loopback peer through SCM."
 } catch {
-    if ($taskInstalled) {
-        Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    $installFailure = $_
+    $unsafeToRemovePayload = $false
+    $rollbackProblems = [Collections.Generic.List[string]]::new()
+
+    # Register-ScheduledTask and clamd --install-service may create an object
+    # *before returning an error*. Detect that possibility, but do not remove
+    # a colliding or replaced object unless ownership is still confirmed.
+    if ($taskInstallAttempted) {
+        try {
+            $existingTask = Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+            if ($existingTask) {
+                $actions = @($existingTask.Actions)
+                $actual = if ($actions.Count -eq 1 -and $actions[0].Execute) {
+                    [IO.Path]::GetFullPath([string]$actions[0].Execute)
+                } else { '' }
+                $principal = [string]$existingTask.Principal.UserId
+                if ($actual -ine [IO.Path]::GetFullPath($ManagedFresh) -or
+                    $principal -notin @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18')) {
+                    throw 'FreshClam updater task is not owned by this installation.'
+                }
+                Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction Stop
+            }
+        } catch {
+            $unsafeToRemovePayload = $true
+            $rollbackProblems.Add("Scheduled-task rollback: $($_.Exception.Message)")
+        }
     }
-    if ($serviceInstalled) {
-        Stop-Service -Name $EngineServiceName -Force -ErrorAction SilentlyContinue
-        # Never execute a possibly modified copy to delete its service.
-        & "$env:SystemRoot\System32\sc.exe" delete $EngineServiceName | Out-Null
+    if ($serviceInstallAttempted) {
+        try {
+            $existingService = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction SilentlyContinue
+            if ($existingService) {
+                Assert-ManagedClamdService
+                if ($existingService.State -ne 'Stopped') {
+                    Stop-Service -Name $EngineServiceName -Force -ErrorAction Stop
+                    (Get-Service -Name $EngineServiceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+                }
+                & "$env:SystemRoot\System32\sc.exe" delete $EngineServiceName | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Could not delete the verified ClamD service (sc.exe exit $LASTEXITCODE)"
+                }
+            }
+        } catch {
+            $unsafeToRemovePayload = $true
+            $rollbackProblems.Add("ClamD service rollback: $($_.Exception.Message)")
+        }
     }
-    Remove-OwnedRegistry
-    if ($createdInstall -and (Test-Path -LiteralPath $InstallRoot)) {
-        Assert-NoReparseTree $InstallRoot
-        Remove-Item -LiteralPath $InstallRoot -Recurse -Force
+
+    # If a service/task is still bound to these files, preserve them and the
+    # registry data; removing them could break the surviving SYSTEM component.
+    if (-not $unsafeToRemovePayload) {
+        if ($registryTouched) {
+            try { Remove-OwnedRegistry }
+            catch { $rollbackProblems.Add("Registry cleanup: $($_.Exception.Message)") }
+        }
+        foreach ($ownedRoot in @(
+            @{ Created = $createdData; Path = $DataRoot },
+            @{ Created = $createdInstall; Path = $InstallRoot }
+        )) {
+            if ($ownedRoot.Created -and (Test-Path -LiteralPath $ownedRoot.Path)) {
+                try {
+                    Assert-NoReparseTree $ownedRoot.Path
+                    Remove-Item -LiteralPath $ownedRoot.Path -Recurse -Force -ErrorAction Stop
+                } catch {
+                    $rollbackProblems.Add("Directory cleanup: $($_.Exception.Message)")
+                }
+            }
+        }
+    } else {
+        $rollbackProblems.Add('Keeping managed files and registry values because a service/task rollback could not be verified.')
     }
-    if ($createdData -and (Test-Path -LiteralPath $DataRoot)) {
-        Assert-NoReparseTree $DataRoot
-        Remove-Item -LiteralPath $DataRoot -Recurse -Force
-    }
-    throw
+    foreach ($problem in $rollbackProblems) { Write-Warning $problem }
+    # A cleanup error must not turn the true install failure into "success".
+    throw $installFailure
 }
