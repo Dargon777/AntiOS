@@ -72,6 +72,9 @@ jobs:
       - name: ClamAV repair SCM/task ownership and postcondition behavioral smoke
         shell: powershell
         run: ./tests/clamav-repair-validation-smoke.ps1
+      - name: Fresh install collisions and user autostart ownership tests
+        shell: powershell
+        run: ./tests/install-boundary-audit-smoke.ps1
 
   native-codeql:
     name: C/C++ CodeQL with pinned WDK native build
