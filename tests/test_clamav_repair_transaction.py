@@ -9,7 +9,7 @@ def test_repair_snapshots_before_mutating_acl_scm_or_task():
     for snapshot in (
         "Get-Acl -LiteralPath $InstallRoot",
         "Get-Acl -LiteralPath $DataRoot",
-        "Export-ScheduledTask -TaskName $UpdaterTaskName",
+        "Export-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName",
         "sdshow $EngineServiceName",
         "$serviceWasRunning",
     ):
@@ -22,8 +22,8 @@ def test_failed_repair_fails_closed_and_restores_owned_system_state():
     assert "$taskWriteAttempted = $true" in source
     assert "$serviceInstallAttempted = $true" in source
     assert "$servicePolicyWriteAttempted = $true" in source
-    assert "Register-ScheduledTask -TaskName $UpdaterTaskName -Xml $taskSnapshot -Force" in source
-    assert "Unregister-ScheduledTask -TaskName $UpdaterTaskName -Confirm:$false" in source
+    assert "Register-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName -Xml $taskSnapshot -Force" in source
+    assert "Unregister-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName -Confirm:$false" in source
     assert "sc.exe" in source
     assert "& $sc delete $EngineServiceName" in source
     assert "Set-Acl -LiteralPath $item.Path -AclObject $item.Acl" in source
