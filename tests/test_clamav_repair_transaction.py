@@ -54,3 +54,16 @@ def test_pure_predicates_are_packaged_and_run_in_windows_ci():
     assert "scripts\\clamav-repair-validation.ps1" in stage
     assert '"clamav-repair-validation.ps1"' in installer
     assert "tests/clamav-repair-validation-smoke.ps1" in workflow
+
+
+
+def test_task_scheduler_root_scope_is_consistent_across_install_and_repair():
+    for path in ("scripts/protection-engine.ps1", "scripts/protection-repair.ps1"):
+        script = (BASE / path).read_text("utf-8")
+        for command in ("Get-ScheduledTask", "Register-ScheduledTask",
+                        "Unregister-ScheduledTask"):
+            if command + " -TaskName $UpdaterTaskName" in script:
+                raise AssertionError(f"{path}: {command} can reach arbitrary task folders")
+            assert command + " -TaskPath '\\' -TaskName $UpdaterTaskName" in script
+    engine = (BASE / "scripts/protection-engine.ps1").read_text("utf-8")
+    assert "Stop-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName" in engine
