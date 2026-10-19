@@ -6,13 +6,13 @@ Set-StrictMode -Version Latest
 function Import-OneFunction([string]$Script, [string]$FunctionName) {
     $tokens = $null
     $parseErrors = $null
-    $ast = [Management.Automation.Language.Parser]::ParseFile(
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
         (Join-Path $PSScriptRoot $Script), [ref]$tokens, [ref]$parseErrors
     )
     if ($parseErrors.Count) { throw "Cannot parse fixture script: $Script" }
     $matched = @($ast.FindAll({
         param($node)
-        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
         $node.Name -eq $FunctionName
     }, $true))
     if ($matched.Count -ne 1) { throw "Expected exactly one $FunctionName function" }
