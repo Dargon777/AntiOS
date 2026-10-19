@@ -411,15 +411,19 @@ def _write_cleanup_manifest(folder: Path, payload: dict[str, Any]) -> None:
     # Never follow a pre-created manifest.json.tmp symlink into another file.
     # Repeated writes are atomic because os.replace() removes our own staged
     # file on success; a foreign/stale temp file is an explicit error.
+    owned_temp = False
     try:
         with temporary.open("x", encoding="utf-8") as stream:
+            owned_temp = True
             json.dump(payload, stream, indent=2, ensure_ascii=False)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, final)
     except (OSError, ValueError, TypeError):
-        # The fixed temporary name is owned by us only after successful "x"
-        # creation. Don't unlink someone else's pre-existing path on failure.
+        # Only unlink a temporary file created by this write. Do not delete
+        # a foreign path that made the exclusive "x" creation fail.
+        if owned_temp:
+            temporary.unlink(missing_ok=True)
         raise
 
 
