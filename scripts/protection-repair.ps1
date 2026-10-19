@@ -48,7 +48,7 @@ function New-UpdaterTask {
     $periodic = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(17) -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 3650)
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
-    Register-ScheduledTask -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -Force | Out-Null
+    Register-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -Force | Out-Null
 }
 
 $issues = [System.Collections.Generic.List[string]]::new()
@@ -92,7 +92,7 @@ if (-not $service) {
     if ($service.State -ne 'Running') { $issues.Add('clamd-service-not-running') }
 }
 
-$task = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+$task = Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
 if (-not $task) {
     $issues.Add('freshclam-task-missing')
 } else {
@@ -143,7 +143,7 @@ if ($Apply) {
     $oldEngineAcl = Get-Acl -LiteralPath $InstallRoot -ErrorAction Stop
     $oldDataAcl = Get-Acl -LiteralPath $DataRoot -ErrorAction Stop
     $taskSnapshot = if ($task) {
-        Export-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction Stop
+        Export-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction Stop
     } else { $null }
     $originalServiceStart = if ($service) { [string]$service.StartMode } else { $null }
     $serviceWasRunning = [bool]($service -and $service.State -eq 'Running')
@@ -217,7 +217,7 @@ if ($Apply) {
     # commands execute. ClamAV VERSION/peer readiness is checked separately by
     # the GUI/Guard and is not implied by this system-maintenance outcome.
     $afterService = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction Stop
-    $afterTask = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction Stop
+    $afterTask = Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction Stop
     Assert-AntiOSRepairPostconditions -Service $afterService -Task $afterTask -ManagedClamd $ManagedClamd -ManagedFresh $ManagedFresh
     if ($engineTrust -eq 'pinned-archive-sha256') {
         Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest (Get-AntiOSPinnedManifest) | Out-Null
@@ -229,15 +229,15 @@ if ($Apply) {
         # task whose executable no longer matches the AntiOS-owned path.
         if ($taskWriteAttempted) {
             try {
-                $rollbackTask = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+                $rollbackTask = Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
                 if ($rollbackTask -and
                     -not (Test-AntiOSRepairTask -Task $rollbackTask -ManagedExecutable $ManagedFresh)) {
                     throw 'Task ownership changed during repair; refusing rollback of a foreign task.'
                 }
                 if ($taskSnapshot) {
-                    Register-ScheduledTask -TaskName $UpdaterTaskName -Xml $taskSnapshot -Force -ErrorAction Stop | Out-Null
+                    Register-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Xml $taskSnapshot -Force -ErrorAction Stop | Out-Null
                 } elseif ($rollbackTask) {
-                    Unregister-ScheduledTask -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction Stop
+                    Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction Stop
                 }
             } catch {
                 Write-Warning "ClamAV updater-task rollback failed: $($_.Exception.Message)"
