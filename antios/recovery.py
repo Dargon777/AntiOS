@@ -175,6 +175,37 @@ def inventory(source: Path, *, cancelled: Callable[[], bool] | None = None,
             "bytes": sum(entry["size"] for entry in manifest["entries"])}
 
 
+def _local_original_path(original: str) -> Path:
+    """Return a local absolute original path and reject network/device namespaces.
+
+    Archive manifests are unauthenticated input. Inventory/export never dereference
+    original paths; check() may do so only after this validation succeeds for every
+    entry in the archive.
+    """
+    if os.name == "nt":
+        value = original.replace("/", "\\")
+        # UNC paths and Win32 device namespaces (\\?\, \\.\, named pipes)
+        # must never be reached from an untrusted recovery manifest.
+        if value.startswith("\\\\"):
+            raise ValueError("Original path must be a local drive path")
+        drive, tail = ntpath.splitdrive(value)
+        if not re.fullmatch(r"[A-Za-z]:", drive) or not tail.startswith("\\"):
+            raise ValueError("Original path must be a local absolute path")
+        for part in tail.split("\\"):
+            if not part:
+                continue
+            trimmed = part.rstrip(" .")
+            stem = trimmed.split(".", 1)[0].upper()
+            if (part in {".", ".."} or not trimmed or trimmed != part or ":" in part
+                    or stem in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+                    or re.fullmatch(r"(?:COM|LPT)[1-9¹²³]", stem)):
+                raise ValueError("Original path uses an unsafe Windows component")
+        return Path(original)
+    if not original.startswith("/") or original.startswith("//"):
+        raise ValueError("Original path must be a local absolute path")
+    return Path(original)
+
+
 def _export_name(original: str) -> str:
     """Use only a portable basename; untrusted directories never reach disk."""
     name = ntpath.basename(original.replace("/", "\\"))
@@ -189,6 +220,7 @@ def _export_name(original: str) -> str:
 
 
 def create(paths: list[Path], destination: Path, *, previous: Path | None = None,
+           expected_previous_id: str | None = None,
            cancelled: Callable[[], bool] | None = None,
            progress: Callable[[dict], None] | None = None) -> dict:
     """Create a new archive; extension preserves all previous baseline bytes."""
@@ -208,6 +240,8 @@ def create(paths: list[Path], destination: Path, *, previous: Path | None = None
                 if previous is not None:
                     with _open_archive(previous) as old:
                         manifest = _manifest(old)
+                        if expected_previous_id is not None and expected_previous_id != _manifest_id(manifest):
+                            raise ValueError("Previous archive changed since it was listed; open it again before extending")
                         if manifest.get("coverage") != "selected-files":
                             errors.append({"path": str(previous), "error": "Previous baseline had incomplete coverage"})
                         for index, entry in enumerate(manifest["entries"]):
@@ -226,7 +260,7 @@ def create(paths: list[Path], destination: Path, *, previous: Path | None = None
                     if absolute == destination or (previous and absolute == Path(os.path.abspath(previous))):
                         return
                     try:
-                        target = checked_path(absolute)
+                        target = checked_path(_local_original_path(str(absolute)))
                         info = target.lstat()
                     except (OSError, ValueError) as exc:
                         if len(errors) < 1000:
@@ -295,17 +329,26 @@ def check(source: Path, *, cancelled: Callable[[], bool] | None = None,
     results = []
     with _open_archive(source) as archive:
         manifest = _manifest(archive)
-        for index, entry in enumerate(manifest["entries"]):
+        entries = manifest["entries"]
+        # Phase 1: verify every saved blob before dereferencing any path supplied
+        # by the unauthenticated manifest. A corrupt later member must not allow
+        # an earlier member to trigger filesystem/network/device access.
+        for index, entry in enumerate(entries):
             _checkpoint(cancelled, progress, index, entry["path"])
             _content(archive, index, entry)
+        # Phase 2: validate the complete path set before the first original read.
+        originals = [_local_original_path(entry["path"]) for entry in entries]
+        for index, (entry, original) in enumerate(zip(entries, originals)):
+            _checkpoint(cancelled, progress, len(entries) + index, entry["path"])
             try:
-                content, _ = read_regular(Path(entry["path"]), MAX_FILE)
+                content, _ = read_regular(original, MAX_FILE)
                 state = "unchanged" if _digest(content) == entry["sha256"] else "changed"
             except FileNotFoundError:
                 state = "missing"
             except (OSError, ValueError):
                 state = "unreadable"
             results.append({"path": entry["path"], "state": state, "index": index})
+        _checkpoint(cancelled, progress, len(entries) * 2, "")
     return {"coverage": manifest.get("coverage", "unknown"), "files": results, "archive_id": _manifest_id(manifest),
             "note": "Changes are not malware verdicts; new files are not enumerated."}
 
@@ -395,6 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--system", action="store_true", help="Include seven Windows core files, not a system image")
         if action == "extend":
             command.add_argument("--previous", type=Path, required=True)
+            command.add_argument("--expected-previous-id", help="Reject a previous archive changed since it was listed")
     command = commands.add_parser("check")
     command.add_argument("archive", type=Path)
     command = commands.add_parser("list")
@@ -410,7 +454,8 @@ def main(argv: list[str] | None = None) -> int:
             paths = args.paths + (system_targets() if args.system else [])
             if not paths:
                 raise ValueError("Select at least one file/folder or --system")
-            result = create(paths, args.archive, previous=getattr(args, "previous", None))
+            result = create(paths, args.archive, previous=getattr(args, "previous", None),
+                            expected_previous_id=getattr(args, "expected_previous_id", None))
             code = 2 if result["errors"] else 0
         elif args.action == "check":
             result = check(args.archive)
