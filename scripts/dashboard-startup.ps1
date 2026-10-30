@@ -22,8 +22,29 @@ if ($identity.User.Value -eq 'S-1-5-18') {
 }
 $taskName = "AntiOS Control Center ($($identity.User.Value))"
 
+function Assert-ControlCenterTaskOwned($Task, [string]$ExpectedExecutable) {
+    if (-not $Task) { return }
+    $account = [string]$Task.Principal.UserId
+    if ($account -notin @($identity.Name, $identity.User.Value)) {
+        throw 'Existing Control Center task belongs to a different Windows user; refusing modification.'
+    }
+    $actions = @($Task.Actions)
+    if ($actions.Count -ne 1 -or -not $actions[0].Execute) {
+        throw 'Existing Control Center task contains unexpected actions.'
+    }
+    try {
+        $actual = [IO.Path]::GetFullPath([string]$actions[0].Execute)
+        $expected = [IO.Path]::GetFullPath($ExpectedExecutable)
+    } catch {
+        throw 'Existing Control Center task executable is invalid.'
+    }
+    if ($actual -ine $expected) {
+        throw 'Existing Control Center task points to another executable; refusing modification.'
+    }
+}
+
 function Get-ControlCenterTask {
-    Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
 }
 
 function Assert-ManagedUnsignedDashboard([string]$Path) {
@@ -76,8 +97,10 @@ if ($Uninstall) {
     }
     $task = Get-ControlCenterTask
     if ($task) {
-        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        $ownedExe = if ($Executable) { $Executable } else { Join-Path $ScriptDirectory 'AntiOS-GUI.exe' }
+        Assert-ControlCenterTaskOwned -Task $task -ExpectedExecutable $ownedExe
+        Stop-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false
     }
     return
 }
@@ -128,6 +151,11 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
 $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Starts the AntiOS Control Center in the notification area at user logon. Resident Guard protection is managed separately.' -Force | Out-Null
+# A task with the same SID/name is not automatically ours. Check both the
+# configured principal and exact executable before overwriting any task.
+$existing = Get-ControlCenterTask
+if ($existing) { Assert-ControlCenterTaskOwned -Task $existing -ExpectedExecutable $exe }
+
+Register-ScheduledTask -TaskPath '\' -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Starts the AntiOS Control Center in the notification area at user logon. Resident Guard protection is managed separately.' -Force | Out-Null
 
 Write-Output "Enabled '$taskName'. AntiOS will start in the notification area at the next logon."
