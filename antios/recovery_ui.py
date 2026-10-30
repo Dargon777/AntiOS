@@ -204,7 +204,9 @@ class RecoveryWindow:
                                           initialfile="AntiOS-baseline.zip", filetypes=[("AntiOS backup", "*.zip")])
         if path:
             previous = self.archive if extend else None
-            self.start("create", lambda **kw: recovery.create(paths, Path(path), previous=previous, **kw))
+            expected_previous_id = self.archive_id if extend else None
+            self.start("create", lambda **kw: recovery.create(
+                paths, Path(path), previous=previous, expected_previous_id=expected_previous_id, **kw))
 
     def check(self):
         if self.archive:
