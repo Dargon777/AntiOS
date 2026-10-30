@@ -2,7 +2,7 @@ import hashlib
 
 import pytest
 
-from antios import updater
+from antios import __version__, updater
 
 
 TRUSTED_CERT = "A" * 40
@@ -10,22 +10,32 @@ OTHER_CERT = "B" * 40
 
 
 def test_latest_alpha_selects_highest_non_draft(monkeypatch):
+    current_alpha = int(__version__.split("a", 1)[1])
+    next_alpha = current_alpha + 1
     monkeypatch.setattr(updater, "_request_json", lambda _url: [
         {"tag_name": "v2.0.0-alpha.14", "draft": False, "assets": []},
-        {"tag_name": "v2.0.0-alpha.99", "draft": True, "assets": []},
+        {"tag_name": f"v2.0.0-alpha.{next_alpha + 100}", "draft": True, "assets": []},
         {
-            "tag_name": "v2.0.0-alpha.28",
+            "tag_name": f"v2.0.0-alpha.{next_alpha}",
             "draft": False,
             "published_at": "2026-10-04T00:00:00Z",
             "html_url": "https://example.invalid/release",
             "assets": [
-                {"name": "AntiOS-Setup.exe", "browser_download_url": "https://github.com/Dargon777/AntiOS/releases/download/v2.0.0-alpha.28/AntiOS-Setup.exe", "size": 5, "digest": None},
+                {
+                    "name": "AntiOS-Setup.exe",
+                    "browser_download_url": (
+                        "https://github.com/Dargon777/AntiOS/releases/download/"
+                        f"v2.0.0-alpha.{next_alpha}/AntiOS-Setup.exe"
+                    ),
+                    "size": 5,
+                    "digest": None,
+                },
             ],
         },
     ])
     result = updater.latest_alpha()
-    assert result["latest_alpha"] == 28
-    assert result["latest_version"] == "2.0.0a28"
+    assert result["latest_alpha"] == next_alpha
+    assert result["latest_version"] == f"2.0.0a{next_alpha}"
     assert result["update_available"] is True
 
 
