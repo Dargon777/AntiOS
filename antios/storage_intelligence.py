@@ -291,10 +291,18 @@ def insights_for_scan(scan: dict[str, Any], *, journal_path: str | Path | None =
     for path, kinds in categories.items():
         choices = [prefs.get(k, {}).get("choice", "normal") for k in kinds]
         hidden = bool(choices) and all(choice == "hide" for choice in choices)
-        preferred = "prefer" in choices
+        learned = any(
+            prefs.get(k, {}).get("choice") == "normal"
+            and prefs.get(k, {}).get("confirmed_deletions", 0) >= 3
+            for k in kinds
+        )
+        preferred = "prefer" in choices or learned
         result["recommendations"].append({
             "path": path, "categories": kinds,
             "priority": "hidden-by-user" if hidden else "preferred" if preferred else "review",
+            "priority_reason": ("explicit-user-choice" if "prefer" in choices else
+                                "repeated-confirmed-cleanups" if learned else
+                                "not-classified-as-unused"),
             "copy_evidence": evidence.get(path, {}).get("status", "not-checked"),
         })
     result["recommendations"].sort(

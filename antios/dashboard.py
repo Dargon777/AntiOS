@@ -2096,6 +2096,10 @@ class Dashboard:
                  + (" (рост)" if trend > 0 and self.language == "ru" else
                     " (снижение)" if trend < 0 and self.language == "ru" else ""))
             )
+            forecast = history.get("predicted_bytes_30_days")
+            if forecast is not None:
+                note += (" · через 30 дн. ~" if self.language == "ru"
+                         else " · 30-day folder estimate ~") + format_bytes(forecast)
             self.cleanup_intelligence_label.configure(text=note, fg=THEME["muted"])
         existing = self.cleanup_tree.get_children()
         if existing:

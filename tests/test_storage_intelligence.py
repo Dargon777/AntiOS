@@ -101,3 +101,17 @@ def test_history_can_be_disabled_and_cleared_by_owner(tmp_path):
         assert not journal.timeline(tmp_path)
         journal.set_history_enabled(True)
         assert journal.history_enabled()
+
+
+def test_repeated_confirmed_deletions_raise_recommendation_without_auto_delete(tmp_path):
+    root = tmp_path / "folder"
+    root.mkdir()
+    scanned = _scan(root)
+    db = tmp_path / "history.sqlite3"
+    with StorageJournal(db) as journal:
+        journal.confirmed_cleanup(["archive", "archive", "archive"])
+    recommendations = insights_for_scan(scanned, journal_path=db)["recommendations"]
+    archive = next(row for row in recommendations if row["path"] == str(root / "alone.iso"))
+    assert archive["priority"] == "preferred"
+    assert archive["priority_reason"] == "repeated-confirmed-cleanups"
+    assert (root / "alone.iso").exists()
