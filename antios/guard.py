@@ -758,6 +758,10 @@ def main(argv=None):
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         state_dir = getattr(args, "state_dir", None) if "args" in locals() else None
         _write_startup_error(state_dir, exc)
+        from .diagnostics import classify_error, record_event
+        record_event("Guard", "ERROR", str(exc),
+                     code=classify_error(str(exc), component="Guard"),
+                     context={"operation": getattr(args, "command", "run")})
         print(f'AntiOS Guard: {exc}', file=sys.stderr)
         return 2
     finally:

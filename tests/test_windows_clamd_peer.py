@@ -63,3 +63,32 @@ def test_exact_loopback_connection_is_bound_to_server_pid():
     finally:
         client.close()
         listener.close()
+
+
+
+@pytest.mark.parametrize("image", [
+    r'"C:\Program Files\AntiOS\ClamAV\clamd.exe"',
+    r'"C:\Program Files\AntiOS\ClamAV\clamd.exe" --config-file="C:\ProgramData\AntiOS-ClamAV\config\clamd.conf"',
+    r'C:\Program Files\AntiOS\ClamAV\clamd.exe --service',
+    r'c:\program files\ANTIOS\clamav\CLAMD.EXE',
+])
+def test_scm_image_is_exact_protected_managed_binary(image):
+    from antios.windows_clamd_peer import matches_managed_clamd_image
+
+    assert matches_managed_clamd_image(image, r"C:\Program Files")
+
+
+@pytest.mark.parametrize("image", [
+    r'C:\Program Files\OtherApp\clamd.exe',
+    r'C:\Program Files\AntiOS\ClamAV\clamd.exe-malicious --service',
+    r'"C:\Program Files\AntiOS\ClamAV\clamd.exe-malicious"',
+    r'"C:\Program Files\AntiOS\ClamAV\clamd.exe"evil',
+    r'cmd.exe /C "C:\Program Files\AntiOS\ClamAV\clamd.exe"',
+    r' C:\Program Files\AntiOS\ClamAV\clamd.exe.evil',
+    r'\\attacker\share\clamd.exe',
+    "",
+])
+def test_scm_image_rejects_lookalike_or_foreign_binaries(image):
+    from antios.windows_clamd_peer import matches_managed_clamd_image
+
+    assert not matches_managed_clamd_image(image, r"C:\Program Files")

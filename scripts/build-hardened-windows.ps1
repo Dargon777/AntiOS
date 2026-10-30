@@ -14,7 +14,12 @@ if ($version -notmatch '^2\.0\.0a(\d+)$') {
 $alpha = [int]$Matches[1]
 $numericVersion = "2.0.$alpha.0"
 
-$outputRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
+# Restrict recursive cleanup to the dedicated build output folder.
+$outputName = $OutputDirectory -replace '^[.][\\/]', ''
+if ($outputName -cnotmatch '^hardened-dist(?:-[A-Za-z0-9_-]{1,40})?$') {
+    throw 'Hardened output must be hardened-dist or hardened-dist-SUFFIX under the repository.'
+}
+$outputRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot $outputName))
 $workRoot = Join-Path $outputRoot "_nuitka"
 $icon = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "build\icons\app_main.ico"))
 
@@ -22,7 +27,14 @@ if (-not (Test-Path -LiteralPath $icon -PathType Leaf)) {
     throw "Build AntiOS icons first. Missing: $icon"
 }
 
-Remove-Item -Recurse -Force $outputRoot -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $outputRoot) {
+    $tree = @(Get-Item -LiteralPath $outputRoot -Force) +
+            @(Get-ChildItem -LiteralPath $outputRoot -Force -Recurse)
+    if (@($tree | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
+        throw 'Hardened output contains a junction/symlink; refusing recursive cleanup.'
+    }
+}
+Remove-Item -LiteralPath $outputRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $workRoot | Out-Null
 
 function Build-HardenedProgram {

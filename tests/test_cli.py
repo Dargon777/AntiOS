@@ -39,7 +39,12 @@ def test_config_init_and_show(capsys, tmp_path):
     assert payload["config"]["general"]["computer_name_prefix"] == "LAB"
 
 
-def test_log_file_records_command_not_identity_values(capsys, tmp_path):
+def test_log_file_records_command_not_identity_values(capsys, tmp_path, monkeypatch):
+    # Windows CI runs as an administrator; the regular user's logging
+    # contract must be tested as non-elevated instead of asking an elevated
+    # process to write into a user-controlled temporary directory.
+    from antios import logging_utils
+    monkeypatch.setattr(logging_utils, "_privileged_windows_context", lambda: False)
     log = tmp_path / "antios.log"
     secret_marker = "SHOULD-NOT-APPEAR"
 

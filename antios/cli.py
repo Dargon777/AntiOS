@@ -646,6 +646,16 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     except (OSError, RuntimeError, PermissionError, ValueError) as exc:
+        from .diagnostics import classify_error, record_event
+        operation = str(getattr(args, "command", "cli") or "cli")
+        component = (
+            "ClamAV" if operation.startswith("protection") else
+            "Scanner" if operation == "virus-scan" else
+            "Updater" if operation == "update" else "System"
+        )
+        record_event(component, "ERROR", str(exc),
+                     code=classify_error(str(exc), component=component),
+                     context={"operation": operation})
         try:
             logger.error("command failed: %s", exc)
         except UnboundLocalError:

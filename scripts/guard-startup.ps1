@@ -33,6 +33,29 @@ if ($RootsJson) {
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $taskName = "AntiOS Guard ($($identity.User.Value))"
 
+function Assert-GuardTaskOwned($Task, [string]$ExpectedExecutable) {
+    if (-not $Task) { return }
+    $account = [string]$Task.Principal.UserId
+    if ($account -in @('', $null) -or
+        $account -inotmatch '^.+$' -or
+        $account -notin @($identity.Name, $identity.User.Value)) {
+        throw 'Existing Guard task belongs to a different Windows user; refusing modification.'
+    }
+    $actions = @($Task.Actions)
+    if ($actions.Count -ne 1 -or -not $actions[0].Execute) {
+        throw 'Existing Guard task has unexpected actions; refusing modification.'
+    }
+    try {
+        $actual = [IO.Path]::GetFullPath([string]$actions[0].Execute)
+        $expected = [IO.Path]::GetFullPath($ExpectedExecutable)
+    } catch {
+        throw 'Existing Guard task has an invalid executable path.'
+    }
+    if ($actual -ine $expected) {
+        throw 'Existing Guard task points to another executable; refusing modification.'
+    }
+}
+
 function Stop-ManagedGuardProcess([string]$Path) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
     $expected = [IO.Path]::GetFullPath($Path)
@@ -58,12 +81,13 @@ if ($Uninstall) {
         Write-Output "Preview: stop and unregister task '$taskName'; preserve history and quarantine."
         return
     }
-    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($task) {
-        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-    }
     $uninstallExe = if ($Executable) { $Executable } else { Join-Path $ScriptDirectory 'AntiOS-Guard.exe' }
+    $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task) {
+        Assert-GuardTaskOwned -Task $task -ExpectedExecutable $uninstallExe
+        Stop-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false
+    }
     Stop-ManagedGuardProcess $uninstallExe
     return
 }
@@ -150,6 +174,10 @@ if ($EngineServiceName) {
     }
 }
 
+# Check the existing task before rewriting policy files or stopping anything.
+$existing = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+if ($existing) { Assert-GuardTaskOwned -Task $existing -ExpectedExecutable $exe }
+
 New-Item -ItemType Directory -Path $folder -Force | Out-Null
 $current = Get-Item -LiteralPath $folder -Force
 while ($current) {
@@ -181,13 +209,14 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -Re
 
 # Reconfiguring resident protection must never leave an old task instance
 # holding guard.lock. Stop the existing task first, then replace its definition.
-$existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$existing = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existing) {
-    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Assert-GuardTaskOwned -Task $existing -ExpectedExecutable $exe
+    Stop-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
     $state = $existing.State
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Milliseconds 100
-        $currentTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        $currentTask = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
         $state = if ($currentTask) { $currentTask.State } else { $null }
         if ($state -ne 'Running') { break }
     }
@@ -201,22 +230,22 @@ if ($existing) {
 # managed Guard executable, so a stale lock cannot block the replacement.
 Stop-ManagedGuardProcess $exe
 
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AntiOS selected-folder post-write monitoring with trusted ClamD binding; no pre-execution blocking.' -Force | Out-Null
-Start-ScheduledTask -TaskName $taskName
+Register-ScheduledTask -TaskPath '\' -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AntiOS selected-folder post-write monitoring with trusted ClamD binding; no pre-execution blocking.' -Force | Out-Null
+Start-ScheduledTask -TaskPath '\' -TaskName $taskName
 
 # The Guard is long-lived. If the task immediately returns to Ready, capture the
 # Task Scheduler result now instead of leaving the GUI with a stale heartbeat.
 $observedRunning = $false
 for ($attempt = 0; $attempt -lt 30; $attempt++) {
     Start-Sleep -Milliseconds 200
-    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
     if ($task -and $task.State -eq 'Running') {
         $observedRunning = $true
         break
     }
 }
 if (-not $observedRunning) {
-    $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+    $info = Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
     $last = if ($info) { $info.LastTaskResult } else { '(unavailable)' }
     throw "Resident Guard task exited during startup. LastTaskResult=$last"
 }
