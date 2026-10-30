@@ -90,6 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
+    recovery = sub.add_parser("recovery", help="Create, extend, check and export bounded file backups.")
+    recovery.add_argument("recovery_args", nargs=argparse.REMAINDER)
     guard = sub.add_parser("guard", help="Resident post-write scanning, status and stop control.")
     guard.add_argument("guard_args", nargs=argparse.REMAINDER,
                        help="run ROOT, status, stop or history; use run --help for options")
@@ -309,6 +311,9 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args.config) if args.config else default_config_path()
 
     try:
+        if args.command == "recovery":
+            from .recovery import main as recovery_main
+            return recovery_main(args.recovery_args)
         if args.command == "guard":
             from .guard import main as guard_main
             return guard_main(args.guard_args)

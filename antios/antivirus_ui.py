@@ -228,6 +228,14 @@ class AntivirusPanel:
         )
         self.engine_chip.pack(pady=(8, 16))
 
+        from .recovery_ui import open_recovery
+        self.app._button(
+            score,
+            "Резервные копии" if self.app.language == "ru" else "File recovery",
+            lambda: open_recovery(self.app, self.palette),
+            kind="secondary",
+        ).pack(padx=10, pady=(0, 12))
+
         # Four truthful protection component cards.
         components = tk.Frame(outer, bg=self.palette["bg"])
         components.grid(row=1, column=0, sticky="ew", pady=(0, 12))

@@ -1,43 +1,79 @@
-# AntiOS v2.0.0 alpha 27
+# AntiOS v2.0.0 alpha 28
 
-Alpha 27 adds a proper Windows logon experience for the AntiOS Control Center and introduces the first validated hardened Windows build path.
+Alpha 28 rolls the recent security, diagnostics and recovery work into one public
+Windows alpha release.
 
-## Control Center autostart
+## File recovery
 
-AntiOS can now start with Windows without opening a normal window on the desktop.
+AntiOS now includes opt-in bounded file baselines from the Antivirus page and CLI.
 
-- a dedicated **AntiOS Control Center** Scheduled Task starts `AntiOS-GUI.exe --background` at the current user's logon;
-- the task runs separately from Resident Guard, so disabling the Control Center startup does **not** disable resident protection;
-- fresh installer deployments enable Control Center startup by default;
-- upgrades preserve the user's existing choice instead of forcing startup back on;
-- Settings now exposes **Start AntiOS with Windows (notification area)**;
-- disabling the option unregisters only the Control Center task;
-- uninstall removes the task cleanly;
-- background startup hides the root window before UI construction, avoiding a visible startup flash;
-- if the notification-area component cannot start, AntiOS falls back to showing the normal window instead of disappearing.
+- save selected files with SHA-256 integrity metadata;
+- inspect and compare saved files with current originals;
+- recover all or selected verified copies into a fresh directory;
+- reject malformed ZIP data, invalid Unicode and unsafe network/device manifest paths;
+- verify every stored blob before reading original paths;
+- bind baseline extension/recovery selections to the manifest that was previously shown.
 
-Unsigned alpha builds may register startup only when the executable is the machine-installed AntiOS-GUI.exe in a protected install directory. Signed builds use normal Authenticode validation.
+This is file backup and integrity checking, not a full Windows rollback and not a
+malware-clean verdict. Archives are currently unencrypted and should be kept on
+appropriately protected or offline storage.
 
-## Code hardening groundwork
+## Diagnostics Center
 
-A parallel Windows build now compiles AntiOS CLI, GUI and Resident Guard with Nuitka standalone, MSVC and LTO.
+The desktop app now includes a local Diagnostics Center for protection and runtime
+events.
 
-CI verifies that the hardened binaries:
+- bounded JSONL event history with rollover;
+- severity/component/search filters;
+- human-readable diagnosis alongside technical details;
+- privacy redaction at ingestion and stronger redaction in support exports;
+- reviewed ZIP support export without quarantine contents, malware samples or user
+  configuration files.
 
-- build successfully on Windows;
-- start the CLI, GUI and Guard;
-- contain no loose AntiOS `.py` or `.pyc` files;
-- retain Windows metadata and package resources;
-- produce a SHA-256 hardening manifest.
+## Managed ClamAV trust and repair
 
-This hardened path is intentionally kept parallel to the established release pipeline for now. It raises reverse-engineering cost but is not described as encryption or absolute secrecy.
+Managed ClamAV bootstrap and maintenance were hardened substantially.
 
-## Open-core boundary
+- the official ClamAV 1.5.4 Windows x64 ZIP is pinned by exact URL, size and SHA-256;
+- extracted `clamd.exe` and `freshclam.exe` are attested against the trusted archive;
+- installed engine trust metadata is rechecked before maintenance;
+- repair snapshots owned service/task/ACL state and attempts best-effort rollback on
+  later failure;
+- postconditions re-check service identity, startup state and updater task identity;
+- ambiguous or foreign ClamAV services/tasks fail closed instead of being replaced.
 
-The public AntiOS v2 tree remains Apache-2.0. Already published source cannot be made secret retroactively.
+## Installer and system-change hardening
 
-Future proprietary technology such as CBF scoring, Business/EDR fleet correlation, commercial policy and cloud-side logic should live outside the public source tree behind a narrow signed interface.
+- startup task changes verify AntiOS ownership before replacing/removing tasks;
+- ClamAV fresh install refuses colliding services, tasks and machine-wide bindings;
+- partial install failures preserve or safely roll back owned resources when possible;
+- Storage Cleanup backup files use exclusive creation and fsync before destructive
+  follow-up actions;
+- full-source audit tooling now checks tracked files, parsable formats, PowerShell
+  grammar and high-risk source contracts in CI.
 
-## Compatibility
+## Public site
 
-Windows 10 22H2 x64 (build 19045) and newer Windows 11 builds remain the supported desktop target.
+The GitHub Pages site was redesigned for public alpha distribution with EN/RU
+content, transparent capability/limitation messaging and release-aware download
+buttons that follow the newest published GitHub release.
+
+## Validation
+
+The merged feature/audit heads passed their GitHub Actions suites before alpha 28
+integration, including Windows portable builds, hardened Windows builds, Store MSIX,
+CodeQL where applicable, native-boundary tests and the full-source audit.
+
+The alpha 28 integration branch is expected to pass the same release metadata,
+Python and Windows packaging gates before publication.
+
+## Important alpha limitations
+
+AntiOS remains pre-release software. It does not claim certified Windows primary
+antivirus registration, ELAM/PPL status or complete pre-execution blocking. Resident
+Guard remains primarily post-write protection; the native filter path is still
+experimental. Real-machine Windows 10/11 acceptance and hostile failure-injection
+coverage remain separate release-hardening work.
+
+Windows 10 22H2 x64 (build 19045) and newer Windows 11 builds remain the supported
+desktop target.

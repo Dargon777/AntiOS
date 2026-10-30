@@ -6,6 +6,28 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a28] - 2026-10-30
+
+- Added bounded file baseline capture, archive inspection, change comparison and
+  selected-file recovery through the CLI and Russian/English desktop UI.
+- Hardened recovery against corrupt compressed ZIP data, invalid Unicode,
+  network/device manifest paths and stale baseline replacement between listing
+  and extension.
+- Added the Diagnostics Center with a privacy-redacted local event journal,
+  actionable protection errors and reviewed support export.
+- Added repository-wide source auditing and stronger Windows PowerShell/source
+  contracts for high-risk install, update and protection paths.
+- Hardened managed ClamAV bootstrap around the pinned official 1.5.4 Windows x64
+  archive, installed executable attestation and fail-closed repair.
+- Added safer ClamAV maintenance rollback/postcondition checks and stronger
+  ownership checks for scheduled tasks, services and startup tasks.
+- Hardened Storage Cleanup backup writes against link/race substitution.
+- Published the redesigned bilingual AntiOS public site with release-aware
+  downloads and transparency links.
+- Synchronized Python, Windows installer, Store/MSIX and executable metadata to
+  alpha 28.
+
+
 ## [2.0.0a19] - 2026-10-04
 
 - Rebuilt Antivirus around protection state, scanning, Resident Guard, results
