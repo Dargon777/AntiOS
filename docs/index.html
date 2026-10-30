@@ -1,130 +1,304 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="AntiOS — on-demand antivirus scanning, encrypted quarantine and Windows health diagnostics.">
-  <title>AntiOS — Windows Health, Privacy & Diagnostics</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0b0d12;
-      --panel: #141821;
-      --panel2: #1a1f2b;
-      --text: #f4f6fb;
-      --muted: #aab3c4;
-      --line: #2a3140;
-      --accent: #79a7ff;
-      --ok: #6ee7a8;
-      --review: #ffd166;
-      --warn: #ff7b7b;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: radial-gradient(circle at 20% 0%, #172036 0, var(--bg) 40%);
-      color: var(--text);
-      font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
-    }
-    a { color: inherit; }
-    .wrap { max-width: 1120px; margin: auto; padding: 28px; }
-    nav { display: flex; align-items: center; gap: 18px; }
-    nav strong { font-size: 22px; margin-right: auto; }
-    nav a { color: var(--muted); text-decoration: none; }
-    .hero { padding: 96px 0 70px; display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; }
-    h1 { font-size: clamp(44px, 7vw, 76px); line-height: .98; margin: 0 0 22px; letter-spacing: -2px; }
-    h2 { font-size: 34px; margin-top: 0; }
-    .lead { color: var(--muted); font-size: 21px; max-width: 660px; }
-    .buttons { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
-    .button { display: inline-block; text-decoration: none; padding: 13px 18px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); font-weight: 700; }
-    .button.primary { background: var(--accent); color: #08101f; border-color: transparent; }
-    .dash { background: rgba(20,24,33,.9); border: 1px solid var(--line); border-radius: 18px; padding: 22px; box-shadow: 0 28px 90px rgba(0,0,0,.35); }
-    .dash h3 { margin: 0 0 4px; font-size: 22px; }
-    .dash p { color: var(--muted); margin-top: 0; }
-    .row { display: grid; grid-template-columns: 86px 170px 1fr; gap: 10px; padding: 12px 0; border-top: 1px solid var(--line); }
-    .status { font-weight: 800; }
-    .ok { color: var(--ok); }
-    .review { color: var(--review); }
-    .warn { color: var(--warn); }
-    section { padding: 62px 0; border-top: 1px solid var(--line); }
-    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
-    .card h3 { margin-top: 0; }
-    .card p { color: var(--muted); margin-bottom: 0; }
-    .privacy { background: var(--panel2); border-radius: 16px; padding: 26px; }
-    footer { color: var(--muted); padding: 32px 0 60px; }
-    code { background: #0e1118; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
-    @media (max-width: 820px) {
-      .hero, .grid { grid-template-columns: 1fr; }
-      .hero { padding-top: 64px; }
-      .row { grid-template-columns: 74px 130px 1fr; font-size: 14px; }
-      nav a.hide-small { display: none; }
-    }
-  </style>
+  <meta name="description" content="AntiOS — open-source Windows security, antivirus, diagnostics and privacy tooling.">
+  <meta name="theme-color" content="#0b0d10">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://raw.githubusercontent.com data:; connect-src https://api.github.com; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests">
+  <meta property="og:title" content="AntiOS — Windows security you can inspect">
+  <meta property="og:description" content="Open-source Windows security tooling with ClamAV, Resident Guard, quarantine, diagnostics and no automatic telemetry.">
+  <meta property="og:type" content="website">
+  <title>AntiOS — Windows security you can inspect</title>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div class="wrap">
-    <nav>
-      <strong>AntiOS</strong>
-      <a class="hide-small" href="https://github.com/Dargon777/AntiOS">Source</a>
-      <a class="hide-small" href="https://github.com/Dargon777/AntiOS/issues">Feedback</a>
-      <a href="https://github.com/Dargon777/AntiOS/releases">Releases</a>
-    </nav>
+  <div class="noise" aria-hidden="true"></div>
 
-    <main>
-      <div class="hero">
-        <div>
-          <h1>Know what needs attention on your Windows PC.</h1>
-          <p class="lead">AntiOS is a free, open-source Windows diagnostics dashboard with on-demand antivirus scanning and encrypted quarantine. Check selected files through your installed Windows antivirus provider, inspect detections and review common security and system signals.</p>
-          <div class="buttons">
-            <a class="button primary" href="https://github.com/Dargon777/AntiOS/releases">Download for Windows</a>
-            <a class="button" href="https://github.com/Dargon777/AntiOS">View source</a>
-          </div>
-          <p class="lead" style="font-size:15px;margin-top:18px">Apache-2.0 · No automatic telemetry · On-demand scanning · Reversible quarantine</p>
+  <header class="site-header">
+    <div class="shell nav">
+      <a class="brand" href="#top" aria-label="AntiOS home">
+        <img src="https://raw.githubusercontent.com/Dargon777/AntiOS/master/antios/assets/icons/app_main.png" alt="" width="34" height="34">
+        <span>AntiOS</span>
+        <span class="alpha-pill">ALPHA</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#protection" data-en="Protection" data-ru="Защита">Protection</a>
+        <a href="#trust" data-en="Transparency" data-ru="Прозрачность">Transparency</a>
+        <a href="#alpha" data-en="Alpha status" data-ru="Статус alpha">Alpha status</a>
+        <a href="https://github.com/Dargon777/AntiOS" rel="noreferrer">GitHub</a>
+      </nav>
+
+      <button class="lang-button" id="langButton" type="button" aria-label="Switch language">RU</button>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero shell">
+      <div class="hero-copy">
+        <div class="eyebrow">
+          <span class="pulse-dot"></span>
+          <span id="releaseLabel" data-en="Public alpha · latest release" data-ru="Публичная alpha · свежий релиз">Public alpha · latest release</span>
         </div>
 
-        <div class="dash" aria-label="Example AntiOS dashboard">
-          <h3>Your PC looks okay</h3>
-          <p>5 OK · 2 to review · 0 warnings</p>
-          <div class="row"><span class="status ok">OK</span><strong>Defender</strong><span>Real-time protection is active</span></div>
-          <div class="row"><span class="status ok">OK</span><strong>Secure Boot</strong><span>Enabled</span></div>
-          <div class="row"><span class="status ok">OK</span><strong>TPM</strong><span>Present and ready</span></div>
-          <div class="row"><span class="status review">Review</span><strong>Startup apps</strong><span>18 common startup entries found</span></div>
-          <div class="row"><span class="status review">Review</span><strong>Restart</strong><span>Windows has pending changes</span></div>
+        <h1 data-en="Windows security you can inspect." data-ru="Защита Windows, которую можно проверить.">Windows security you can inspect.</h1>
+
+        <p class="hero-lead"
+           data-en="AntiOS is an open-source Windows security project built around a managed ClamAV engine, Resident Guard, reversible quarantine, behavior signals and system diagnostics — without automatic telemetry."
+           data-ru="AntiOS — open-source проект для защиты Windows: управляемый движок ClamAV, Resident Guard, обратимый карантин, поведенческие сигналы и диагностика системы — без автоматической телеметрии.">
+          AntiOS is an open-source Windows security project built around a managed ClamAV engine, Resident Guard, reversible quarantine, behavior signals and system diagnostics — without automatic telemetry.
+        </p>
+
+        <div class="hero-actions">
+          <a class="button primary" id="downloadButton" href="https://github.com/Dargon777/AntiOS/releases"
+             data-en="Download for Windows" data-ru="Скачать для Windows">Download for Windows</a>
+          <a class="button secondary" href="https://github.com/Dargon777/AntiOS"
+             data-en="View source" data-ru="Исходный код">View source</a>
         </div>
+
+        <div class="release-meta">
+          <span id="versionText">v2.0.0-alpha.27</span>
+          <span>Windows 10 / 11</span>
+          <span>Apache-2.0</span>
+          <a id="checksumLink" href="https://github.com/Dargon777/AntiOS/releases"
+             data-en="SHA-256" data-ru="SHA-256">SHA-256</a>
+        </div>
+
+        <p class="alpha-warning"
+           data-en="Alpha software. AntiOS does not silently disable Microsoft Defender and does not claim certified primary-antivirus status."
+           data-ru="Alpha-версия. AntiOS не отключает Microsoft Defender скрытно и не заявляет статус сертифицированной основной антивирусной защиты.">
+          Alpha software. AntiOS does not silently disable Microsoft Defender and does not claim certified primary-antivirus status.
+        </p>
       </div>
 
-      <section>
-        <h2>Useful in the first 30 seconds</h2>
-        <div class="grid">
-          <div class="card"><h3>Antivirus & security</h3><p>On-demand file scans, manual encrypted quarantine, Defender scan controls, BitLocker, Secure Boot and TPM state. Persistent protection remains with your installed antivirus.</p></div>
-          <div class="card"><h3>Performance clues</h3><p>Free disk space, uptime, pending restarts and common startup applications.</p></div>
-          <div class="card"><h3>System context</h3><p>Windows edition/build, architecture, processor and technical diagnostics when you need them.</p></div>
+      <div class="product-card" aria-label="AntiOS protection overview">
+        <div class="window-bar">
+          <div class="window-title">
+            <img src="https://raw.githubusercontent.com/Dargon777/AntiOS/master/antios/assets/icons/app_main.png" alt="" width="22" height="22">
+            <span>AntiOS</span>
+          </div>
+          <div class="window-controls"><i></i><i></i><i></i></div>
         </div>
-      </section>
 
-      <section>
-        <h2>Privacy by design</h2>
-        <div class="privacy">
-          <strong>No automatic telemetry.</strong>
-          <p>AntiOS does not automatically upload diagnostic reports to the project. File scans are read-only; quarantine and restore require confirmation. The installed antivirus provider may use cloud services under its own settings. Defender scans follow Defender's remediation policy.</p>
-          <a href="https://github.com/Dargon777/AntiOS/blob/master/PRIVACY.md">Read the privacy policy →</a>
+        <div class="status-hero">
+          <div class="status-ring"><span>✓</span></div>
+          <div>
+            <small data-en="PROTECTION STATUS" data-ru="СОСТОЯНИЕ ЗАЩИТЫ">PROTECTION STATUS</small>
+            <strong data-en="Protection active" data-ru="Защита активна">Protection active</strong>
+            <p data-en="Local security layers are available" data-ru="Локальные уровни защиты доступны">Local security layers are available</p>
+          </div>
         </div>
-      </section>
 
-      <section>
-        <h2>Help shape the project</h2>
-        <div class="grid">
-          <div class="card"><h3>Found a bug?</h3><p><a href="https://github.com/Dargon777/AntiOS/issues/new?template=bug_report.yml">Send a reproducible bug report →</a></p></div>
-          <div class="card"><h3>Missing something?</h3><p><a href="https://github.com/Dargon777/AntiOS/issues/new?template=feature_request.yml">Suggest a feature →</a></p></div>
-          <div class="card"><h3>Want to help?</h3><p><a href="https://github.com/Dargon777/AntiOS">Star, share or contribute on GitHub →</a></p></div>
+        <div class="mini-grid">
+          <article>
+            <span class="mini-icon">◇</span>
+            <div><strong>Guard</strong><small data-en="Resident monitoring" data-ru="Фоновый мониторинг">Resident monitoring</small></div>
+            <b class="state good" data-en="Active" data-ru="Активен">Active</b>
+          </article>
+          <article>
+            <span class="mini-icon">⌁</span>
+            <div><strong data-en="Behavior" data-ru="Поведение">Behavior</strong><small data-en="Correlation signals" data-ru="Корреляция сигналов">Correlation signals</small></div>
+            <b class="state good">OK</b>
+          </article>
+          <article>
+            <span class="mini-icon">⌕</span>
+            <div><strong>ClamAV</strong><small data-en="Managed local engine" data-ru="Управляемый локальный движок">Managed local engine</small></div>
+            <b class="state good" data-en="Ready" data-ru="Готов">Ready</b>
+          </article>
+          <article>
+            <span class="mini-icon">▣</span>
+            <div><strong data-en="Quarantine" data-ru="Карантин">Quarantine</strong><small data-en="Reversible isolation" data-ru="Обратимая изоляция">Reversible isolation</small></div>
+            <b class="state neutral" data-en="Clear" data-ru="Чисто">Clear</b>
+          </article>
         </div>
-      </section>
-    </main>
 
-    <footer>
-      AntiOS is open source under Apache-2.0. Windows is a trademark of Microsoft; AntiOS is not affiliated with Microsoft.
-    </footer>
-  </div>
+        <div class="scan-row">
+          <div><span></span><span></span><span></span></div>
+          <p data-en="Designed to show degraded or unavailable protection instead of pretending everything is fine."
+             data-ru="Если часть защиты недоступна или деградировала, AntiOS показывает это прямо, а не делает вид, что всё в порядке.">
+            Designed to show degraded or unavailable protection instead of pretending everything is fine.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="proof-strip">
+      <div class="shell proof-grid">
+        <div><strong data-en="Open source" data-ru="Открытый код">Open source</strong><span data-en="Inspect the implementation" data-ru="Можно проверить реализацию">Inspect the implementation</span></div>
+        <div><strong data-en="No automatic telemetry" data-ru="Без автотелеметрии">No automatic telemetry</strong><span data-en="Diagnostics stay local by default" data-ru="Диагностика остаётся локально">Diagnostics stay local by default</span></div>
+        <div><strong data-en="Reversible actions" data-ru="Обратимые действия">Reversible actions</strong><span data-en="Quarantine and recovery are explicit" data-ru="Карантин и восстановление — явные действия">Quarantine and recovery are explicit</span></div>
+        <div><strong data-en="Auditable releases" data-ru="Проверяемые релизы">Auditable releases</strong><span data-en="Source, CI and SHA-256 checksums" data-ru="Исходники, CI и SHA-256">Source, CI and SHA-256 checksums</span></div>
+      </div>
+    </section>
+
+    <section class="section shell" id="protection">
+      <div class="section-heading">
+        <span class="section-kicker" data-en="PROTECTION LAYERS" data-ru="УРОВНИ ЗАЩИТЫ">PROTECTION LAYERS</span>
+        <h2 data-en="More than a single scan button." data-ru="Больше, чем одна кнопка «Сканировать».">More than a single scan button.</h2>
+        <p data-en="AntiOS combines independent layers and reports their real state instead of collapsing everything into one fake score."
+           data-ru="AntiOS объединяет независимые уровни и показывает их реальное состояние, не сводя всё к одному выдуманному «проценту защиты».">
+          AntiOS combines independent layers and reports their real state instead of collapsing everything into one fake score.
+        </p>
+      </div>
+
+      <div class="feature-grid">
+        <article class="feature-card">
+          <span class="feature-number">01</span>
+          <h3 data-en="Managed ClamAV" data-ru="Управляемый ClamAV">Managed ClamAV</h3>
+          <p data-en="Local malware scanning with managed signatures, bounded requests and explicit health reporting."
+             data-ru="Локальное сканирование вредоносных файлов с управляемыми сигнатурами, ограниченными запросами и явным контролем состояния.">
+            Local malware scanning with managed signatures, bounded requests and explicit health reporting.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">02</span>
+          <h3>Resident Guard</h3>
+          <p data-en="Resident selected-folder monitoring and post-write scanning with visible degraded states and history."
+             data-ru="Фоновый мониторинг выбранных папок и сканирование после изменений с историей и видимыми состояниями деградации.">
+            Resident selected-folder monitoring and post-write scanning with visible degraded states and history.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">03</span>
+          <h3 data-en="Behavior signals" data-ru="Поведенческие сигналы">Behavior signals</h3>
+          <p data-en="Correlation of suspicious activity as an additional signal — not a magic verdict and not a hidden destructive action."
+             data-ru="Корреляция подозрительной активности как дополнительный сигнал — не «магический» вердикт и не скрытое разрушительное действие.">
+            Correlation of suspicious activity as an additional signal — not a magic verdict and not a hidden destructive action.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">04</span>
+          <h3 data-en="Reversible quarantine" data-ru="Обратимый карантин">Reversible quarantine</h3>
+          <p data-en="Explicit isolation and restore workflows with integrity checks instead of silent deletion."
+             data-ru="Явная изоляция и восстановление с проверкой целостности вместо молчаливого удаления файлов.">
+            Explicit isolation and restore workflows with integrity checks instead of silent deletion.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">05</span>
+          <h3 data-en="Windows diagnostics" data-ru="Диагностика Windows">Windows diagnostics</h3>
+          <p data-en="Defender state, Secure Boot, TPM, BitLocker, startup entries, disk space, pending restarts and system context."
+             data-ru="Состояние Defender, Secure Boot, TPM, BitLocker, автозагрузка, свободное место, ожидающие перезапуски и сведения о системе.">
+            Defender state, Secure Boot, TPM, BitLocker, startup entries, disk space, pending restarts and system context.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">06</span>
+          <h3 data-en="Incident visibility" data-ru="Разбор инцидентов">Incident visibility</h3>
+          <p data-en="Local incident history and response tooling to understand what happened before taking action."
+             data-ru="Локальная история инцидентов и инструменты реагирования, чтобы сначала понять, что произошло, а затем действовать.">
+            Local incident history and response tooling to understand what happened before taking action.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section trust-section" id="trust">
+      <div class="shell trust-layout">
+        <div class="section-heading sticky-heading">
+          <span class="section-kicker" data-en="TRUST, NOT MARKETING" data-ru="ДОВЕРИЕ, А НЕ МАРКЕТИНГ">TRUST, NOT MARKETING</span>
+          <h2 data-en="Security software should be able to explain itself."
+              data-ru="Защитное ПО должно уметь объяснить, что оно делает.">
+            Security software should be able to explain itself.
+          </h2>
+          <p data-en="AntiOS is deliberately explicit about what is active, what is experimental and what is unavailable."
+             data-ru="AntiOS намеренно показывает, что активно, что экспериментально, а что недоступно.">
+            AntiOS is deliberately explicit about what is active, what is experimental and what is unavailable.
+          </p>
+        </div>
+
+        <div class="trust-list">
+          <a href="https://github.com/Dargon777/AntiOS/blob/master/PRIVACY.md" class="trust-item">
+            <span>01</span><div><strong data-en="Privacy policy" data-ru="Политика приватности">Privacy policy</strong><p data-en="No automatic telemetry. Read exactly what can leave the machine." data-ru="Без автоматической телеметрии. Можно проверить, какие данные вообще способны покинуть ПК.">No automatic telemetry. Read exactly what can leave the machine.</p></div><b>↗</b>
+          </a>
+          <a href="https://github.com/Dargon777/AntiOS/blob/master/SECURITY.md" class="trust-item">
+            <span>02</span><div><strong data-en="Security policy" data-ru="Политика безопасности">Security policy</strong><p data-en="Public reporting process and documented security boundaries." data-ru="Публичный процесс сообщения об уязвимостях и задокументированные границы безопасности.">Public reporting process and documented security boundaries.</p></div><b>↗</b>
+          </a>
+          <a href="https://github.com/Dargon777/AntiOS/actions" class="trust-item">
+            <span>03</span><div><strong>CI / CodeQL</strong><p data-en="Automated tests, Windows builds and static analysis are visible on GitHub." data-ru="Автотесты, Windows-сборки и статический анализ видны прямо на GitHub.">Automated tests, Windows builds and static analysis are visible on GitHub.</p></div><b>↗</b>
+          </a>
+          <a href="https://github.com/Dargon777/AntiOS/releases" class="trust-item">
+            <span>04</span><div><strong data-en="Release checksums" data-ru="Контрольные суммы релизов">Release checksums</strong><p data-en="Published Windows artifacts include SHA-256 verification files." data-ru="Для Windows-релизов публикуются файлы проверки SHA-256.">Published Windows artifacts include SHA-256 verification files.</p></div><b>↗</b>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section shell" id="alpha">
+      <div class="alpha-panel">
+        <div>
+          <span class="section-kicker" data-en="PUBLIC ALPHA" data-ru="ПУБЛИЧНАЯ ALPHA">PUBLIC ALPHA</span>
+          <h2 data-en="Useful today. Still under active hardening."
+              data-ru="Уже полезно. Но всё ещё активно укрепляется.">
+            Useful today. Still under active hardening.
+          </h2>
+        </div>
+
+        <div class="alpha-copy">
+          <p data-en="AntiOS is not presented as a finished replacement for Windows Security. Native enforcement, signing, installer behavior and compatibility are treated as release gates, not assumptions."
+             data-ru="AntiOS не выдаётся за готовую замену Windows Security. Нативное принуждение, подпись, поведение установщика и совместимость рассматриваются как отдельные релизные критерии, а не как «само собой работает».">
+            AntiOS is not presented as a finished replacement for Windows Security. Native enforcement, signing, installer behavior and compatibility are treated as release gates, not assumptions.
+          </p>
+          <a href="https://github.com/Dargon777/AntiOS/blob/master/docs/DEFENDER_REPLACEMENT.md"
+             data-en="Read the replacement readiness gates →"
+             data-ru="Посмотреть критерии готовности к замене Defender →">Read the replacement readiness gates →</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section shell download-section" id="download">
+      <div class="download-panel">
+        <div>
+          <span class="section-kicker" data-en="TRY THE ALPHA" data-ru="ПОПРОБОВАТЬ ALPHA">TRY THE ALPHA</span>
+          <h2 data-en="Install AntiOS on a test machine."
+              data-ru="Установи AntiOS на тестовый ПК.">Install AntiOS on a test machine.</h2>
+          <p data-en="Use the installer for the normal Windows experience, or open the release page for portable and developer artifacts."
+             data-ru="Для обычной установки используй инсталлятор. Portable- и developer-сборки доступны на странице релизов.">
+            Use the installer for the normal Windows experience, or open the release page for portable and developer artifacts.
+          </p>
+        </div>
+        <div class="download-actions">
+          <a class="button primary large" id="downloadButtonBottom" href="https://github.com/Dargon777/AntiOS/releases"
+             data-en="Download installer" data-ru="Скачать установщик">Download installer</a>
+          <a class="button secondary large" href="https://github.com/Dargon777/AntiOS/releases"
+             data-en="All releases" data-ru="Все релизы">All releases</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-grid">
+      <div>
+        <div class="brand footer-brand">
+          <img src="https://raw.githubusercontent.com/Dargon777/AntiOS/master/antios/assets/icons/app_main.png" alt="" width="30" height="30">
+          <span>AntiOS</span>
+        </div>
+        <p data-en="Open-source Windows security project by DargonITP."
+           data-ru="Open-source проект защиты Windows от DargonITP.">Open-source Windows security project by DargonITP.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/Dargon777/AntiOS">GitHub</a>
+        <a href="https://github.com/Dargon777/AntiOS/releases" data-en="Releases" data-ru="Релизы">Releases</a>
+        <a href="https://github.com/Dargon777/AntiOS/issues" data-en="Feedback" data-ru="Обратная связь">Feedback</a>
+        <a href="https://github.com/Dargon777/AntiOS/blob/master/LICENSE" data-en="License" data-ru="Лицензия">License</a>
+      </div>
+    </div>
+    <div class="shell legal">
+      <span>© <span id="year"></span> DargonITP · Apache-2.0</span>
+      <span data-en="Windows is a trademark of Microsoft. AntiOS is not affiliated with Microsoft."
+            data-ru="Windows — товарный знак Microsoft. AntiOS не аффилирован с Microsoft.">
+        Windows is a trademark of Microsoft. AntiOS is not affiliated with Microsoft.
+      </span>
+    </div>
+  </footer>
+
+  <script src="./app.js" defer></script>
 </body>
 </html>
