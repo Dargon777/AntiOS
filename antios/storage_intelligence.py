@@ -38,7 +38,7 @@ class StorageJournal:
 
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path or default_journal_path())
-        if os.name == "nt":
+        if os.name == "nt" and path is None:
             from .elevation import is_administrator
             if is_administrator():
                 raise PermissionError("Per-user storage journal is not written by an elevated process")
