@@ -6,8 +6,25 @@ import pytest
 
 from antios import recovery
 
+def _native_tk_display_available():
+    if importlib.util.find_spec("tkinter") is None:
+        return False
+    if os.name == "nt":
+        return True
+    if not os.environ.get("DISPLAY"):
+        return False
+    try:
+        import tkinter as tk
+        interpreter = tk.Tcl()
+        interpreter.eval("package require Tk")
+        interpreter.eval("destroy .")
+        return True
+    except tk.TclError:
+        return False
+
+
 pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("tkinter") is None or (os.name != "nt" and not os.environ.get("DISPLAY")),
+    not _native_tk_display_available(),
     reason="Native Tk display unavailable",
 )
 
