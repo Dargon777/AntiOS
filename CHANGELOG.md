@@ -12,6 +12,10 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
   rejects manifest paths that cannot be encoded as valid UTF-8.
 - Logging reconfiguration now closes replaced handlers instead of leaking file
   handles.
+- Recovery change checks verify all saved blobs and reject non-local manifest
+  paths before accessing any original file.
+- Baseline extension can bind to the previously listed manifest ID and rejects
+  an archive replaced between inspection and extension.
 
 ## [2.0.0a19] - 2026-10-04
 
