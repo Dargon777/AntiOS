@@ -35,6 +35,8 @@ DEFAULT_LARGE_BYTES = 500 * 1024 * 1024
 DEFAULT_DUPLICATE_MIN_BYTES = 1 * 1024 * 1024
 QUICK_HASH_BYTES = 1024 * 1024
 HASH_CHUNK_BYTES = 1024 * 1024
+MAX_SCAN_FILES = 200_000
+MAX_SCAN_ENTRIES = 400_000
 
 
 @dataclass(frozen=True)
@@ -76,11 +78,13 @@ def _iter_files(
     *,
     progress: ProgressCallback | None = None,
     cancelled: CancelCallback | None = None,
-) -> tuple[list[FileRecord], list[str]]:
+) -> tuple[list[FileRecord], list[str], bool]:
     records: list[FileRecord] = []
     errors: list[str] = []
     stack = [root]
     scanned_dirs = 0
+    entries_seen = 0
+    limit_reached = False
 
     while stack:
         if cancelled and cancelled():
@@ -90,10 +94,15 @@ def _iter_files(
         try:
             with os.scandir(current) as iterator:
                 for entry in iterator:
+                    entries_seen += 1
+                    if entries_seen > MAX_SCAN_ENTRIES or len(records) >= MAX_SCAN_FILES:
+                        limit_reached = True
+                        errors.append('Storage scan reached bounded entry/file limit; select a smaller folder')
+                        break
                     if cancelled and cancelled():
                         break
                     try:
-                        if entry.is_symlink():
+                        if entry.is_symlink() or (hasattr(entry, 'is_junction') and entry.is_junction()):
                             continue
                         if entry.is_dir(follow_symlinks=False):
                             stack.append(Path(entry.path))
@@ -131,8 +140,10 @@ def _iter_files(
         except (OSError, PermissionError) as exc:
             errors.append(f"{current}: {exc}")
         scanned_dirs += 1
+        if limit_reached:
+            break
 
-    return records, errors
+    return records, errors, limit_reached
 
 
 def _quick_fingerprint(path: Path, size: int) -> str:
@@ -223,11 +234,14 @@ def _duplicate_groups(
         if len(group) < 2:
             continue
         ordered = sorted(group, key=lambda item: str(item.path).casefold())
+        # Hard links are names for one physical file, not independent copies.
+        independent = len({(item.device, item.inode) for item in ordered})
         result.append({
             "size_bytes": size,
             "hash": digest,
             "count": len(ordered),
-            "reclaimable_bytes": size * (len(ordered) - 1),
+            "independent_files": independent,
+            "reclaimable_bytes": size * max(0, independent - 1),
             "paths": [str(item.path) for item in ordered],
         })
 
@@ -267,7 +281,7 @@ def scan_storage(
     if progress:
         progress({"phase": "enumerating", "files_scanned": 0})
 
-    records, errors = _iter_files(
+    records, errors, limit_reached = _iter_files(
         base,
         progress=progress,
         cancelled=cancelled,
@@ -277,6 +291,7 @@ def scan_storage(
         return {
             "root": str(base),
             "cancelled": True,
+            "limit_reached": limit_reached,
             "summary": {
                 "files_scanned": len(records),
                 "bytes_scanned": sum(item.size for item in records),
@@ -337,6 +352,7 @@ def scan_storage(
     result = {
         "root": str(base),
         "cancelled": bool(cancelled and cancelled()),
+        "limit_reached": limit_reached,
         "rules": {
             "old_days": old_days,
             "large_bytes": large_bytes,
@@ -442,6 +458,8 @@ def cleanup_files(
     """
     if mode not in {"delete", "backup"}:
         raise ValueError("cleanup mode must be 'delete' or 'backup'")
+    if scan_result.get("limit_reached") or scan_result.get("cancelled"):
+        raise ValueError("Cleanup requires a completed, bounded scan")
 
     root = _lexical_path(scan_result.get("root", ""))
     snapshots = scan_result.get("candidate_snapshots")
@@ -491,7 +509,8 @@ def cleanup_files(
         "requested": len(requested),
         "deleted": 0,
         "backed_up": 0,
-        "bytes_freed": 0,
+        "bytes_freed": 0,  # Estimated net space reclaimed on source volume.
+        "gross_deleted_bytes": 0,
         "backup_dir": str(backup_dir) if backup_dir else None,
         "items": [],
         "errors": [],
@@ -502,6 +521,9 @@ def cleanup_files(
         snapshot = snapshots[key]
         item = {"path": key, "size_bytes": int(snapshot.get("size_bytes", 0))}
         try:
+            # Recheck parent reparse points before opening a cleanup candidate.
+            from .antivirus import checked_path
+            checked_path(target)
             before = target.lstat()
             if not _same_snapshot(before, snapshot):
                 raise ValueError("file changed since the cleanup scan")
@@ -535,6 +557,7 @@ def cleanup_files(
                     sha256=source_hash,
                 )
 
+            checked_path(target)
             before_delete = target.lstat()
             if not _same_snapshot(before_delete, snapshot):
                 raise ValueError("file changed before deletion")
@@ -549,10 +572,20 @@ def cleanup_files(
                 _write_cleanup_manifest(backup_dir, manifest)
                 result["backed_up"] += 1
 
+            # Determine the destination volume BEFORE removing the original.
+            # A failed stat must never turn a successful deletion into an
+            # incorrectly reported "skipped" item.
+            same_volume_backup = (
+                mode == "backup" and destination.stat().st_dev == before_delete.st_dev
+            )
             target.unlink()
 
             result["deleted"] += 1
-            result["bytes_freed"] += int(snapshot.get("size_bytes", 0))
+            result["gross_deleted_bytes"] += int(snapshot.get("size_bytes", 0))
+            # No space is reclaimed if hard links retain the data or the
+            # verified backup occupies the same source volume.
+            if before_delete.st_nlink == 1 and not same_volume_backup:
+                result["bytes_freed"] += int(snapshot.get("size_bytes", 0))
             item["status"] = "deleted"
             if mode == "backup":
                 assert manifest is not None and backup_dir is not None

@@ -198,6 +198,22 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Minimum duplicate file size in MB (default: {DEFAULT_DUPLICATE_MIN_BYTES // (1024 * 1024)}).",
     )
     storage_cmd.add_argument("--json", action="store_true")
+    storage_cmd.add_argument("--background", action="store_true",
+                             help="Optional maintenance: skip unless PC is idle on AC power.")
+
+    history_cmd = sub.add_parser("storage-history", help="View, disable or clear MemoryMap history.")
+    history_cmd.add_argument("action", choices=["status", "on", "off", "clear"])
+    history_cmd.add_argument("--json", action="store_true")
+
+    proof_cmd = sub.add_parser("storage-proof", help="Verify a Storage Cleanup backup and test a sandbox restore.")
+    proof_cmd.add_argument("directory")
+    proof_cmd.add_argument("--hash-only", action="store_true", help="Skip the sandbox restore test.")
+    proof_cmd.add_argument("--json", action="store_true")
+
+    preference_cmd = sub.add_parser("storage-preference", help="Set lightweight CleanupDNA recommendations.")
+    preference_cmd.add_argument("category", choices=["duplicate", "old", "archive", "empty"])
+    preference_cmd.add_argument("choice", choices=["prefer", "normal", "hide"])
+    preference_cmd.add_argument("--json", action="store_true")
 
     av = sub.add_parser("virus-scan", help="Read-only, on-demand antivirus scan of a file or folder.")
     av.add_argument("path")
@@ -429,7 +445,54 @@ def main(argv: list[str] | None = None) -> int:
                 dashboard_args.extend(["--lang", args.lang])
             return dashboard_main(dashboard_args)
 
+        if args.command == "storage-history":
+            from .storage_intelligence import StorageJournal
+            with StorageJournal() as journal:
+                if args.action == "on":
+                    journal.set_history_enabled(True)
+                elif args.action == "off":
+                    journal.set_history_enabled(False)
+                elif args.action == "clear":
+                    journal.clear_history()
+                payload = {"enabled": journal.history_enabled(), "action": args.action}
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"MemoryMap: {'enabled' if payload['enabled'] else 'disabled'}; {args.action}")
+            return 0
+
+        if args.command == "storage-preference":
+            from .storage_intelligence import StorageJournal
+            with StorageJournal() as journal:
+                journal.set_preference(args.category, args.choice)
+                payload = journal.preferences()
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"CleanupDNA: {args.category} = {args.choice}")
+            return 0
+
+        if args.command == "storage-proof":
+            from .backup_proof import prove_cleanup_backup
+            payload = prove_cleanup_backup(args.directory, restore_sample=not args.hash_only)
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"RecoveryProof: {payload['status']} ({payload['verified']}/{payload['entries']} verified)")
+                if payload['errors']:
+                    print("Problems: " + "; ".join(payload['errors'][:10]))
+            return 0 if not payload['errors'] else 2
+
         if args.command in {"storage-scan", "cleanup-scan"}:
+            from .storage_intelligence import background_permission, insights_for_scan
+            if args.background:
+                permission = background_permission()
+                if not permission['allowed']:
+                    if args.json:
+                        _print_json({"skipped": True, "reason": permission['reason']})
+                    else:
+                        print('SmartSleep: skipped maintenance: ' + permission['reason'])
+                    return 0
             target = Path(args.path).expanduser() if args.path else default_scan_path()
             result = scan_storage(
                 target,
@@ -437,6 +500,7 @@ def main(argv: list[str] | None = None) -> int:
                 large_bytes=args.large_mb * 1024 * 1024,
                 duplicate_min_bytes=args.duplicate_min_mb * 1024 * 1024,
             )
+            result["intelligence"] = insights_for_scan(result)
             logger.info(
                 "storage-scan path=%s files=%d duplicate_groups=%d",
                 target,
@@ -447,6 +511,13 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(result)
             else:
                 print(render_storage_scan(result))
+                info = result['intelligence']
+                trend = info['history']
+                print('MemoryMap / TimeDebt: ' + trend['forecast'])
+                if trend.get('bytes_per_day') is not None:
+                    print(f"  Estimated directory change/day: {trend['bytes_per_day']} bytes")
+                print('Survival: ' + str(info['survival']['candidates_without_verified_independent_copy']) +
+                      ' cleanup candidates without a verified independent copy in this scan')
             return 0
 
         if args.command == "virus-scan":

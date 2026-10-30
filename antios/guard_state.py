@@ -34,7 +34,12 @@ class GuardState:
             info = self.path.stat()
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError("Guard database must be a regular, unlinked file")
-        self.db = sqlite3.connect(self.path, timeout=2)
+        self.db = sqlite3.connect(self.path, timeout=5)
+        # Guard is a frequent writer while GUI/CLI/tests query status. WAL
+        # allows readers to use a stable snapshot instead of colliding with
+        # short writer transactions on Windows (especially Python 3.13).
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA busy_timeout=5000")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS control (id INTEGER PRIMARY KEY CHECK(id=1), stop_run TEXT NOT NULL);
@@ -96,7 +101,7 @@ def read_guard_state(folder=None, *, history=False, stop=False):
         return {"state": "not-running", "running": False, "pre_execution_blocking": False}
     checked_path(path)
     uri = path.absolute().as_uri() + ("?mode=rw" if stop else "?mode=ro")
-    with closing(sqlite3.connect(uri, uri=True, timeout=2)) as db, db:
+    with closing(sqlite3.connect(uri, uri=True, timeout=5)) as db, db:
         row = db.execute("SELECT payload FROM state WHERE id=1").fetchone()
         status = json.loads(row[0]) if row else {"state": "not-running", "running": False}
         if not isinstance(status, dict) or not isinstance(status.get("running"), bool):
@@ -135,7 +140,7 @@ def read_incident_history(folder=None, *, limit=50):
     uri = path.absolute().as_uri() + "?mode=ro"
 
     newest: dict[str, dict] = {}
-    with closing(sqlite3.connect(uri, uri=True, timeout=2)) as db:
+    with closing(sqlite3.connect(uri, uri=True, timeout=5)) as db:
         row = db.execute("SELECT payload FROM state WHERE id=1").fetchone()
         if row:
             try:
