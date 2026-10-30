@@ -1,7 +1,7 @@
 name: Experimental native antivirus boundary
 on:
   pull_request:
-    paths: ['native/**', 'tests/test_native*', '.github/workflows/windows-native.yml']
+    paths: ['native/**', 'tests/test_native*', '.github/workflows/windows-native.yml', '.github/workflows/full-source-audit.yml']
   workflow_dispatch:
 permissions:
   contents: read

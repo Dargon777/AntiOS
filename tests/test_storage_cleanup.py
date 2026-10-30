@@ -200,3 +200,60 @@ def test_backup_is_persisted_before_failed_source_delete(tmp_path, monkeypatch):
     assert (backup_dir / "files" / "archive.zip").read_bytes() == b"z" * 1024
     manifest = (backup_dir / "manifest.json").read_text(encoding="utf-8")
     assert "verified-pending-delete" in manifest
+
+
+
+def test_backup_never_overwrites_a_path_created_during_exclusive_open(tmp_path, monkeypatch):
+    """Regression: a symlink/file may appear after destination setup."""
+    root = tmp_path / "scan"
+    backups = tmp_path / "backups"
+    _write(root / "archive.zip", 1024, b"z")
+    scan = scan_storage(root, duplicate_min_bytes=10_000, large_bytes=10_000)
+    victim = tmp_path / "foreign-data.txt"
+    victim.write_bytes(b"do-not-replace")
+    original_open = Path.open
+    injected = {"done": False}
+
+    def raced_open(self, mode="r", *args, **kwargs):
+        if not injected["done"] and self.name == "archive.zip" and mode == "xb":
+            injected["done"] = True
+            try:
+                self.symlink_to(victim)
+            except (OSError, NotImplementedError):
+                self.write_bytes(b"foreign-file")
+        return original_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", raced_open)
+    result = cleanup_files(scan, [root / "archive.zip"], mode="backup", backup_root=backups)
+    assert injected["done"]
+    assert result["deleted"] == 0
+    assert result["errors"]
+    assert (root / "archive.zip").read_bytes() == b"z" * 1024
+    assert victim.read_bytes() == b"do-not-replace"
+
+
+def test_manifest_exclusive_creation_rejects_external_temp_symlink(tmp_path, monkeypatch):
+    root = tmp_path / "scan"
+    backups = tmp_path / "backups"
+    _write(root / "archive.zip", 1024, b"z")
+    scan = scan_storage(root, duplicate_min_bytes=10_000, large_bytes=10_000)
+    victim = tmp_path / "foreign-manifest.txt"
+    victim.write_bytes(b"keep-this-file")
+    original_open = Path.open
+    injected = {"done": False}
+
+    def raced_open(self, mode="r", *args, **kwargs):
+        if not injected["done"] and self.name == "manifest.json.tmp" and mode == "x":
+            injected["done"] = True
+            try:
+                self.symlink_to(victim)
+            except (OSError, NotImplementedError):
+                self.write_bytes(b"foreign-temp")
+        return original_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", raced_open)
+    with pytest.raises(FileExistsError):
+        cleanup_files(scan, [root / "archive.zip"], mode="backup", backup_root=backups)
+    assert injected["done"]
+    assert (root / "archive.zip").read_bytes() == b"z" * 1024
+    assert victim.read_bytes() == b"keep-this-file"

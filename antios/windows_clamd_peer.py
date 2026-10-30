@@ -7,6 +7,7 @@ connection must belong to the configured running own-process LocalSystem service
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ntpath
 import os
 import re
 import socket
@@ -61,6 +62,36 @@ class ServiceProcess:
 def _require_windows() -> None:
     if os.name != "nt":
         raise OSError("Windows SCM peer verification is available only on Windows")
+
+
+def matches_managed_clamd_image(image: str, program_files: str) -> bool:
+    """Compare SCM executable with the exact AntiOS-managed installation.
+
+    A quoted path or a legacy unquoted Program Files image is supported,
+    but a similarly prefixed executable, script host or foreign service isn't.
+    """
+    if not image or not program_files:
+        return False
+    expected = ntpath.normcase(ntpath.normpath(
+        ntpath.join(program_files, "AntiOS", "ClamAV", "clamd.exe")
+    ))
+    line = image.strip()
+    if line.startswith('"'):
+        end = line.find('"', 1)
+        if end <= 1:
+            return False
+        exe = line[1:end]
+        rest = line[end + 1:]
+        if rest and not rest[0].isspace():
+            return False
+    else:
+        if ntpath.normcase(line[:len(expected)]) != expected:
+            return False
+        exe = line[:len(expected)]
+        rest = line[len(expected):]
+        if rest and not rest[0].isspace():
+            return False
+    return ntpath.normcase(ntpath.normpath(exe)) == expected
 
 
 def query_service_process(service_name: str) -> ServiceProcess:
@@ -150,6 +181,12 @@ def query_service_process(service_name: str) -> ServiceProcess:
         account = config.lpServiceStartName or ""
         if account.casefold() not in {"localsystem", r".\localsystem", r"nt authority\system"}:
             raise OSError("Configured ClamD service must run as LocalSystem")
+        # LocalSystem plus an SCM name alone cannot authenticate an engine.
+        # Require the actual executable to be the protected AntiOS binary.
+        if service_name.casefold() == "clamd":
+            program_files = os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles", "")
+            if not matches_managed_clamd_image(config.lpBinaryPathName or "", program_files):
+                raise OSError("ClamD service executable is outside the AntiOS managed installation")
         return ServiceProcess(service_name, int(state.dwProcessId), account)
     finally:
         if service:

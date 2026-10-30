@@ -4,9 +4,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$stage = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
-
-Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+# Restrict recursive cleanup to the dedicated generated staging folder.
+$stageName = $OutputDirectory -replace '^[.][\\/]', ''
+if ($stageName -cnotmatch '^installer-stage(?:-[A-Za-z0-9_-]{1,40})?$') {
+    throw 'Installer staging must be installer-stage or installer-stage-SUFFIX under the repository.'
+}
+$stage = [IO.Path]::GetFullPath((Join-Path $repoRoot $stageName))
+if (Test-Path -LiteralPath $stage) {
+    $tree = @(Get-Item -LiteralPath $stage -Force) +
+            @(Get-ChildItem -LiteralPath $stage -Force -Recurse)
+    if (@($tree | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
+        throw 'Installer stage contains a junction/symlink; refusing recursive cleanup.'
+    }
+}
+Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage | Out-Null
 
 foreach ($source in @(
@@ -31,6 +42,8 @@ foreach ($path in @(
     "scripts\guard-startup.ps1",
     "scripts\dashboard-startup.ps1",
     "scripts\protection-engine.ps1",
+    "scripts\clamav-trust.ps1",
+    "scripts\clamav-repair-validation.ps1",
     "scripts\protection-bootstrap.ps1",
     "scripts\protection-repair.ps1",
     "scripts\protection-first-run.ps1",
@@ -75,6 +88,8 @@ $required = @(
     "guard-startup.ps1",
     "dashboard-startup.ps1",
     "protection-engine.ps1",
+    "clamav-trust.ps1",
+    "clamav-repair-validation.ps1",
     "protection-bootstrap.ps1",
     "protection-repair.ps1",
     "protection-first-run.ps1",

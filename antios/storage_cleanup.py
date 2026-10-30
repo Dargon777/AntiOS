@@ -408,11 +408,23 @@ def _same_snapshot(info: os.stat_result, snapshot: dict[str, Any]) -> bool:
 def _write_cleanup_manifest(folder: Path, payload: dict[str, Any]) -> None:
     temporary = folder / "manifest.json.tmp"
     final = folder / "manifest.json"
-    temporary.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    os.replace(temporary, final)
+    # Never follow a pre-created manifest.json.tmp symlink into another file.
+    # Repeated writes are atomic because os.replace() removes our own staged
+    # file on success; a foreign/stale temp file is an explicit error.
+    owned_temp = False
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            owned_temp = True
+            json.dump(payload, stream, indent=2, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, final)
+    except (OSError, ValueError, TypeError):
+        # Only unlink a temporary file created by this write. Do not delete
+        # a foreign path that made the exclusive "x" creation fail.
+        if owned_temp:
+            temporary.unlink(missing_ok=True)
+        raise
 
 
 def cleanup_files(
@@ -499,10 +511,14 @@ def cleanup_files(
                 relative = target.relative_to(root)
                 destination = backup_dir / "files" / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                if destination.exists():
-                    raise FileExistsError(f"backup destination already exists: {destination}")
-
-                shutil.copy2(target, destination)
+                # Exclusive creation is essential: shutil.copy2() follows
+                # a symlink inserted after an exists() check, potentially
+                # overwriting an unrelated file before deleting the source.
+                # "xb" fails closed even if a link appears at the last moment.
+                with target.open("rb") as original_stream, destination.open("xb") as backup_stream:
+                    shutil.copyfileobj(original_stream, backup_stream, HASH_CHUNK_BYTES)
+                    backup_stream.flush()
+                    os.fsync(backup_stream.fileno())
                 after_copy = target.lstat()
                 if not _same_snapshot(after_copy, snapshot):
                     destination.unlink(missing_ok=True)

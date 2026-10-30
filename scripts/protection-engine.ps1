@@ -5,11 +5,13 @@ param(
     [string]$ClamAVDirectory,
     [switch]$Uninstall,
     [switch]$Apply,
-    [bool]$RequireValidSignature = $true
+    [bool]$RequireValidSignature = $true,
+    [string]$TrustedArchivePath
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'clamav-trust.ps1')
 
 $EngineServiceName = 'clamd'
 $UpdaterTaskName = 'AntiOS ClamAV Signature Update'
@@ -89,29 +91,87 @@ function Remove-OwnedRegistry {
     }
 }
 
+function Assert-ManagedClamdService {
+    $registered = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction Stop
+    $expectedExe = Join-Path $InstallRoot 'clamd.exe'
+    $escapedExe = [regex]::Escape($expectedExe)
+    # Match the actual SCM image path, not a substring that could be present
+    # in an unrelated command argument or a similarly named installation.
+    $imagePattern = ('^\s*(?:"{0}"|{0})(?=\s|$)' -f $escapedExe)
+    if (-not $registered -or $registered.ServiceType -ne 'Own Process' -or
+        $registered.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM') -or
+        [string]$registered.PathName -notmatch $imagePattern) {
+        throw "Refusing to modify a ClamD service not owned by AntiOS: $($registered.PathName)"
+    }
+}
+
+function Assert-FreshEngineInstallTargets {
+    # Run before preview and repeat *after UAC* immediately before writing.
+    # The destination folders and scheduler task must be newly owned, not
+    # pre-existing objects whose contents or configuration could be destroyed.
+    if (Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue) {
+        throw "A service named '$EngineServiceName' already exists. AntiOS will not replace an existing ClamAV service."
+    }
+    if (Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue) {
+        throw 'FreshClam updater task already exists; refusing to replace a potentially foreign scheduled task.'
+    }
+    foreach ($destination in @($InstallRoot, $DataRoot)) {
+        if (Test-Path -LiteralPath $destination) {
+            throw "Managed engine destination already exists: $destination"
+        }
+    }
+    if (Test-Path $AntiOSRegistry) {
+        $existingService = Get-ItemPropertyValue -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue
+        if ($existingService) {
+            throw 'Existing AntiOS engine registry binding found; use an explicit repair/uninstall workflow.'
+        }
+    }
+    if (Test-Path $ClamRegistry) {
+        $existingConf = Get-ItemPropertyValue -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
+        $existingData = Get-ItemPropertyValue -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
+        if ($existingConf -or $existingData) {
+            throw 'Existing machine-wide ClamAV ConfDir/DataDir registry configuration was found; refusing to overwrite another installation.'
+        }
+    }
+}
+
 if ($Uninstall) {
     if (-not $Apply) {
         Write-Output "Preview: stop/remove '$EngineServiceName', unregister '$UpdaterTaskName', remove AntiOS-owned ClamAV registry bindings and managed engine/data directories."
         return
     }
     Assert-Administrator
-    $task = Get-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
-    if ($task) {
-        Stop-ScheduledTask -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $UpdaterTaskName -Confirm:$false
-    }
+    # Check *all* managed targets before stopping tasks/services or touching
+    # registry state. Recursive deletion must not traverse a junction.
+    if (Test-Path -LiteralPath $InstallRoot) { Assert-NoReparseTree $InstallRoot }
+    if (Test-Path -LiteralPath $DataRoot) { Assert-NoReparseTree $DataRoot }
     $service = Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue
+    if ($service) { Assert-ManagedClamdService }
+    $task = Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        $actions = @($task.Actions)
+        $managedFresh = Join-Path $InstallRoot 'freshclam.exe'
+        if ($actions.Count -ne 1 -or
+            [IO.Path]::GetFullPath([string]$actions[0].Execute) -ine
+                [IO.Path]::GetFullPath($managedFresh)) {
+            throw 'Refusing to unregister a non-AntiOS ClamAV update task.'
+        }
+    }
+    if ($task) {
+        Stop-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false
+    }
     if ($service) {
         if ($service.Status -ne 'Stopped') {
             Stop-Service -Name $EngineServiceName -Force
             $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
         }
-        $managedClamd = Join-Path $InstallRoot 'clamd.exe'
-        if (-not (Test-Path -LiteralPath $managedClamd)) {
-            throw 'The clamd service exists but the AntiOS-managed executable is missing; refusing ambiguous removal.'
+        # Do not execute an on-disk ClamAV binary with administrator rights
+        # during uninstall. The verified SCM service identity is sufficient.
+        & "$env:SystemRoot\System32\sc.exe" delete $EngineServiceName | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not delete the verified AntiOS ClamD service (sc.exe exit $LASTEXITCODE)"
         }
-        & $managedClamd --uninstall-service
-        if ($LASTEXITCODE -ne 0) { throw "clamd --uninstall-service failed with exit code $LASTEXITCODE" }
     }
     Remove-OwnedRegistry
     if (Test-Path -LiteralPath $InstallRoot) { Remove-Item -LiteralPath $InstallRoot -Recurse -Force }
@@ -128,21 +188,36 @@ $SourceFresh = Join-Path $Source 'freshclam.exe'
 foreach ($required in @($SourceClamd, $SourceFresh)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required ClamAV binary is missing: $required" }
 }
-$signature = Assert-SignedPair $SourceClamd $SourceFresh
+$trustedReceipt = $null
+if ($TrustedArchivePath) {
+    # Only the shipped SHA256-pinned archive and byte-identical extracted EXEs
+    # can use archive trust. Manual/third-party sources need Authenticode.
+    $manifest = Get-AntiOSPinnedManifest
+    $stagingRoot = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($TrustedArchivePath))
+    $programFiles = [IO.Path]::GetFullPath([Environment]::GetFolderPath('ProgramFiles'))
+    $stagingName = [IO.Path]::GetFileName($stagingRoot)
+    $expectedSource = Join-Path (Join-Path $stagingRoot 'extract') ([string]$manifest.extract_dir)
+    if ([IO.Path]::GetDirectoryName($stagingRoot) -ine $programFiles -or
+        $stagingName -cnotmatch '^AntiOS-ClamAV-Staging-[a-f0-9]{32}$' -or
+        $Source -ine [IO.Path]::GetFullPath($expectedSource)) {
+        throw 'Archive-based ClamAV trust requires the exact protected AntiOS staging directory.'
+    }
+    if (Test-Path -LiteralPath $stagingRoot) { Assert-NoReparseTree $stagingRoot }
+    $trustedReceipt = Assert-AntiOSArchivePair -ArchivePath $TrustedArchivePath -SourceDirectory $Source -Manifest $manifest
+    $signature = [pscustomobject]@{
+        ClamdStatus = 'ArchivePinned'
+        FreshClamStatus = 'ArchivePinned'
+        Signer = '(pinned release archive SHA-256; PE publisher not asserted)'
+    }
+} else {
+    if (-not $RequireValidSignature) {
+        throw 'Unsigned arbitrary ClamAV sources are not supported. Use the pinned official archive installer.'
+    }
+    $signature = Assert-SignedPair $SourceClamd $SourceFresh
+}
 $configSource = Get-ConfigSource
 
-if (Get-Service -Name $EngineServiceName -ErrorAction SilentlyContinue) {
-    throw "A service named '$EngineServiceName' already exists. AntiOS will not replace an existing ClamAV service."
-}
-if (Test-Path -LiteralPath $InstallRoot) { throw "Managed engine destination already exists: $InstallRoot" }
-if (Test-Path -LiteralPath $DataRoot) { throw "Managed engine data destination already exists: $DataRoot" }
-if (Test-Path $ClamRegistry) {
-    $existingConf = Get-ItemPropertyValue -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
-    $existingData = Get-ItemPropertyValue -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
-    if ($existingConf -or $existingData) {
-        throw 'Existing machine-wide ClamAV ConfDir/DataDir registry configuration was found; refusing to overwrite another installation.'
-    }
-}
+Assert-FreshEngineInstallTargets
 
 [pscustomobject]@{
     Source = $Source
@@ -162,12 +237,16 @@ if (-not $Apply) {
 }
 
 Assert-Administrator
+# Do not trust a pre-elevation dry-run: a directory or updater task may have
+# appeared while UAC was displayed or another installer was active.
+Assert-FreshEngineInstallTargets
 $createdInstall = $false
 $createdData = $false
-$serviceInstalled = $false
-$taskInstalled = $false
+$serviceInstallAttempted = $false
+$taskInstallAttempted = $false
+$registryTouched = $false
 try {
-    New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $InstallRoot -ErrorAction Stop | Out-Null
     $createdInstall = $true
     $engineAcl = New-Object Security.AccessControl.DirectorySecurity
     $engineAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)')
@@ -176,19 +255,44 @@ try {
 
     $ManagedClamd = Join-Path $InstallRoot 'clamd.exe'
     $ManagedFresh = Join-Path $InstallRoot 'freshclam.exe'
-    Assert-SignedPair $ManagedClamd $ManagedFresh | Out-Null
+    if ($trustedReceipt) {
+        foreach ($name in @('clamd.exe', 'freshclam.exe')) {
+            $field = if ($name -eq 'clamd.exe') { 'clamd_sha256' } else { 'freshclam_sha256' }
+            if ((Get-AntiOSSha256 (Join-Path $InstallRoot $name)) -cne [string]$trustedReceipt.$field) {
+                throw "Installed $name differs from the verified official archive."
+            }
+        }
+        # Receipt is stored in protected Program Files; hash checking replaces
+        # PE signing *only* for this authenticated, immutable vendor ZIP.
+        [IO.File]::WriteAllText(
+            (Join-Path $InstallRoot 'engine-trust.json'),
+            ($trustedReceipt | ConvertTo-Json -Depth 4),
+            [Text.UTF8Encoding]::new($false)
+        )
+        Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest $manifest | Out-Null
+    } else {
+        Assert-SignedPair $ManagedClamd $ManagedFresh | Out-Null
+    }
 
-    New-Item -ItemType Directory -Path $ConfigRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $DatabaseRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $TempRoot -Force | Out-Null
+    # Create the machine-wide folder without -Force. Ownership is recorded
+    # as soon as creation succeeds, so even a later subfolder failure can be
+    # cleaned up. Harden the root ACL before creating its children.
+    if (Test-Path -LiteralPath $DataRoot) {
+        throw "Managed engine data destination appeared during installation: $DataRoot"
+    }
+    New-Item -ItemType Directory -Path $DataRoot -ErrorAction Stop | Out-Null
     $createdData = $true
     $dataAcl = New-Object Security.AccessControl.DirectorySecurity
     $dataAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)')
     Set-Acl -LiteralPath $DataRoot -AclObject $dataAcl
+    New-Item -ItemType Directory -Path $ConfigRoot -ErrorAction Stop | Out-Null
+    New-Item -ItemType Directory -Path $DatabaseRoot -ErrorAction Stop | Out-Null
+    New-Item -ItemType Directory -Path $TempRoot -ErrorAction Stop | Out-Null
 
     Copy-Item -LiteralPath (Join-Path $configSource 'clamd.conf.example') -Destination $ClamdConfig
     Copy-Item -LiteralPath (Join-Path $configSource 'freshclam.conf.example') -Destination $FreshConfig
 
+    $registryTouched = $true
     New-Item -Path $ClamRegistry -Force | Out-Null
     New-ItemProperty -Path $ClamRegistry -Name ConfDir -PropertyType String -Value $ConfigRoot -Force | Out-Null
     New-ItemProperty -Path $ClamRegistry -Name DataDir -PropertyType String -Value $DatabaseRoot -Force | Out-Null
@@ -198,18 +302,16 @@ try {
     & $ManagedFresh "--config-file=$FreshConfig"
     if ($LASTEXITCODE -ne 0) { throw "Initial FreshClam update failed with exit code $LASTEXITCODE" }
 
+    $serviceInstallAttempted = $true
     & $ManagedClamd --install-service
     if ($LASTEXITCODE -ne 0) { throw "clamd --install-service failed with exit code $LASTEXITCODE" }
-    $serviceInstalled = $true
 
     $engine = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'"
     if (-not $engine -or $engine.ServiceType -ne 'Own Process' -or
         $engine.StartName -notin @('LocalSystem','NT AUTHORITY\SYSTEM')) {
         throw 'Installed clamd service is not an own-process LocalSystem service.'
     }
-    if ($engine.PathName -notlike "*$ManagedClamd*") {
-        throw "Installed clamd service does not reference the managed executable: $($engine.PathName)"
-    }
+    Assert-ManagedClamdService
     & "$env:SystemRoot\System32\sc.exe" config $EngineServiceName start= auto | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure automatic ClamD startup.' }
     & "$env:SystemRoot\System32\sc.exe" description $EngineServiceName 'AntiOS managed ClamAV scanning engine' | Out-Null
@@ -224,21 +326,87 @@ try {
     $periodic = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(17) -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 3650)
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 5)
-    Register-ScheduledTask -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -Force | Out-Null
-    $taskInstalled = $true
+    # Installing a new engine must NEVER take ownership of someone else's
+    # root-scheduler task, even if it appeared after the preflight.
+    if (Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue) {
+        throw 'FreshClam updater task appeared during installation; refusing to overwrite it.'
+    }
+    $taskInstallAttempted = $true
+    Register-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Action $action -Trigger @($startup, $periodic) -Principal $principal -Settings $settings -Description 'Keeps the AntiOS ClamAV signature database current.' -ErrorAction Stop | Out-Null
 
     Write-Output "AntiOS managed ClamAV is running as '$EngineServiceName'. FreshClam is scheduled and Guard can verify the loopback peer through SCM."
 } catch {
-    if ($taskInstalled) {
-        Unregister-ScheduledTask -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    $installFailure = $_
+    $unsafeToRemovePayload = $false
+    $rollbackProblems = [Collections.Generic.List[string]]::new()
+
+    # Register-ScheduledTask and clamd --install-service may create an object
+    # *before returning an error*. Detect that possibility, but do not remove
+    # a colliding or replaced object unless ownership is still confirmed.
+    if ($taskInstallAttempted) {
+        try {
+            $existingTask = Get-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -ErrorAction SilentlyContinue
+            if ($existingTask) {
+                $actions = @($existingTask.Actions)
+                $actual = if ($actions.Count -eq 1 -and $actions[0].Execute) {
+                    [IO.Path]::GetFullPath([string]$actions[0].Execute)
+                } else { '' }
+                $principal = [string]$existingTask.Principal.UserId
+                if ($actual -ine [IO.Path]::GetFullPath($ManagedFresh) -or
+                    $principal -notin @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18')) {
+                    throw 'FreshClam updater task is not owned by this installation.'
+                }
+                Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false -ErrorAction Stop
+            }
+        } catch {
+            $unsafeToRemovePayload = $true
+            $rollbackProblems.Add("Scheduled-task rollback: $($_.Exception.Message)")
+        }
     }
-    if ($serviceInstalled) {
-        Stop-Service -Name $EngineServiceName -Force -ErrorAction SilentlyContinue
-        $managed = Join-Path $InstallRoot 'clamd.exe'
-        if (Test-Path -LiteralPath $managed) { & $managed --uninstall-service | Out-Null }
+    if ($serviceInstallAttempted) {
+        try {
+            $existingService = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction SilentlyContinue
+            if ($existingService) {
+                Assert-ManagedClamdService
+                if ($existingService.State -ne 'Stopped') {
+                    Stop-Service -Name $EngineServiceName -Force -ErrorAction Stop
+                    (Get-Service -Name $EngineServiceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+                }
+                & "$env:SystemRoot\System32\sc.exe" delete $EngineServiceName | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Could not delete the verified ClamD service (sc.exe exit $LASTEXITCODE)"
+                }
+            }
+        } catch {
+            $unsafeToRemovePayload = $true
+            $rollbackProblems.Add("ClamD service rollback: $($_.Exception.Message)")
+        }
     }
-    Remove-OwnedRegistry
-    if ($createdInstall -and (Test-Path -LiteralPath $InstallRoot)) { Remove-Item -LiteralPath $InstallRoot -Recurse -Force }
-    if ($createdData -and (Test-Path -LiteralPath $DataRoot)) { Remove-Item -LiteralPath $DataRoot -Recurse -Force }
-    throw
+
+    # If a service/task is still bound to these files, preserve them and the
+    # registry data; removing them could break the surviving SYSTEM component.
+    if (-not $unsafeToRemovePayload) {
+        if ($registryTouched) {
+            try { Remove-OwnedRegistry }
+            catch { $rollbackProblems.Add("Registry cleanup: $($_.Exception.Message)") }
+        }
+        foreach ($ownedRoot in @(
+            @{ Created = $createdData; Path = $DataRoot },
+            @{ Created = $createdInstall; Path = $InstallRoot }
+        )) {
+            if ($ownedRoot.Created -and (Test-Path -LiteralPath $ownedRoot.Path)) {
+                try {
+                    Assert-NoReparseTree $ownedRoot.Path
+                    Remove-Item -LiteralPath $ownedRoot.Path -Recurse -Force -ErrorAction Stop
+                } catch {
+                    $rollbackProblems.Add("Directory cleanup: $($_.Exception.Message)")
+                }
+            }
+        }
+    } else {
+        $rollbackProblems.Add('Keeping managed files and registry values because a service/task rollback could not be verified.')
+    }
+    foreach ($problem in $rollbackProblems) { Write-Warning $problem }
+    # A cleanup error must not turn the true install failure into "success".
+    throw $installFailure
 }

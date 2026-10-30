@@ -22,6 +22,47 @@ foreach ($required in @($CliSource, $GuiSource, $GuardSource, $StartupSource, $D
     }
 }
 
+# Inventory only files coming from the trusted source payload, never the
+# contents of an existing install directory (which may include user data).
+$owned = [Collections.Generic.List[string]]::new()
+foreach ($relative in @('AntiOS.exe', 'AntiOS-GUI.exe', 'AntiOS-Guard.exe',
+                        'guard-startup.ps1', 'dashboard-startup.ps1')) {
+    $source = Join-Path $SourceDirectory $relative
+    $item = Get-Item -LiteralPath $source -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Unsafe AntiOS source file: $source"
+    }
+    $owned.Add($relative)
+}
+foreach ($runtime in @('_cli', '_gui', '_guard')) {
+    $folder = Join-Path $SourceDirectory $runtime
+    $directory = Get-Item -LiteralPath $folder -Force
+    if (-not $directory.PSIsContainer -or ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Unsafe runtime payload directory: $folder"
+    }
+    foreach ($item in (Get-ChildItem -LiteralPath $folder -Recurse -Force)) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Source runtime contains a reparse point: $($item.FullName)"
+        }
+        if (-not $item.PSIsContainer) {
+            $suffix = $item.FullName.Substring($folder.Length).TrimStart('\')
+            $owned.Add((Join-Path $runtime $suffix))
+        }
+    }
+}
+if (Test-Path -LiteralPath $InstallDir) {
+    $existing = Get-Item -LiteralPath $InstallDir -Force
+    if (-not $existing.PSIsContainer -or
+        ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Unsafe existing AntiOS install directory: $InstallDir"
+    }
+}
+$manifestFile = Join-Path $InstallDir 'install-manifest.json'
+if ((Test-Path -LiteralPath $manifestFile) -and
+    ((Get-Item -LiteralPath $manifestFile -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'Refusing to overwrite a reparse-point install manifest.'
+}
+
 if (Test-Path -LiteralPath $GuardTarget) {
     $guardState = (& $GuardTarget status | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0 -or $guardState.running) {
@@ -38,6 +79,18 @@ Copy-Item -Force $DashboardStartupSource $InstallDir
 foreach ($runtime in @("_cli", "_gui", "_guard")) {
     Copy-Item -Recurse -Force (Join-Path $SourceDirectory $runtime) $InstallDir
 }
+
+# The manifest is written only after the payload copy succeeded. Uninstall
+# removes these exact relative paths, leaving unknown files untouched.
+$manifest = @{
+    schema = 1
+    files = @($owned | Sort-Object -Unique)
+}
+[IO.File]::WriteAllText(
+    $manifestFile,
+    ($manifest | ConvertTo-Json -Depth 4),
+    [Text.UTF8Encoding]::new($false)
+)
 
 $Programs = [Environment]::GetFolderPath("Programs")
 $StartMenuDir = Join-Path $Programs "AntiOS"
