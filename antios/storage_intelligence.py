@@ -243,7 +243,12 @@ def insights_for_scan(scan: dict[str, Any], *, journal_path: str | Path | None =
         "recommendations": [],
         "preferences": {},
     }
-    if scan.get("cancelled"):
+    if scan.get("cancelled") or scan.get("limit_reached"):
+        result["history"] = {
+            "forecast": "unavailable",
+            "reason": "cancelled-or-incomplete-scan",
+        }
+        result["survival"]["note"] += " Scan was incomplete; evidence may be missing."
         return result
     prefs: dict[str, dict[str, Any]] = {}
     try:

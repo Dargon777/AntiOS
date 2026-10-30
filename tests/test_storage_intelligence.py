@@ -79,3 +79,12 @@ def test_insights_integrate_without_deleting_anything(tmp_path):
 def test_smartsleep_does_not_claim_idle_on_unsupported_os():
     if os.name != "nt":
         assert not background_permission()["allowed"]
+
+
+def test_incomplete_scan_does_not_pollute_memorymap(tmp_path):
+    scan = _scan(tmp_path)
+    scan["limit_reached"] = True
+    db = tmp_path / "history.db"
+    insight = insights_for_scan(scan, journal_path=db)
+    assert insight["history"]["forecast"] == "unavailable"
+    assert not db.exists()

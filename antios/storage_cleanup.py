@@ -572,14 +572,19 @@ def cleanup_files(
                 _write_cleanup_manifest(backup_dir, manifest)
                 result["backed_up"] += 1
 
+            # Determine the destination volume BEFORE removing the original.
+            # A failed stat must never turn a successful deletion into an
+            # incorrectly reported "skipped" item.
+            same_volume_backup = (
+                mode == "backup" and destination.stat().st_dev == before_delete.st_dev
+            )
             target.unlink()
 
             result["deleted"] += 1
             result["gross_deleted_bytes"] += int(snapshot.get("size_bytes", 0))
-            # No space is reclaimed if other hard links retain the blocks or
-            # a verified backup still occupies the same source volume.
-            if (before_delete.st_nlink == 1 and
-                    (mode == "delete" or (destination.stat().st_dev != before_delete.st_dev))):
+            # No space is reclaimed if hard links retain the data or the
+            # verified backup occupies the same source volume.
+            if before_delete.st_nlink == 1 and not same_volume_backup:
                 result["bytes_freed"] += int(snapshot.get("size_bytes", 0))
             item["status"] = "deleted"
             if mode == "backup":
