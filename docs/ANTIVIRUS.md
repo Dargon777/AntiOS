@@ -54,6 +54,23 @@ AntiOS.exe protection-repair
 AntiOS.exe protection-repair --yes --update-signatures
 ```
 
+A privileged repair snapshots the current ACLs on the installed engine and
+database folders, the existing FreshClam scheduled-task XML, and ClamD's
+startup mode/service DACL/description *before* changing them. If a subsequent
+operation fails, AntiOS attempts to restore owned resources and remove a
+newly created service/task; rollback refuses to touch a service or task whose
+ownership cannot be confirmed. A rollback failure is reported and still leaves
+the original repair operation unsuccessful. Windows may prevent recovery after
+external concurrent changes, access denial or a crash, so **this is best-effort
+rollback, not an atomic transaction**.
+
+For a successful maintenance operation, the PowerShell JSON result contains
+`maintenance_verified_after: true` only after independently re-reading SCM
+service identity/running/autostart state and the FreshClam task executable.
+This field does **not** imply active real-time protection: the dashboard/Guard
+separately verify the ClamD loopback peer, signature database freshness and
+actual scan readiness before showing a healthy state.
+
 Repair resets the managed engine/data ACLs, ClamD service policy and FreshClam
 scheduled task. It refuses to take over an ambiguous `clamd` service whose
 account/path does not match the AntiOS-managed runtime.
