@@ -1034,3 +1034,18 @@ def test_remote_stop_checked_before_polling_processes(tmp_path, monkeypatch):
     assert result["state"] == "stopped"
     assert result["running"] is False
     assert read_guard_state(state_path)["state"] == "stopped"
+
+
+def test_guard_journal_reader_uses_wal_for_concurrent_status(tmp_path):
+    from antios.guard_state import GuardState, read_guard_state
+    folder = tmp_path / "isolated-state"
+    store = GuardState(folder)
+    try:
+        assert store.db.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        store.publish({"state": "monitoring", "running": True, "heartbeat": time.time()})
+        store.event("probe", {"message": "hello"})
+        status = read_guard_state(folder, history=True)
+        assert status["state"] == "monitoring"
+        assert any(entry["kind"] == "probe" for entry in status["events"])
+    finally:
+        store.close()
