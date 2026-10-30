@@ -2082,7 +2082,9 @@ class Dashboard:
                     " (снижение)" if trend < 0 and self.language == "ru" else ""))
             )
             self.cleanup_intelligence_label.configure(text=note, fg=THEME["muted"])
-        self.cleanup_tree.delete(*self.cleanup_tree.get_children())
+        existing = self.cleanup_tree.get_children()
+        if existing:
+            self.cleanup_tree.delete(*existing)
         self.cleanup_rows.clear()
         categories = candidate_categories(result)
         meta = result.get("candidate_snapshots", {})
