@@ -259,7 +259,7 @@ def create(paths: list[Path], destination: Path, *, previous: Path | None = None
                     if absolute == destination or (previous and absolute == Path(os.path.abspath(previous))):
                         return
                     try:
-                        target = checked_path(absolute)
+                        target = checked_path(_local_original_path(str(absolute)))
                         info = target.lstat()
                     except (OSError, ValueError) as exc:
                         if len(errors) < 1000:
