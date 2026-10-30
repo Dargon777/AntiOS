@@ -1,79 +1,28 @@
-# AntiOS v2.0.0 alpha 28
+# AntiOS v2.0.0 alpha 29
 
-Alpha 28 rolls the recent security, diagnostics and recovery work into one public
-Windows alpha release.
+Alpha 29 introduces lightweight Storage Intelligence and cleanup safety improvements on top of alpha 28.
 
-## File recovery
+## Storage Intelligence
 
-AntiOS now includes opt-in bounded file baselines from the Antivirus page and CLI.
+- **LastCopy** checks whether a matching independent file was verified *inside the selected scan*. No match does not prove that a file is the only remaining copy; external drives, cloud storage and other folders are not checked.
+- **MemoryMap** stores one aggregate folder-size/file-count sample per day for up to 180 days and 32 scan roots. It can be disabled or erased in the GUI or CLI. Root identifiers are pseudonymized, not encrypted.
+- **TimeDebt** estimates folder-size trends only after enough separate-day samples. It is an experimental trend, not a prediction of future disk use.
+- **CleanupDNA** lets users prefer, hide or reset cleanup categories. Repeated confirmed cleanups can affect display priority, never authorize deletion.
+- **RecoveryProof** checks Storage Cleanup backup checksums and test-restores one small file in a private temporary directory. It does not test full Windows restoration, prove that backups are malware-free or overwrite originals.
+- **Survival** provides read-only evidence about candidates lacking a verified independent copy within the selected scan.
+- **SmartSleep** gates optional explicitly requested background maintenance on AC power and user idle time. It does not pause real-time antivirus protection.
 
-- save selected files with SHA-256 integrity metadata;
-- inspect and compare saved files with current originals;
-- recover all or selected verified copies into a fresh directory;
-- reject malformed ZIP data, invalid Unicode and unsafe network/device manifest paths;
-- verify every stored blob before reading original paths;
-- bind baseline extension/recovery selections to the manifest that was previously shown.
+## Safety and reliability
 
-This is file backup and integrity checking, not a full Windows rollback and not a
-malware-clean verdict. Archives are currently unencrypted and should be kept on
-appropriately protected or offline storage.
+- Restored the missing Storage Cleanup results renderer in the desktop UI.
+- Incomplete or bounded scans cannot proceed to destructive cleanup.
+- Hard links are not misreported as independent copies or reclaimable disk space.
+- Cleanup backup writes on the same volume do not overstate net freed bytes.
+- Improved Guard SQLite concurrency with write-ahead logging.
+- Added focused automated tests and documented privacy and limitations.
 
-## Diagnostics Center
+## Installation
 
-The desktop app now includes a local Diagnostics Center for protection and runtime
-events.
+This is a prerelease. Windows builds are unsigned unless artifact signing is configured; Windows SmartScreen may warn. Use the installer or portable ZIP from this release's Assets. Back up important files before running cleanup.
 
-- bounded JSONL event history with rollover;
-- severity/component/search filters;
-- human-readable diagnosis alongside technical details;
-- privacy redaction at ingestion and stronger redaction in support exports;
-- reviewed ZIP support export without quarantine contents, malware samples or user
-  configuration files.
-
-## Managed ClamAV trust and repair
-
-Managed ClamAV bootstrap and maintenance were hardened substantially.
-
-- the official ClamAV 1.5.4 Windows x64 ZIP is pinned by exact URL, size and SHA-256;
-- extracted `clamd.exe` and `freshclam.exe` are attested against the trusted archive;
-- installed engine trust metadata is rechecked before maintenance;
-- repair snapshots owned service/task/ACL state and attempts best-effort rollback on
-  later failure;
-- postconditions re-check service identity, startup state and updater task identity;
-- ambiguous or foreign ClamAV services/tasks fail closed instead of being replaced.
-
-## Installer and system-change hardening
-
-- startup task changes verify AntiOS ownership before replacing/removing tasks;
-- ClamAV fresh install refuses colliding services, tasks and machine-wide bindings;
-- partial install failures preserve or safely roll back owned resources when possible;
-- Storage Cleanup backup files use exclusive creation and fsync before destructive
-  follow-up actions;
-- full-source audit tooling now checks tracked files, parsable formats, PowerShell
-  grammar and high-risk source contracts in CI.
-
-## Public site
-
-The GitHub Pages site was redesigned for public alpha distribution with EN/RU
-content, transparent capability/limitation messaging and release-aware download
-buttons that follow the newest published GitHub release.
-
-## Validation
-
-The merged feature/audit heads passed their GitHub Actions suites before alpha 28
-integration, including Windows portable builds, hardened Windows builds, Store MSIX,
-CodeQL where applicable, native-boundary tests and the full-source audit.
-
-The alpha 28 integration branch is expected to pass the same release metadata,
-Python and Windows packaging gates before publication.
-
-## Important alpha limitations
-
-AntiOS remains pre-release software. It does not claim certified Windows primary
-antivirus registration, ELAM/PPL status or complete pre-execution blocking. Resident
-Guard remains primarily post-write protection; the native filter path is still
-experimental. Real-machine Windows 10/11 acceptance and hostile failure-injection
-coverage remain separate release-hardening work.
-
-Windows 10 22H2 x64 (build 19045) and newer Windows 11 builds remain the supported
-desktop target.
+**Security scope:** Storage Intelligence is a local, on-demand aid, not a replacement for verified offline backups, antivirus or professional recovery. See docs/STORAGE_INTELLIGENCE.md.
