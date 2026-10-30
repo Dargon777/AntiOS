@@ -6,6 +6,18 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+## [2.0.0a29] - 2026-10-30
+
+- Added LastCopy evidence for independent duplicate files within a selected storage scan; hard links are not counted as separate copies.
+- Added bounded MemoryMap storage history and experimental TimeDebt folder-size trends, with controls to disable and erase history.
+- Added CleanupDNA user preferences and cautious recommendation ranking from confirmed cleanup actions; never deletes automatically.
+- Added RecoveryProof backup SHA-256 verification with an isolated sample restoration and read-only Survival copy-coverage reports.
+- Added SmartSleep idle/AC gating for optional background maintenance without throttling antivirus protection.
+- Restored Storage Cleanup results rendering in the desktop GUI and added limits that prevent deletion after incomplete scans.
+- Improved net reclaimed-space estimates when backups are on the same volume; improved Guard journal concurrency using SQLite WAL.
+- Updated Python, Windows installer/executable and Store package metadata to alpha 29.
+
+
 ## [2.0.0a28] - 2026-10-30
 
 - Added bounded file baseline capture, archive inspection, change comparison and
