@@ -6,6 +6,13 @@ The format follows Keep a Changelog principles. AntiOS v2 is currently pre-relea
 
 ## [Unreleased]
 
+- Added bounded file baseline capture, archive inspection, change comparison and
+  selected-file recovery through the CLI and Russian/English desktop UI.
+- Recovery now normalizes corrupt compressed ZIP data into structured errors and
+  rejects manifest paths that cannot be encoded as valid UTF-8.
+- Logging reconfiguration now closes replaced handlers instead of leaking file
+  handles.
+
 ## [2.0.0a19] - 2026-10-04
 
 - Rebuilt Antivirus around protection state, scanning, Resident Guard, results
