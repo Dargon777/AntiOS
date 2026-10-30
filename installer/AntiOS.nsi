@@ -47,6 +47,8 @@ Var RollbackFailed
   !insertmacro ${OP} "guard-startup.ps1"
   !insertmacro ${OP} "dashboard-startup.ps1"
   !insertmacro ${OP} "protection-engine.ps1"
+  !insertmacro ${OP} "clamav-trust.ps1"
+  !insertmacro ${OP} "clamav-repair-validation.ps1"
   !insertmacro ${OP} "protection-bootstrap.ps1"
   !insertmacro ${OP} "protection-repair.ps1"
   !insertmacro ${OP} "protection-first-run.ps1"
