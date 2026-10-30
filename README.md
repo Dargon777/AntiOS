@@ -69,6 +69,13 @@ Windows health results use simple **OK / Review / Warning / Info** states and ke
 
 AntiOS deliberately avoids a fake all-knowing “PC health score”.
 
+## Experimental file recovery
+
+Antivirus → File recovery and the CLI provide opt-in bounded file baselines:
+save selected files with SHA-256 checksums, compare later changes, inspect saved
+content and recover verified bytes into a fresh directory. This is file backup
+and integrity checking, not a full Windows rollback or a malware-clean verdict.
+
 ## Privacy
 
 **No automatic telemetry.**
