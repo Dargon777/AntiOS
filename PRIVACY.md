@@ -42,6 +42,22 @@ File logging is disabled by default.
 
 If you enable logging, AntiOS records operational information such as command name, dry-run state, change count and backup path. It intentionally avoids logging scanned fingerprint values, generated identity values, or backup contents.
 
+## Local lightweight storage intelligence
+
+A user-requested Storage Cleanup scan can store aggregate folder size/file-count
+snapshots (up to 180 days for at most 32 selected roots) and CleanupDNA
+category preferences in the local per-user storage-intelligence.sqlite3
+journal. Scan roots are stored as deterministic SHA-256 identifiers, not plaintext
+paths, but this is **not encryption** and does not guarantee anonymity. This
+feature does not install a continuous file-access observer or upload analytics.
+
+The optional RecoveryProof command explicitly reads and hashes selected Storage
+Cleanup backup files, and restores a small test file into a temporary sandbox.
+Storage Cleanup backups contain **unencrypted file contents**, unlike the DPAPI
+antivirus quarantine. Keep backup folders in appropriately protected locations.
+The owner can delete the storage-intelligence.sqlite3 journal to reset its
+history and preferences when AntiOS is closed.
+
 ## System changes
 
 Health and Storage Cleanup checks and on-demand file scans are read-only. Quarantine and restoration require a GUI confirmation or CLI `--yes`. Restoration never overwrites an existing file. Defender scans require confirmation and may remediate detections under Defender's own policy.

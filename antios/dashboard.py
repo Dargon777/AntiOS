@@ -37,6 +37,10 @@ from .storage_cleanup import (
     format_bytes,
     scan_storage,
 )
+from .storage_intelligence import (
+    StorageJournal, candidate_categories, copy_evidence, insights_for_scan,
+)
+from .backup_proof import prove_cleanup_backup
 from .tray import (
     DashboardTray,
     application_icon_asset,
@@ -1719,6 +1723,24 @@ class Dashboard:
             wraplength=900,
         ).pack(fill="x", pady=(0, 10))
 
+        self.cleanup_intelligence_label = tk.Label(
+            parent, text="MemoryMap / TimeDebt: awaiting first scan",
+            bg=THEME["bg"], fg=THEME["muted"],
+            font=("Segoe UI", 9), anchor="w", wraplength=900,
+        )
+        self.cleanup_intelligence_label.pack(fill="x", pady=(0, 10))
+
+        intelligence_actions = tk.Frame(parent, bg=THEME["bg"])
+        intelligence_actions.pack(fill="x", pady=(0, 9))
+        for caption, action in (
+            (("Проверить резервную копию" if self.language == "ru" else "RecoveryProof"), self._proof_cleanup_backup),
+            (("Отчёт о восстановимости" if self.language == "ru" else "Survival report"), self._show_cleanup_survival),
+            (("Предпочитать категорию" if self.language == "ru" else "Prefer category"), lambda: self._cleanup_preference("prefer")),
+            (("Скрыть категорию" if self.language == "ru" else "Hide category"), lambda: self._cleanup_preference("hide")),
+            (("Сбросить приоритеты" if self.language == "ru" else "Reset preferences"), self._cleanup_reset_preferences),
+        ):
+            self._button(intelligence_actions, caption, action, kind="secondary").pack(side="left", padx=(0, 6))
+
         table_header = tk.Frame(parent, bg=THEME["bg"])
         table_header.pack(fill="x", pady=(0, 6))
         tk.Label(
@@ -1927,6 +1949,8 @@ class Dashboard:
                     progress=progress,
                     cancelled=self._storage_cancel.is_set,
                 )
+                if not result.get("cancelled"):
+                    result["intelligence"] = insights_for_scan(result)
             except Exception as exc:
                 self.root.after(
                     0,
@@ -2028,6 +2052,166 @@ class Dashboard:
         self.antivirus_panel.render_provider_status(health)
         self._render_startup(health)
         self._render_system(scan_data, health)
+
+
+    def _render_cleanup_result(self, result: dict[str, Any]) -> None:
+        """Render bounded, opt-in storage scan rows (missing in Alpha 28)."""
+        summary = result.get("summary", {})
+        for key, widget in self.cleanup_summary.items():
+            value = summary.get(key, 0)
+            widget.configure(text=format_bytes(value) if key.endswith("_bytes") else str(value))
+        if result.get("limit_reached"):
+            self.cleanup_intelligence_label.configure(
+                text=("Лимит сканирования: выберите меньшую папку. Очистка заблокирована."
+                      if self.language == "ru" else
+                      "Scan limit reached: choose a smaller folder; deletion is blocked."),
+                fg=THEME["warn"],
+            )
+        else:
+            info = result.get("intelligence", {})
+            history = info.get("history", {})
+            trend = history.get("bytes_per_day")
+            note = (
+                ("MemoryMap: данных пока недостаточно" if self.language == "ru"
+                 else "MemoryMap: insufficient history")
+                if trend is None else
+                (("TimeDebt: изменение папки около " if self.language == "ru"
+                  else "TimeDebt: estimated folder change ")
+                 + format_bytes(abs(trend)) + ("/день" if self.language == "ru" else "/day")
+                 + (" (рост)" if trend > 0 and self.language == "ru" else
+                    " (снижение)" if trend < 0 and self.language == "ru" else ""))
+            )
+            self.cleanup_intelligence_label.configure(text=note, fg=THEME["muted"])
+        self.cleanup_tree.delete(*self.cleanup_tree.get_children())
+        self.cleanup_rows.clear()
+        categories = candidate_categories(result)
+        meta = result.get("candidate_snapshots", {})
+        preferences = result.get("intelligence", {}).get("preferences", {})
+        recommendations = result.get("intelligence", {}).get("recommendations", [])
+        order = [row["path"] for row in recommendations] or sorted(categories)
+        labels = {
+            "duplicate": self.t("cleanup.type.duplicate"),
+            "old": self.t("cleanup.type.old"),
+            "archive": self.t("cleanup.type.archive"),
+            "empty": self.t("cleanup.type.empty"),
+        }
+        shown = 0
+        for path in order:
+            kinds = categories.get(path, [])
+            if kinds and all(preferences.get(cat, {}).get("choice") == "hide" for cat in kinds):
+                continue
+            snapshot = meta.get(path)
+            if not isinstance(snapshot, dict):
+                continue
+            modified_ns = snapshot.get("modified_ns", 0)
+            try:
+                date = datetime.fromtimestamp(int(modified_ns) / 1e9).strftime("%Y-%m-%d")
+            except (ValueError, OverflowError, OSError, TypeError):
+                date = "—"
+            size = int(snapshot.get("size_bytes", 0))
+            iid = self.cleanup_tree.insert(
+                "", "end", values=(", ".join(labels[k] for k in kinds),
+                                   format_bytes(size), date, path),
+            )
+            self.cleanup_rows[iid] = {
+                "path": path, "size": size, "categories": kinds,
+            }
+            shown += 1
+            if shown >= 1500:  # Tk must not freeze on huge inventories.
+                break
+        self._cleanup_selection_changed()
+        if shown < len(categories):
+            self.cleanup_status.configure(
+                text=(f"Показано {shown} из {len(categories)} кандидатов"
+                      if self.language == "ru" else
+                      f"Showing {shown} of {len(categories)} candidates")
+            )
+
+    def _show_cleanup_survival(self) -> None:
+        from tkinter import messagebox
+        if not self.storage_result:
+            return
+        report = self.storage_result.get("intelligence", {}).get("survival")
+        if not report:
+            return
+        text = (
+            (f"Проверено кандидатов: {report['assessed_cleanup_candidates']}\n"
+             f"Без подтверждённой независимой копии: "
+             f"{report['candidates_without_verified_independent_copy']}\n\n"
+             "Проверены только файлы внутри выбранной папки. "
+             "Это не означает, что копий больше нигде нет.")
+            if self.language == "ru" else
+            (f"Candidates: {report['assessed_cleanup_candidates']}\n"
+             f"Without another verified file in this scan: "
+             f"{report['candidates_without_verified_independent_copy']}\n\n"
+             "Only this scanned folder was checked; no claim of uniqueness.")
+        )
+        messagebox.showinfo("AntiOS Survival / LastCopy", text)
+
+    def _cleanup_preference(self, choice: str) -> None:
+        from tkinter import messagebox
+        categories = {
+            cat for row in self._selected_cleanup_rows() for cat in row.get("categories", [])
+        }
+        if not categories:
+            messagebox.showinfo("CleanupDNA", "Select a cleanup candidate first.")
+            return
+        try:
+            with StorageJournal() as journal:
+                for category in categories:
+                    journal.set_preference(category, choice)
+            self.storage_result["intelligence"] = insights_for_scan(self.storage_result)
+            self._render_cleanup_result(self.storage_result)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("CleanupDNA", str(exc))
+
+    def _cleanup_reset_preferences(self) -> None:
+        from tkinter import messagebox
+        try:
+            with StorageJournal() as journal:
+                for category in ("duplicate", "old", "archive", "empty"):
+                    journal.set_preference(category, "normal")
+            if self.storage_result:
+                self.storage_result["intelligence"] = insights_for_scan(self.storage_result)
+                self._render_cleanup_result(self.storage_result)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("CleanupDNA", str(exc))
+
+    def _proof_cleanup_backup(self) -> None:
+        from tkinter import filedialog, messagebox
+        if self._storage_action_busy:
+            return
+        chosen = filedialog.askdirectory(
+            title="AntiOS RecoveryProof: select a Storage Cleanup backup",
+            mustexist=True,
+        )
+        if not chosen:
+            return
+        self._storage_action_busy = True
+        self._set_cleanup_busy(True)
+
+        def worker() -> None:
+            try:
+                report = prove_cleanup_backup(chosen)
+                message = (
+                    f"Status: {report['status']}\n"
+                    f"Verified: {report['verified']} / {report['entries']}\n"
+                    f"Test-restored in sandbox: {report['sandbox_restored']}\n"
+                    + "\n".join(report["errors"][:5])
+                )
+                failed = bool(report["errors"])
+            except Exception as exc:
+                message, failed = str(exc), True
+            def finish() -> None:
+                self._storage_action_busy = False
+                self._set_cleanup_busy(False)
+                if failed:
+                    messagebox.showwarning("AntiOS RecoveryProof", message)
+                else:
+                    messagebox.showinfo("AntiOS RecoveryProof", message)
+            self.root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _selected_cleanup_rows(self) -> list[dict[str, Any]]:
         return [
@@ -2132,6 +2316,18 @@ class Dashboard:
                 return
             backup_root = chosen
         else:
+            # LastCopy never declares a file unique, but it can warn that
+            # no independent copy was verified within the scanned folder.
+            evidence = copy_evidence(self.storage_result, paths)
+            unverified = sum(v['status'] == 'no-independent-copy-verified'
+                             for v in evidence.values())
+            if unverified and not messagebox.askyesno(
+                "AntiOS LastCopy",
+                (f"{unverified} selected files have no independently verified copy "
+                 "inside the scanned folder. Other backups were not checked. "
+                 "Continue to permanent deletion?"), icon="warning",
+            ):
+                return
             if not messagebox.askyesno(
                 self.t("cleanup.confirm_permanent_title"),
                 self.t(
@@ -2185,6 +2381,19 @@ class Dashboard:
         self._set_cleanup_busy(False)
         deleted = int(result.get("deleted", 0))
         errors = len(result.get("errors", []))
+        # CleanupDNA learns only from confirmed successful deletions, never
+        # from files that the user simply ignored.
+        if deleted and self.storage_result:
+            categories = candidate_categories(self.storage_result)
+            chosen_kinds = [kind for item in result.get("items", [])
+                            if item.get("status") == "deleted"
+                            for kind in categories.get(item.get("path"), [])]
+            if chosen_kinds:
+                try:
+                    with StorageJournal() as journal:
+                        journal.confirmed_cleanup(chosen_kinds)
+                except (OSError, ValueError):
+                    pass
         freed = format_bytes(result.get("bytes_freed", 0))
 
         if result.get("mode") == "backup":
