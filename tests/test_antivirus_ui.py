@@ -24,9 +24,7 @@ def test_antivirus_catalog_is_complete_and_formats_in_every_locale():
 def _native_tk_display_available():
     if importlib.util.find_spec("tkinter") is None:
         return False
-    if os.name == "nt":
-        return True
-    if not os.environ.get("DISPLAY"):
+    if os.name != "nt" and not os.environ.get("DISPLAY"):
         return False
     try:
         import tkinter as tk
