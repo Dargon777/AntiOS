@@ -9,7 +9,9 @@ LOGGER_NAME = "antios"
 
 def configure_logging(level: str = "INFO", file_path: str = "") -> logging.Logger:
     logger = logging.getLogger(LOGGER_NAME)
-    logger.handlers.clear()
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.propagate = False
 
