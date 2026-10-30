@@ -65,3 +65,18 @@ journals have their own data and privacy boundaries.
 Performance goals are not benchmark results. Manual RecoveryProof can consume
 disk IO when reading backups. The GUI caps rendered candidate rows to avoid
 creating an enormous Tk table. No estimate is treated as permission to delete.
+
+
+## User control
+
+MemoryMap history is enabled initially but can be switched off or erased.
+The GUI provides toggle/erase controls in Storage Cleanup. CLI equivalents:
+
+    antios storage-history status --json
+    antios storage-history off
+    antios storage-history clear
+    antios storage-history on
+
+Disabling history stops *new* aggregate measurements. Clearing history removes
+old measurements; a subsequent manual scan may create a fresh sample when
+history is enabled. Neither operation affects antivirus detection or quarantine.

@@ -55,8 +55,10 @@ The optional RecoveryProof command explicitly reads and hashes selected Storage
 Cleanup backup files, and restores a small test file into a temporary sandbox.
 Storage Cleanup backups contain **unencrypted file contents**, unlike the DPAPI
 antivirus quarantine. Keep backup folders in appropriately protected locations.
-The owner can delete the storage-intelligence.sqlite3 journal to reset its
-history and preferences when AntiOS is closed.
+The owner can disable, re-enable or erase aggregate history from the GUI or
+storage-history CLI command. Clearing history does not clear CleanupDNA
+preferences. Closing AntiOS before manually deleting the journal also resets
+preferences. Stored copies are not uploaded by this module.
 
 ## System changes
 

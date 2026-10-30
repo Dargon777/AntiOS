@@ -201,6 +201,10 @@ def build_parser() -> argparse.ArgumentParser:
     storage_cmd.add_argument("--background", action="store_true",
                              help="Optional maintenance: skip unless PC is idle on AC power.")
 
+    history_cmd = sub.add_parser("storage-history", help="View, disable or clear MemoryMap history.")
+    history_cmd.add_argument("action", choices=["status", "on", "off", "clear"])
+    history_cmd.add_argument("--json", action="store_true")
+
     proof_cmd = sub.add_parser("storage-proof", help="Verify a Storage Cleanup backup and test a sandbox restore.")
     proof_cmd.add_argument("directory")
     proof_cmd.add_argument("--hash-only", action="store_true", help="Skip the sandbox restore test.")
@@ -440,6 +444,22 @@ def main(argv: list[str] | None = None) -> int:
             if args.lang:
                 dashboard_args.extend(["--lang", args.lang])
             return dashboard_main(dashboard_args)
+
+        if args.command == "storage-history":
+            from .storage_intelligence import StorageJournal
+            with StorageJournal() as journal:
+                if args.action == "on":
+                    journal.set_history_enabled(True)
+                elif args.action == "off":
+                    journal.set_history_enabled(False)
+                elif args.action == "clear":
+                    journal.clear_history()
+                payload = {"enabled": journal.history_enabled(), "action": args.action}
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"MemoryMap: {'enabled' if payload['enabled'] else 'disabled'}; {args.action}")
+            return 0
 
         if args.command == "storage-preference":
             from .storage_intelligence import StorageJournal

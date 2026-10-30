@@ -88,3 +88,16 @@ def test_incomplete_scan_does_not_pollute_memorymap(tmp_path):
     insight = insights_for_scan(scan, journal_path=db)
     assert insight["history"]["forecast"] == "unavailable"
     assert not db.exists()
+
+
+def test_history_can_be_disabled_and_cleared_by_owner(tmp_path):
+    db = tmp_path / "history.db"
+    with StorageJournal(db) as journal:
+        assert journal.history_enabled()
+        journal.capture(tmp_path, 100, 2, now=20000 * 86400)
+        journal.set_history_enabled(False)
+        assert not journal.history_enabled()
+        journal.clear_history()
+        assert not journal.timeline(tmp_path)
+        journal.set_history_enabled(True)
+        assert journal.history_enabled()

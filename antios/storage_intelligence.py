@@ -62,7 +62,29 @@ class StorageJournal:
                 category TEXT PRIMARY KEY, choice TEXT NOT NULL,
                 confirmed_deletions INTEGER NOT NULL DEFAULT 0)
         """)
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS settings(
+                name TEXT PRIMARY KEY, value TEXT NOT NULL)
+        """)
         self.db.commit()
+
+    def history_enabled(self) -> bool:
+        row = self.db.execute(
+            "SELECT value FROM settings WHERE name='history'"
+        ).fetchone()
+        return row is None or row[0] == "on"
+
+    def set_history_enabled(self, enabled: bool) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT INTO settings(name, value) VALUES('history', ?) "
+                "ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                ("on" if enabled else "off",),
+            )
+
+    def clear_history(self) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM samples")
 
     def __enter__(self) -> "StorageJournal":
         return self
@@ -254,9 +276,14 @@ def insights_for_scan(scan: dict[str, Any], *, journal_path: str | Path | None =
     try:
         with StorageJournal(journal_path) as store:
             summary = scan["summary"]
-            store.capture(scan["root"], summary["bytes_scanned"],
-                          summary["files_scanned"], now=now)
-            result["history"] = estimate_trend(store.timeline(scan["root"]))
+            enabled = store.history_enabled()
+            result["history_enabled"] = enabled
+            if enabled:
+                store.capture(scan["root"], summary["bytes_scanned"],
+                              summary["files_scanned"], now=now)
+                result["history"] = estimate_trend(store.timeline(scan["root"]))
+            else:
+                result["history"] = {"forecast": "disabled-by-user", "samples": []}
             prefs = store.preferences()
     except (OSError, ValueError, sqlite3.Error) as exc:
         result["history"] = {"forecast": "unavailable", "reason": str(exc)[:200]}

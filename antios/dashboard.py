@@ -1741,6 +1741,21 @@ class Dashboard:
         ):
             self._button(intelligence_actions, caption, action, kind="secondary").pack(side="left", padx=(0, 6))
 
+        history_actions = tk.Frame(parent, bg=THEME["bg"])
+        history_actions.pack(fill="x", pady=(0, 9))
+        self._button(
+            history_actions,
+            "Настроить историю MemoryMap" if self.language == "ru" else "Toggle MemoryMap history",
+            self._toggle_cleanup_history,
+            kind="secondary",
+        ).pack(side="left", padx=(0, 6))
+        self._button(
+            history_actions,
+            "Удалить историю" if self.language == "ru" else "Erase MemoryMap history",
+            self._clear_cleanup_history,
+            kind="secondary",
+        ).pack(side="left")
+
         table_header = tk.Frame(parent, bg=THEME["bg"])
         table_header.pack(fill="x", pady=(0, 6))
         tk.Label(
@@ -2128,6 +2143,51 @@ class Dashboard:
                       if self.language == "ru" else
                       f"Showing {shown} of {len(categories)} candidates")
             )
+
+    def _toggle_cleanup_history(self) -> None:
+        from tkinter import messagebox
+        try:
+            with StorageJournal() as store:
+                enabled = not store.history_enabled()
+                store.set_history_enabled(enabled)
+            messagebox.showinfo(
+                "MemoryMap",
+                ("История сканирований включена." if enabled else
+                 "История сканирований отключена. Старые снимки можно удалить отдельно.")
+                if self.language == "ru" else
+                ("Scan history enabled." if enabled else
+                 "Scan history disabled. Existing snapshots can be erased separately."),
+            )
+            if self.storage_result:
+                self.storage_result["intelligence"] = insights_for_scan(self.storage_result)
+                self._render_cleanup_result(self.storage_result)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("MemoryMap", str(exc))
+
+    def _clear_cleanup_history(self) -> None:
+        from tkinter import messagebox
+        if not messagebox.askyesno(
+            "MemoryMap",
+            ("Безвозвратно удалить сохранённые агрегированные снимки?"
+             if self.language == "ru" else
+             "Permanently delete saved aggregate snapshots?"),
+        ):
+            return
+        try:
+            with StorageJournal() as store:
+                store.clear_history()
+            # Do not immediately recreate the record being deleted.
+            if self.storage_result:
+                self.storage_result.get("intelligence", {})["history"] = {
+                    "forecast": "insufficient-history", "samples": [],
+                }
+            self.cleanup_intelligence_label.configure(
+                text=("История очищена; следующий запуск анализа создаст новый снимок."
+                      if self.language == "ru" else
+                      "History erased; the next scan may create a new snapshot.")
+            )
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("MemoryMap", str(exc))
 
     def _show_cleanup_survival(self) -> None:
         from tkinter import messagebox
