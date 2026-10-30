@@ -9,9 +9,7 @@ from antios import recovery
 def _native_tk_display_available():
     if importlib.util.find_spec("tkinter") is None:
         return False
-    if os.name == "nt":
-        return True
-    if not os.environ.get("DISPLAY"):
+    if os.name != "nt" and not os.environ.get("DISPLAY"):
         return False
     try:
         import tkinter as tk
