@@ -7,6 +7,7 @@ body:
     attributes:
       value: |
         Thanks for reporting a bug. Do not paste secrets, backup files, Registry exports or personal identifiers.
+        Security vulnerabilities, bypasses, exploit details, trust-boundary weaknesses or internal protection architecture must not be posted in a public issue. Use the private reporting route in SECURITY.md.
   - type: input
     id: version
     attributes:
