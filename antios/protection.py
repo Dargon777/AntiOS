@@ -207,6 +207,11 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     defender = defender_status()
     coexistence = coexistence_profile(defender)
     amsi = amsi_provider_status()
+    from .windows_companion import collect_windows_companion_status
+    vendor_companion = collect_windows_companion_status() if os.name == "nt" else {
+        "coexistence": {"vendor_products_detected": [], "vendor_realtime_confirmed": []},
+        "products": [],
+    }
     peer_ok = (not engine.get("peer_verification_required") or
                engine.get("peer_verified") is True)
     engine_ready = bool(
@@ -247,11 +252,22 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     antios_resident = bool(engine_ready and (guard_operational or pre_execution))
     defender_realtime = defender.get("realtime_active") is True
     layered_active = bool(defender_realtime and antios_resident)
+    vendor_detected = vendor_companion["coexistence"].get("vendor_products_detected") or []
+    vendor_realtime = vendor_companion["coexistence"].get("vendor_realtime_confirmed") or []
+    layered_vendor = bool(engine_ready and vendor_realtime)
     amsi_registered = bool(amsi.get("registered") and amsi.get("module_exists"))
     coexistence = dict(coexistence)
     coexistence["layered_with_defender"] = layered_active
-    if layered_active:
+    coexistence["vendor_products_detected"] = vendor_detected
+    coexistence["vendor_realtime_confirmed"] = vendor_realtime
+    coexistence["layered_with_vendor"] = layered_vendor
+    coexistence["vendor_mode"] = vendor_companion["coexistence"].get("mode")
+    if layered_vendor:
+        coexistence["mode"] = "vendor-companion-layered"
+    elif layered_active:
         coexistence["mode"] = "layered"
+    elif vendor_detected:
+        coexistence["mode"] = "vendor-companion-detected"
     elif defender_realtime:
         coexistence["mode"] = "defender-active-antios-incomplete"
 
@@ -274,6 +290,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "native": native,
         "native_coexistence": native_health,
         "defender": defender,
+        "windows_vendor_companion": vendor_companion,
         "coexistence": coexistence,
         "amsi": amsi,
         "risk": risk,
@@ -294,6 +311,9 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
             "defender_dependency": False,
             "defender_realtime_active": defender_realtime,
             "layered_with_defender": layered_active,
+            "third_party_vendor_detected": bool(vendor_detected),
+            "third_party_vendor_realtime_confirmed": bool(vendor_realtime),
+            "layered_with_vendor": layered_vendor,
             "amsi_provider_registered": amsi_registered,
             "amsi_provider_engine_ready": amsi_registered and engine_ready,
         },
@@ -382,6 +402,10 @@ def render_protection_status(status: dict) -> str:
     coexistence = status.get("coexistence", {})
     native_health = status.get("native_coexistence", {})
     amsi = status.get("amsi", {}) if isinstance(status.get("amsi"), dict) else {}
+    vendor = status.get("windows_vendor_companion", {})
+    vendor_coexist = vendor.get("coexistence", {}) if isinstance(vendor, dict) else {}
+    vendor_detected = vendor_coexist.get("vendor_products_detected") or []
+    vendor_realtime = vendor_coexist.get("vendor_realtime_confirmed") or []
     telemetry = native_health.get("telemetry", {})
     risk = status.get("risk", {}) if isinstance(status.get("risk"), dict) else {}
     last_risk = risk.get("last") if isinstance(risk.get("last"), dict) else {}
@@ -431,9 +455,11 @@ def render_protection_status(status: dict) -> str:
         f"completion-timeouts={telemetry.get('completion_timeouts', 'unknown')}",
         f"Pre-execution enforcement: {'active' if caps['pre_execution_blocking'] else 'inactive'}",
         f"Microsoft Defender: {'real-time active' if defender.get('realtime_active') else defender.get('running_mode', 'unavailable')}",
+        f"Kaspersky / Dr.Web detected: {', '.join(vendor_detected) if vendor_detected else 'none'}",
+        f"Vendor real-time confirmed: {', '.join(vendor_realtime) if vendor_realtime else 'none'}",
         f"Coexistence mode: {coexistence.get('mode', 'unknown')}",
         f"AntiOS AMSI provider: {'registered' if amsi.get('registered') and amsi.get('module_exists') else 'not registered'}",
-        "AntiOS role: independent companion; Defender settings unchanged",
+        "AntiOS role: independent companion; Defender settings unchanged; Kaspersky/Dr.Web settings unchanged",
         "Primary Windows antivirus registration: not claimed",
         "Remaining gates: " + ", ".join(status["remaining_gates"]),
     ])

@@ -179,6 +179,9 @@ def companion_protected_roots() -> tuple[Path, ...]:
     if sys.platform.startswith("linux"):
         from .linux_companion import companion_protected_roots as linux_roots
         return linux_roots()
+    if os.name == "nt":
+        from .windows_companion import windows_companion_protected_roots
+        return windows_companion_protected_roots()
     return ()
 
 
@@ -190,13 +193,20 @@ def collect_coexistence_status() -> dict:
     defender = _defender_status()
     wsc = _wsc_antivirus_health()
     amsi = _amsi_provider_status()
+    from .windows_companion import collect_windows_companion_status
+    vendor = collect_windows_companion_status()
+    coexistence = evaluate_coexistence(defender, wsc, amsi)
+    coexistence["vendor_mode"] = vendor["coexistence"]["mode"]
+    coexistence["vendor_products_detected"] = vendor["coexistence"]["vendor_products_detected"]
+    coexistence["vendor_realtime_confirmed"] = vendor["coexistence"]["vendor_realtime_confirmed"]
     return {
         "schema": 1,
         "kind": "antios-defender-coexistence",
         "defender": defender,
         "windows_security": wsc,
+        "windows_vendor_companion": vendor,
         "antios_amsi": amsi,
-        "coexistence": evaluate_coexistence(defender, wsc, amsi),
+        "coexistence": coexistence,
         "policy": {
             "disable_defender": False,
             "register_primary_antivirus": False,
@@ -214,13 +224,20 @@ def render_coexistence_status(status: dict) -> str:
     defender = status["defender"]
     amsi = status["antios_amsi"]
     wsc = status["windows_security"]
+    vendor = status.get("windows_vendor_companion", {})
+    vendor_coexist = vendor.get("coexistence", {}) if isinstance(vendor, dict) else {}
+    detected = vendor_coexist.get("vendor_products_detected") or []
+    realtime = vendor_coexist.get("vendor_realtime_confirmed") or []
     return "\n".join([
-        "AntiOS + Microsoft Defender coexistence",
+        "AntiOS Windows coexistence",
         f"Mode: {coexist['mode']}",
         f"Defender real-time: {'active' if coexist['defender_active_parallel'] else 'not confirmed'}",
+        f"Third-party AV: {', '.join(detected) if detected else 'none detected'}",
+        f"Third-party real-time confirmed: {', '.join(realtime) if realtime else 'none'}",
         f"Defender running mode: {defender.get('running_mode', 'unknown')}",
         f"Windows Security AV health: {wsc.get('health', 'unknown')}",
         f"AntiOS AMSI provider: {'registered' if amsi.get('registered') else 'not registered'}",
         "AntiOS primary WSC registration: no",
         "Defender settings changed by AntiOS: no",
+        "Kaspersky / Dr.Web settings changed by AntiOS: no",
     ])
