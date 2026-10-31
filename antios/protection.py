@@ -302,7 +302,77 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     }
 
 
+def collect_linux_protection_status() -> dict:
+    """Linux-specific companion protection view without changing Windows contracts."""
+    engine: dict
+    try:
+        scanner = ClamAVScanner(require_verified_peer=False, timeout=5)
+        try:
+            engine = dict(scanner.metadata, available=True)
+        finally:
+            scanner.close()
+    except (OSError, RuntimeError, ValueError) as exc:
+        engine = {"available": False, "detail": str(exc)[:500]}
+
+    guard = read_guard_state()
+    from .linux_companion import collect_linux_companion_status
+    companion = collect_linux_companion_status()
+    peer_ok = (not engine.get("peer_verification_required") or
+               engine.get("peer_verified") is True)
+    engine_ready = bool(
+        engine.get("available") and
+        engine.get("database_freshness") == "current" and
+        peer_ok
+    )
+    guard_running = bool(
+        guard.get("running") and
+        guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
+    )
+    vendor_realtime = companion["coexistence"]["vendor_realtime_confirmed"]
+    blockers = []
+    if not engine_ready:
+        blockers.append("local-clamd-with-current-signatures")
+    return {
+        "schema": 1,
+        "kind": "antios-linux-protection-status",
+        "engine": engine,
+        "guard": guard,
+        "companion": companion,
+        "capabilities": {
+            "standalone_detection_engine": engine_ready,
+            "on_demand_second_opinion": engine_ready,
+            "resident_post_write_detection": guard_running and engine_ready,
+            "vendor_realtime_confirmed": bool(vendor_realtime),
+            "layered_with_vendor": bool(vendor_realtime and engine_ready),
+            "storage_intelligence": True,
+        },
+        "production_primary_antivirus": False,
+        "remaining_gates": blockers,
+    }
+
+
 def render_protection_status(status: dict) -> str:
+    if status.get("kind") == "antios-linux-protection-status":
+        caps = status["capabilities"]
+        engine = status["engine"]
+        guard = status["guard"]
+        companion = status["companion"]["coexistence"]
+        products = status["companion"]["products"]
+        detected = companion["vendor_products_detected"]
+        realtime = companion["vendor_realtime_confirmed"]
+        return "\n".join([
+            "AntiOS Linux protection status",
+            f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
+            f" ({engine.get('version', engine.get('detail', 'unavailable'))})",
+            f"Database: {engine.get('database_freshness', 'unknown')}",
+            f"Vendor AV detected: {', '.join(detected) if detected else 'none'}",
+            f"Vendor realtime confirmed: {', '.join(realtime) if realtime else 'none'}",
+            f"Companion mode: {companion['mode']}",
+            f"Resident Guard: {guard.get('state', 'not-running')} (opt-in)",
+            "AntiOS role: supplemental second opinion; vendor settings unchanged",
+            "Primary Linux antivirus role: not claimed",
+            "Remaining gates: " + (", ".join(status["remaining_gates"]) or "none"),
+        ])
     caps = status["capabilities"]
     engine = status["engine"]
     guard = status["guard"]

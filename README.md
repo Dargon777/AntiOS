@@ -2,13 +2,15 @@
 
 **Languages:** English · [Русский](README.ru.md) · [Español](README.es.md) · [简体中文](README.zh-CN.md) · [Suomi](README.fi.md) · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
-**Resident protection, independent antivirus scanning, encrypted quarantine and Windows Health diagnostics.**
+**Antivirus companion scanning, Storage Intelligence and Windows/Linux diagnostics.**
 
 **Supported Windows target:** Windows 10 22H2 x64 (build 19045) and newer Windows 11 builds. Older Windows 10 releases and 32-bit Windows are unsupported.
 
-AntiOS answers one simple question first: **does anything on this Windows PC need attention?**
+**Linux companion target:** current x86_64 Linux distributions with Python 3.11+; Kaspersky Endpoint Security for Linux and Dr.Web are detected through their documented read-only control interfaces. Linux support is supplemental and does not take ownership of vendor AV policy.
 
-> **Pre-release:** 2.0.0 alpha 27
+AntiOS answers one simple question first: **does anything on this machine need attention?**
+
+> **Pre-release:** 2.0.0 alpha 29
 
 [![Tests](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/python-v2.yml)
 [![Windows portable](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml/badge.svg)](https://github.com/Dargon777/AntiOS/actions/workflows/windows-release.yml)
@@ -22,6 +24,23 @@ AntiOS answers one simple question first: **does anything on this Windows PC nee
 https://github.com/Dargon777/AntiOS/releases
 
 Setup requests Administrator consent, installs AntiOS to **`C:\\Program Files\\AntiOS`**, and now prepares the managed ClamAV service and signature updater automatically. On a normal same-user UAC install it also enables Resident Guard for common user folders. The ZIP remains a portable/developer fallback.
+
+## Linux companion mode
+
+Linux uses AntiOS as a supplemental second-opinion layer. Kaspersky or Dr.Web can remain the primary real-time product while AntiOS provides independent ClamAV scans, Storage Intelligence and read-only diagnostics. AntiOS does not disable vendor protection, change exclusions, start/stop vendor services or automatically launch vendor scans.
+
+From a source checkout:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
+antios coexistence-status
+antios quick-check
+antios protection-status
+```
+
+The optional desktop surface uses Tk; see [docs/LINUX.md](docs/LINUX.md). A dedicated Linux CI artifact is built for pull requests and master; a signed distro package is not claimed yet.
 
 ## Antivirus
 

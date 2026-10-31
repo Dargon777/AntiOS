@@ -173,7 +173,20 @@ def evaluate_coexistence(defender: dict, wsc: dict, amsi: dict) -> dict:
     }
 
 
+def companion_protected_roots() -> tuple[Path, ...]:
+    """Return third-party AV locations AntiOS Guard should never inventory."""
+    import sys
+    if sys.platform.startswith("linux"):
+        from .linux_companion import companion_protected_roots as linux_roots
+        return linux_roots()
+    return ()
+
+
 def collect_coexistence_status() -> dict:
+    import sys
+    if sys.platform.startswith("linux"):
+        from .linux_companion import collect_linux_companion_status
+        return collect_linux_companion_status()
     defender = _defender_status()
     wsc = _wsc_antivirus_health()
     amsi = _amsi_provider_status()
@@ -194,6 +207,9 @@ def collect_coexistence_status() -> dict:
 
 
 def render_coexistence_status(status: dict) -> str:
+    if status.get("kind") == "antios-linux-companion-coexistence":
+        from .linux_companion import render_linux_companion_status
+        return render_linux_companion_status(status)
     coexist = status["coexistence"]
     defender = status["defender"]
     amsi = status["antios_amsi"]

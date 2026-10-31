@@ -67,7 +67,7 @@ def _backend() -> WindowsRegistryBackend:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="antios",
-        description="AntiOS: Antivirus and Windows Diagnostics",
+        description="AntiOS: antivirus companion, storage intelligence and system diagnostics",
     )
     parser.add_argument(
         "--version",
@@ -105,7 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     coexist_cmd = sub.add_parser(
         "coexistence-status",
-        help="Show read-only Microsoft Defender, Windows Security and AntiOS AMSI coexistence state.",
+        help="Show read-only coexistence state (Defender on Windows; Kaspersky/Dr.Web on Linux).",
     )
     coexist_cmd.add_argument("--json", action="store_true")
 
@@ -150,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     quick = sub.add_parser(
         "quick-check",
         aliases=["check"],
-        help="Run a friendly Windows health and privacy check.",
+        help="Run a friendly platform health and protection check.",
     )
     quick.add_argument("--json", action="store_true")
     quick.add_argument(
@@ -161,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     dashboard_cmd = sub.add_parser(
         "dashboard",
-        help="Open the AntiOS Windows Health & Privacy dashboard.",
+        help="Open the AntiOS desktop dashboard.",
     )
     dashboard_cmd.add_argument(
         "--lang",
@@ -354,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "update":
+            if os.name != "nt":
+                raise RuntimeError("Automatic AntiOS Setup updater currently requires Windows")
             if args.download_only and args.yes:
                 raise ValueError("--download-only and --yes cannot be used together")
             from .updater import download_update, latest_alpha, schedule_install
@@ -378,8 +380,16 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "protection-status":
-            from .protection import collect_protection_status, render_protection_status
-            status = collect_protection_status(args.engine_service)
+            from .protection import (
+                collect_linux_protection_status,
+                collect_protection_status,
+                render_protection_status,
+            )
+            status = (
+                collect_linux_protection_status()
+                if sys.platform.startswith("linux")
+                else collect_protection_status(args.engine_service)
+            )
             if args.json:
                 _print_json(status)
             else:
@@ -396,6 +406,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "protection-bootstrap":
+            _require_windows()
             if not args.yes:
                 raise ValueError("Protection bootstrap changes machine settings; pass --yes to confirm")
             if not _is_admin():
@@ -409,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "protection-repair":
+            _require_windows()
             from .protection_repair import run_protection_repair
             payload = run_protection_repair(
                 apply=args.yes,
@@ -438,7 +450,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
 
         if args.command == "dashboard":
-            _require_windows()
+            if os.name != "nt" and not sys.platform.startswith("linux"):
+                raise RuntimeError("AntiOS dashboard currently supports Windows and Linux")
             from .dashboard import main as dashboard_main
             dashboard_args = []
             if args.lang:
@@ -529,6 +542,9 @@ def main(argv: list[str] | None = None) -> int:
                                 cache_path=default_scan_cache_path(),
                                 use_cache=not args.no_cache,
                                 excluded_paths=(default_quarantine_path(),))
+            if sys.platform.startswith("linux"):
+                from .linux_companion import collect_linux_companion_status
+                result["companion"] = collect_linux_companion_status()["coexistence"]
             if args.json:
                 _print_json(result)
             else:
@@ -539,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if result["findings"] else (0 if result["verdict"] == "no-threats-found" else 3)
 
         if args.command == "quarantine":
+            if os.name != "nt":
+                raise RuntimeError("AntiOS encrypted quarantine currently requires Windows DPAPI")
             store = Quarantine()
             if args.quarantine_command == "list":
                 payload = {"items": store.list_items()}
@@ -570,6 +588,15 @@ def main(argv: list[str] | None = None) -> int:
                 "note": "Use --yes to run. Scans follow Defender's remediation policy; results are in Windows Security.",
             }
             _print_json(payload)
+            return 0
+
+        if args.command in {"quick-check", "check"} and sys.platform.startswith("linux"):
+            from .linux_health import collect_linux_health, render_linux_health
+            payload = collect_linux_health()
+            if args.json:
+                _print_json(payload)
+            else:
+                print(render_linux_health(payload))
             return 0
 
         backend = _backend()
