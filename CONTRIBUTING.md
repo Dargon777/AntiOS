@@ -58,3 +58,23 @@ The current AntiOS v2 source tree is licensed under the Apache License 2.0.
 Unless you explicitly state otherwise when submitting a contribution, contributions intentionally submitted for inclusion in AntiOS v2 are made under the Apache License 2.0, consistent with Section 5 of the license.
 
 Do not submit code you do not have the right to license. If a contribution incorporates third-party material, clearly identify its origin and license.
+
+
+## Public security documentation
+
+Keep public GitHub text focused on user-visible behavior, compatibility, limitations and test outcomes.
+
+Do **not** publish security-sensitive operational architecture in public pull requests, issues, release notes, READMEs or discussions. This includes exact:
+
+- trust-boundary or privilege-handoff sequencing;
+- internal service, task, process, state-file or IPC identities;
+- watchdog, heartbeat, lock and recovery mechanics;
+- provider-validation and peer-verification order;
+- retry, timeout, queue, cache, correlation or detection thresholds;
+- native protocol fields and enforcement decision flow;
+- updater activation, repair, rollback or postcondition sequencing;
+- unfinished bypasses, exploit proofs or attacker-oriented architecture diagrams.
+
+If a change requires discussion of those details, use a private engineering channel. Security vulnerabilities, bypasses and exploit details must be reported through the private route described in [SECURITY.md](SECURITY.md), not a public issue or pull request.
+
+Public descriptions should explain **what changed for users and what safety guarantee is preserved**, not provide a step-by-step map of the protection implementation.
