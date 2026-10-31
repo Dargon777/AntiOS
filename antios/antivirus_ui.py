@@ -1135,12 +1135,25 @@ class AntivirusPanel:
                         text=explanation("ENGINE_NOT_READY", self.app.language)[0],
                         fg=self.palette["review"],
                     )
+        vendor = value.get("windows_vendor_companion", {}) if isinstance(value, dict) else {}
+        vendor_coexist = vendor.get("coexistence", {}) if isinstance(vendor, dict) else {}
+        detected_vendors = vendor_coexist.get("vendor_products_detected") or []
+        confirmed_vendors = vendor_coexist.get("vendor_realtime_confirmed") or []
+        vendor_names = [
+            "Kaspersky" if item == "kaspersky" else "Dr.Web" if item == "drweb" else str(item)
+            for item in detected_vendors
+        ]
         layered = bool(
             caps.get("standalone_detection_engine") and
-            caps.get("layered_with_defender") and
             (
-                caps.get("resident_post_write_detection") or
-                caps.get("pre_execution_blocking")
+                (
+                    caps.get("layered_with_defender") and
+                    (
+                        caps.get("resident_post_write_detection") or
+                        caps.get("pre_execution_blocking")
+                    )
+                )
+                or caps.get("layered_with_vendor")
             )
         )
         self.layered_active = layered
@@ -1149,10 +1162,27 @@ class AntivirusPanel:
             fg=self.palette["ok"] if layered else self.palette["muted"],
         )
         if hasattr(self, "engine_component_status"):
+            if vendor_names:
+                companion_label = ", ".join(vendor_names)
+                companion_text = (
+                    f"Готов · рядом с {companion_label}"
+                    if self.app.language == "ru"
+                    else f"Ready · alongside {companion_label}"
+                )
+                if not confirmed_vendors:
+                    companion_text += (
+                        " · realtime не подтверждён"
+                        if self.app.language == "ru"
+                        else " · real-time unconfirmed"
+                    )
+            else:
+                companion_text = (
+                    "Готов · рядом с Defender" if self.app.language == "ru"
+                    else "Ready · alongside Defender"
+                )
             self.engine_component_status.configure(
                 text=(
-                    "Готов · рядом с Defender" if layered and self.app.language == "ru"
-                    else "Ready · alongside Defender" if layered
+                    companion_text if layered or vendor_names
                     else "Движок доступен" if caps.get("standalone_detection_engine") and self.app.language == "ru"
                     else "Engine available" if caps.get("standalone_detection_engine")
                     else "Требует проверки" if self.app.language == "ru"

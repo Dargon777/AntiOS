@@ -43,6 +43,8 @@ See:
 
 The Antivirus area provides scanning, findings, quarantine, protection status and advanced diagnostics. AntiOS can coexist with Microsoft Defender and selected third-party products without disabling their protection.
 
+On Windows, Kaspersky and Dr.Web companion detection is documented in [docs/WINDOWS_COMPANION.md](docs/WINDOWS_COMPANION.md). AntiOS remains a supplemental layer and does not change vendor exclusions, services, quarantine or policy.
+
 Resident protection and experimental native components are documented only at a high level. AntiOS does not claim certified Windows primary-antivirus status, ELAM/PPL protection or complete pre-execution coverage.
 
 See [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
