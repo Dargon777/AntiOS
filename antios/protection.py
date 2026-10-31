@@ -9,6 +9,11 @@ import subprocess
 from .clamav import ClamAVScanner
 from .coexistence import amsi_provider_status
 from .guard_state import read_guard_state
+from .private_core import (
+    INTERFACE_VERSION as PRIVATE_CORE_INTERFACE_VERSION,
+    PrivateCoreError,
+    invoke_private_core,
+)
 from .windows_antivirus import coexistence_profile, defender_status
 from .windows_process import hidden_process_kwargs, system_executable
 
@@ -186,7 +191,39 @@ def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
     }
 
 
+def _private_core_protection_status(engine_service: str | None = None) -> dict | None:
+    """Prefer the private core when its narrow public contract is available.
+
+    The open implementation remains a migration fallback until the sensitive
+    components have actually moved to the private repository.
+    """
+    payload = {}
+    if engine_service is not None:
+        payload["engine_service"] = engine_service
+    try:
+        result = invoke_private_core("protection.status", payload, timeout_seconds=10)
+    except PrivateCoreError:
+        return None
+
+    if (
+        result.get("schema") != 1
+        or result.get("kind") != "antios-protection-status"
+        or not isinstance(result.get("capabilities"), dict)
+    ):
+        return None
+    status = dict(result)
+    status["private_core"] = {
+        "active": True,
+        "interface": PRIVATE_CORE_INTERFACE_VERSION,
+    }
+    return status
+
+
 def collect_protection_status(engine_service: str | None = None) -> dict:
+    private_status = _private_core_protection_status(engine_service)
+    if private_status is not None:
+        return private_status
+
     engine: dict
     try:
         scanner = ClamAVScanner(
