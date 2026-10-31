@@ -652,8 +652,25 @@ jobs:
           fi
           mapfile -t assets < <(find release-artifacts -type f -print | sort)
           test "${#assets[@]}" -ge 8
+
+          # Public GitHub release metadata is deliberately fixed and minimal.
+          # Detailed implementation notes belong in private engineering records,
+          # not in a public release body.
+          notes_file="$RUNNER_TEMP/antios-public-release-notes.md"
+          cat > "$notes_file" <<'EOF'
+          # AntiOS public prerelease
+
+          This prerelease contains user-facing improvements, reliability fixes and compatibility updates.
+
+          Public release metadata intentionally omits internal security implementation details that could make reconnaissance, reverse engineering or bypass development easier.
+
+          For supported usage, current limitations, privacy information and responsible vulnerability reporting, see README.md, PRIVACY.md and SECURITY.md.
+
+          AntiOS v2 remains prerelease software.
+          EOF
+
           gh release create "$tag" "${assets[@]}" \
             --target "$GITHUB_SHA" \
             --prerelease \
             --title "AntiOS $tag" \
-            --notes-file release/RELEASE_NOTES.md
+            --notes-file "$notes_file"
