@@ -2,10 +2,9 @@ name: Sanitize public release metadata
 
 on:
   push:
-    branches:
-      - master
+    branches: [master]
     paths:
-      - .github/workflows/sanitize-public-release-metadata.yml
+      - ".github/workflows/sanitize-public-release-metadata.yml"
 
 permissions:
   contents: write
@@ -14,30 +13,33 @@ jobs:
   sanitize:
     runs-on: ubuntu-latest
     steps:
-      - name: Replace historical release descriptions with public-safe summaries
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
+      - name: Sanitize release descriptions
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const notes = `# AntiOS public prerelease summary
 
-          notes="$(cat <<'EOF'
-# AntiOS public prerelease summary
+            This historical AntiOS v2 prerelease contains user-facing improvements in security, diagnostics, reliability, compatibility, interface and/or storage features.
 
-This historical AntiOS v2 prerelease contains user-facing improvements in security, diagnostics, reliability, compatibility, interface and/or storage features.
+            Security-sensitive implementation details have been removed from the public release description. Public release metadata intentionally does not document internal control flow, trust-boundary sequencing, persistence mechanics, state/IPC layouts, service/task identities, provider handoffs, retry/timeout values, queue/cache parameters, detection thresholds, native protocol internals, repair/rollback sequencing or update activation details.
 
-Security-sensitive implementation details have been removed from the public release description. Public release metadata intentionally does not document internal control flow, trust-boundary sequencing, persistence mechanics, state/IPC layouts, service/task identities, provider handoffs, retry/timeout values, queue/cache parameters, detection thresholds, native protocol internals, repair/rollback sequencing or update activation details.
+            This documentation policy reduces unnecessary reconnaissance value but is not a substitute for secure design, signed updates, least privilege, code review and fail-safe behavior.
 
-This documentation policy reduces unnecessary reconnaissance value but is not a substitute for secure design, signed updates, least privilege, code review and fail-safe behavior.
+            For vulnerability reporting, use the repository's SECURITY.md and private vulnerability reporting when available.`;
 
-For vulnerability reporting, use the repository's SECURITY.md and private vulnerability reporting when available.
-EOF
-)"
+            const { owner, repo } = context.repo;
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner,
+              repo,
+              per_page: 100
+            });
 
-          gh release list --repo "$GH_REPO" --limit 100 --json tagName --jq '.[].tagName' |
-          while IFS= read -r tag; do
-            [ -n "$tag" ] || continue
-            echo "Sanitizing $tag"
-            gh release edit "$tag" --repo "$GH_REPO" --notes "$notes"
-          done
+            for (const release of releases) {
+              core.info(`Sanitizing ${release.tag_name}`);
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: release.id,
+                body: notes
+              });
+            }
