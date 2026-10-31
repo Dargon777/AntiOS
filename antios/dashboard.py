@@ -3706,6 +3706,9 @@ class Dashboard:
 
 
 def launch(language: str | None = None, *, background: bool = False) -> int:
+    if sys.platform.startswith("linux"):
+        from .linux_dashboard import launch as launch_linux
+        return launch_linux(language, background=background)
     tr = Translator(normalize_language(language or detect_language()))
     if not is_windows():
         raise RuntimeError(tr.t("error.dashboard_windows"))
@@ -3735,7 +3738,7 @@ def launch(language: str | None = None, *, background: bool = False) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="AntiOS Antivirus & Windows Diagnostics Dashboard"
+        description="AntiOS Antivirus Companion & Diagnostics Dashboard"
     )
     parser.add_argument(
         "--self-test",

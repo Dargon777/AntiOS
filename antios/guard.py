@@ -18,7 +18,7 @@ import uuid
 from .antivirus import checked_path, fingerprint, is_link
 from .behavior import BehaviorEngine
 from .clamav import ClamAVScanner
-from .coexistence import defender_protected_roots
+from .coexistence import companion_protected_roots, defender_protected_roots
 from .incident import IncidentGraph
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
 from .guard_state import GuardState, default_guard_path, read_guard_state
@@ -39,6 +39,8 @@ _FAST_SCAN_SUFFIXES = frozenset({
 })
 _FAST_SETTLE_SECONDS = 0.20
 _MAX_TRANSIENT_SCAN_RETRIES = 3
+_DEFAULT_GUARD_INTERVAL = 15 if os.name != "nt" else 2
+_DEFAULT_GUARD_RESCAN = 1800 if os.name != "nt" else 900
 
 
 def _transient_scan_conflict(exc: BaseException) -> bool:
@@ -54,9 +56,9 @@ def _transient_scan_conflict(exc: BaseException) -> bool:
 class GuardPolicy:
     roots: tuple[Path, ...]
     auto_quarantine: bool = False
-    interval: float = 2
+    interval: float = _DEFAULT_GUARD_INTERVAL
     settle: float = 1
-    rescan: float = 900
+    rescan: float = _DEFAULT_GUARD_RESCAN
     max_files: int = 50000
     max_queue: int = 256
     engine_service: str | None = None
@@ -145,6 +147,7 @@ class Guard:
             self.state_dir,
             default_quarantine_path().absolute(),
             *defender_protected_roots(),
+            *companion_protected_roots(),
         )
         for excluded in self.excluded:
             if any(root == excluded or excluded in root.parents for root in self.roots):

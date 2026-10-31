@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "antios"
 dynamic = ["version"]
-description = "On-demand antivirus scanning, encrypted quarantine and Windows health diagnostics"
+description = "Antivirus companion scanning, storage intelligence and Windows/Linux diagnostics"
 dependencies = [
   "Pillow>=10.4; platform_system == \"Windows\"",
   "pystray>=0.19.5; platform_system == \"Windows\"",
@@ -15,7 +15,7 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Dargon777 and AntiOS contributors" }]
-keywords = ["windows", "privacy", "health", "security", "diagnostics", "cli", "desktop"]
+keywords = ["windows", "linux", "privacy", "health", "security", "antivirus", "diagnostics", "cli", "desktop"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -24,6 +24,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
   "Topic :: System :: Systems Administration",
 ]
 
