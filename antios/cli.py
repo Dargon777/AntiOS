@@ -380,8 +380,16 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "protection-status":
-            from .protection import collect_protection_status, render_protection_status
-            status = collect_protection_status(args.engine_service)
+            from .protection import (
+                collect_linux_protection_status,
+                collect_protection_status,
+                render_protection_status,
+            )
+            status = (
+                collect_linux_protection_status()
+                if sys.platform.startswith("linux")
+                else collect_protection_status(args.engine_service)
+            )
             if args.json:
                 _print_json(status)
             else:

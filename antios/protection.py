@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 
 from .clamav import ClamAVScanner
 from .coexistence import amsi_provider_status
@@ -203,42 +202,6 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         engine = {"available": False, "detail": str(exc)[:500]}
 
     guard = read_guard_state()
-    if sys.platform.startswith("linux"):
-        from .linux_companion import collect_linux_companion_status
-        companion = collect_linux_companion_status()
-        peer_ok = (not engine.get("peer_verification_required") or
-                   engine.get("peer_verified") is True)
-        engine_ready = bool(
-            engine.get("available") and
-            engine.get("database_freshness") == "current" and
-            peer_ok
-        )
-        guard_running = bool(
-            guard.get("running") and
-            guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
-        )
-        vendor_realtime = companion["coexistence"]["vendor_realtime_confirmed"]
-        blockers = []
-        if not engine_ready:
-            blockers.append("local-clamd-with-current-signatures")
-        return {
-            "schema": 1,
-            "kind": "antios-linux-protection-status",
-            "engine": engine,
-            "guard": guard,
-            "companion": companion,
-            "capabilities": {
-                "standalone_detection_engine": engine_ready,
-                "on_demand_second_opinion": engine_ready,
-                "resident_post_write_detection": guard_running and engine_ready,
-                "vendor_realtime_confirmed": bool(vendor_realtime),
-                "layered_with_vendor": bool(vendor_realtime and engine_ready),
-                "storage_intelligence": True,
-            },
-            "production_primary_antivirus": False,
-            "remaining_gates": blockers,
-        }
-
     managed = _managed_runtime_status()
     native = _native_status()
     defender = defender_status()
@@ -333,6 +296,55 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
             "layered_with_defender": layered_active,
             "amsi_provider_registered": amsi_registered,
             "amsi_provider_engine_ready": amsi_registered and engine_ready,
+        },
+        "production_primary_antivirus": False,
+        "remaining_gates": blockers,
+    }
+
+
+def collect_linux_protection_status() -> dict:
+    """Linux-specific companion protection view without changing Windows contracts."""
+    engine: dict
+    try:
+        scanner = ClamAVScanner(require_verified_peer=False, timeout=5)
+        try:
+            engine = dict(scanner.metadata, available=True)
+        finally:
+            scanner.close()
+    except (OSError, RuntimeError, ValueError) as exc:
+        engine = {"available": False, "detail": str(exc)[:500]}
+
+    guard = read_guard_state()
+    from .linux_companion import collect_linux_companion_status
+    companion = collect_linux_companion_status()
+    peer_ok = (not engine.get("peer_verification_required") or
+               engine.get("peer_verified") is True)
+    engine_ready = bool(
+        engine.get("available") and
+        engine.get("database_freshness") == "current" and
+        peer_ok
+    )
+    guard_running = bool(
+        guard.get("running") and
+        guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
+    )
+    vendor_realtime = companion["coexistence"]["vendor_realtime_confirmed"]
+    blockers = []
+    if not engine_ready:
+        blockers.append("local-clamd-with-current-signatures")
+    return {
+        "schema": 1,
+        "kind": "antios-linux-protection-status",
+        "engine": engine,
+        "guard": guard,
+        "companion": companion,
+        "capabilities": {
+            "standalone_detection_engine": engine_ready,
+            "on_demand_second_opinion": engine_ready,
+            "resident_post_write_detection": guard_running and engine_ready,
+            "vendor_realtime_confirmed": bool(vendor_realtime),
+            "layered_with_vendor": bool(vendor_realtime and engine_ready),
+            "storage_intelligence": True,
         },
         "production_primary_antivirus": False,
         "remaining_gates": blockers,

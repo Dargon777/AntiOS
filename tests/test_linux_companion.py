@@ -84,3 +84,33 @@ def test_os_release_parser_is_bounded_and_simple(tmp_path):
         "ID": "example",
         "VERSION_ID": "42",
     }
+
+
+def test_linux_protection_status_is_separate_from_windows_contract(monkeypatch):
+    import antios.protection as protection
+
+    class Ready:
+        metadata = {
+            "version": "ClamAV test",
+            "database_freshness": "current",
+            "peer_verification_required": False,
+        }
+        def __init__(self, **kwargs):
+            pass
+        def close(self):
+            pass
+
+    monkeypatch.setattr(protection, "ClamAVScanner", Ready)
+    monkeypatch.setattr(protection, "read_guard_state",
+                        lambda: {"running": False, "state": "not-running"})
+    monkeypatch.setattr(companion, "_is_linux", lambda: True)
+    monkeypatch.setattr(companion, "probe_kaspersky",
+                        lambda: {"installed": True, "realtime_confirmed": True})
+    monkeypatch.setattr(companion, "probe_drweb",
+                        lambda: {"installed": False, "realtime_confirmed": None})
+
+    status = protection.collect_linux_protection_status()
+    assert status["kind"] == "antios-linux-protection-status"
+    assert status["capabilities"]["standalone_detection_engine"] is True
+    assert status["capabilities"]["layered_with_vendor"] is True
+    assert status["production_primary_antivirus"] is False
