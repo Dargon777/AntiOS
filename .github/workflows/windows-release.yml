@@ -1,4 +1,4 @@
-name: AntiOS v2 Windows portable
+name: AntiOS v2 release
 
 on:
   workflow_dispatch:
@@ -549,26 +549,111 @@ jobs:
             python-dist/*
           if-no-files-found: error
 
-      - name: Publish alpha release on master
+
+
+  build-linux:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav-daemon python3-tk
+          python -m pip install --upgrade pip
+          python -m pip install pytest pyinstaller -e .
+
+      - name: Validate release version
+        run: |
+          package_version="$(python -c 'import antios; print(antios.__version__)')"
+          release_version="$(tr -d '\r\n' < release/VERSION)"
+          test "$package_version" = "$release_version"
+
+      - name: Test Linux companion surface
+        run: |
+          python -m pytest -rs tests/test_linux_companion.py tests/test_cli.py tests/test_coexistence.py tests/test_windows_companion.py
+          python -m antios coexistence-status --json
+          python -m antios quick-check --json
+
+      - name: Build Linux CLI and GUI
+        run: |
+          pyinstaller --clean --noconfirm --onedir --contents-directory _linux --console --name AntiOS antios_entry.py
+          pyinstaller --clean --noconfirm --onedir --contents-directory _linux_gui --windowed --name AntiOS-GUI antios_gui_entry.py
+          ./dist/AntiOS/AntiOS --version
+          ./dist/AntiOS/AntiOS coexistence-status --json
+          ./dist/AntiOS-GUI/AntiOS-GUI --self-test
+
+      - name: Package Linux release
+        run: |
+          mkdir -p linux-package
+          cp -a dist/AntiOS linux-package/
+          cp -a dist/AntiOS-GUI linux-package/
+          cp README.md LICENSE NOTICE docs/LINUX.md linux-package/
+          {
+            echo "AntiOS version: $(tr -d '\r\n' < release/VERSION)"
+            echo "Commit: $GITHUB_SHA"
+            echo "Build runner: ubuntu-latest"
+            echo "Architecture: x86_64"
+            echo "License: Apache-2.0"
+          } > linux-package/BUILD_INFO.txt
+          tar -C linux-package -czf AntiOS-linux-x64.tar.gz .
+          sha256sum AntiOS-linux-x64.tar.gz > AntiOS-linux-x64.tar.gz.sha256
+
+      - name: Attest Linux archive provenance
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        shell: pwsh
+        uses: actions/attest@v4
+        with:
+          subject-path: AntiOS-linux-x64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AntiOS-linux-release-artifacts
+          path: |
+            AntiOS-linux-x64.tar.gz
+            AntiOS-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+
+  publish-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: AntiOS-release-artifacts
+          path: release-artifacts/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: AntiOS-linux-release-artifacts
+          path: release-artifacts/linux
+
+      - name: Publish combined alpha release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = (Get-Content .\release\TAG -Raw).Trim()
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Warning "Release $tag already exists; these artifacts will NOT replace its downloads. Use a new release version and tag to publish fixes."
-            exit 0
-          }
-          $pythonArtifacts = Get-ChildItem .\python-dist\* | ForEach-Object { $_.FullName }
-          gh release create $tag `
-            .\AntiOS-windows-x64.zip `
-            .\AntiOS-windows-x64.zip.sha256 `
-            .\AntiOS-Setup.exe `
-            .\AntiOS-Setup.exe.sha256 `
-            $pythonArtifacts `
-            --target $env:GITHUB_SHA `
-            --prerelease `
-            --title "AntiOS $tag" `
-            --notes-file .\release\RELEASE_NOTES.md
+          set -euo pipefail
+          tag="$(tr -d '\r\n' < release/TAG)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; refusing to replace published downloads."
+            exit 1
+          fi
+          mapfile -t assets < <(find release-artifacts -type f -print | sort)
+          test "${#assets[@]}" -ge 8
+          gh release create "$tag" "${assets[@]}" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "AntiOS $tag" \
+            --notes-file release/RELEASE_NOTES.md
