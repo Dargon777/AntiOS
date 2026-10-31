@@ -4,7 +4,7 @@ AntiOS supports a layered companion model with supported security products.
 
 ## Public contract
 
-- AntiOS does not disable Microsoft Defender as part of normal coexistence.
+- AntiOS does not disable, stop or reconfigure Microsoft Defender.
 - AntiOS does not add hidden Defender exclusions for itself.
 - AntiOS does not spoof Windows Security Center primary-antivirus registration.
 - AntiOS does not rely on process hiding or rootkit techniques.
