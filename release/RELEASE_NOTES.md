@@ -1,24 +1,23 @@
-# AntiOS release notes
+# AntiOS v2.0.0 alpha 30
 
-AntiOS release notes are intentionally written at the product-capability level.
+Alpha 30 expands AntiOS into a cross-platform companion release while keeping Windows as the primary desktop target.
 
-## Current alpha
+## Highlights
 
-This release line includes improvements to:
+- Linux x86_64 companion build is now published alongside the Windows installer and portable package.
+- Kaspersky and Dr.Web coexistence support is available on Windows and Linux.
+- AntiOS remains a supplemental layer: it does not disable third-party protection, change vendor exclusions or policies, or automatically launch vendor scans.
+- Windows continues to support Microsoft Defender coexistence.
+- Linux includes the AntiOS CLI and a lightweight desktop companion surface for status and on-demand second-opinion scanning.
+- Storage Intelligence, cleanup safeguards and recovery verification from Alpha 29 remain included.
+- Packaging, compatibility checks and automated test coverage were expanded for the combined Windows/Linux release.
 
-- antivirus scanning and resident protection;
-- quarantine and recovery;
-- coexistence with supported security products;
-- diagnostics and incident handling;
-- Storage Cleanup and Storage Intelligence;
-- installation, updating, repair and upgrade reliability;
-- Windows compatibility and packaging;
-- privacy, safety checks and test coverage.
+## Platform notes
 
-### Security documentation policy
+Windows 10 22H2 x64 and newer Windows 11 builds remain the supported Windows target.
 
-Public release notes must not disclose operational architecture that would materially simplify reconnaissance. Avoid publishing exact component handoff order, internal state paths, persistence/service/task identities, watchdog or lock behavior, trust-boundary verification sequences, cache/queue/timeout parameters, detection thresholds, native protocol fields, rollback internals or update activation details.
+Linux support is supplemental. Distribution packaging and service setup can vary; the release provides a portable x86_64 archive rather than claiming native distro-package integration.
 
-Describe **what changed for the user**, not the internal sequence used to implement it.
+This is a prerelease. Direct-download Windows builds may still trigger SmartScreen when code signing is unavailable.
 
-See [../SECURITY.md](../SECURITY.md) for vulnerability reporting.
+See SECURITY.md and PRIVACY.md for the current security and privacy contracts.
