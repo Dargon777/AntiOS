@@ -8,6 +8,9 @@ FORBIDDEN_PREFIXES = (
     "private/",
     "antios/proprietary/",
     "antios/private/",
+    "private-core/",
+    "core-private/",
+    "vendor/private-core/",
 )
 
 
