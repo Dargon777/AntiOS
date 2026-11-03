@@ -430,3 +430,22 @@ def test_guard_scanning_does_not_mask_active_queue_loss(monkeypatch):
     status = protection.collect_protection_status()
     assert status["capabilities"]["resident_post_write_detection"] is False
     assert status["capabilities"]["layered_with_defender"] is False
+
+
+def test_unreadable_guard_database_degrades_guard_without_losing_engine_status(monkeypatch):
+    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
+
+    def denied():
+        raise PermissionError(13, "Access denied", r"C:\ProgramData\AntiOS\Guard\guard.sqlite3")
+
+    monkeypatch.setattr(protection, "read_guard_state", denied)
+    monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
+    monkeypatch.setattr(protection, "defender_status", _active_defender)
+    result = protection.collect_protection_status("clamd")
+    assert result["engine"]["available"] is True
+    assert result["guard"]["state"] == "unavailable"
+    assert result["guard"]["running"] is False
+    assert "Guard state unreadable" in result["guard"]["detail"]
+    assert result["capabilities"]["standalone_detection_engine"] is True
+    assert result["capabilities"]["resident_post_write_detection"] is False
+    assert result["capabilities"]["layered_with_defender"] is False
