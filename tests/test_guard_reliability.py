@@ -104,6 +104,17 @@ def test_failed_private_directory_setup_does_not_create_database(tmp_path, monke
     with pytest.raises(PermissionError, match="ACL denied"):
         guard_state.GuardState(tmp_path / "state")
     assert not (tmp_path / "state" / "guard.sqlite3").exists()
+    assert not (tmp_path / "state").exists()
+
+
+def test_directory_helper_timeout_is_a_reportable_startup_error(tmp_path, monkeypatch):
+    from antios import quarantine
+    monkeypatch.setattr(guard_state, "os", SimpleNamespace(name="nt"))
+    def timeout():
+        raise subprocess.TimeoutExpired("whoami", 5)
+    monkeypatch.setattr(quarantine, "_current_windows_sid", timeout)
+    with pytest.raises(OSError, match="current-user Guard access"):
+        guard_state._grant_creator_access(tmp_path)
 
 
 @pytest.mark.parametrize("text,expected", [

@@ -30,13 +30,16 @@ def _grant_creator_access(folder: Path) -> None:
     if os.name != "nt":
         return
     from .quarantine import _current_windows_sid
-    sid = _current_windows_sid()
-    result = subprocess.run(
-        [system_executable("icacls.exe"), str(folder), "/grant:r",
-         f"*{sid}:(OI)(CI)F", "/L", "/Q"],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        timeout=10, **hidden_process_kwargs(),
-    )
+    try:
+        sid = _current_windows_sid()
+        result = subprocess.run(
+            [system_executable("icacls.exe"), str(folder), "/grant:r",
+             f"*{sid}:(OI)(CI)F", "/L", "/Q"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=10, **hidden_process_kwargs(),
+        )
+    except subprocess.SubprocessError as exc:
+        raise OSError("Unable to prepare current-user Guard access") from exc
     if result.returncode:
         raise PermissionError("Unable to grant the current user access to Guard state")
 
