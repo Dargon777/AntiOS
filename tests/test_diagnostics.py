@@ -433,6 +433,12 @@ def test_intermittent_status_probe_failure_is_throttled_and_not_misattributed(mo
     assert len(errors) == 1
     assert errors[0]["component"] == "Protection"
     assert errors[0]["operation"] == "status-probe"
+    AntivirusPanel._sync_protection_ui(panel, {
+        "guard": {"state": "unavailable", "detail": "Guard state unreadable: denied"},
+        "capabilities": {},
+    })
+    assert len(errors) == 2
+    assert errors[-1]["component"] == "Guard"
     monkeypatch.setattr(antivirus_ui.time, "monotonic", lambda: 401.0)
     AntivirusPanel._sync_protection_ui(panel, {"error": "denied"})
-    assert len(errors) == 2
+    assert len(errors) == 3
