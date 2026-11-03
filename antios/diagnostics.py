@@ -164,7 +164,8 @@ def classify_error(message: str, *, component: str = "") -> str:
         "require" in lower or "deny" in lower or "cancel" in lower
     ):
         return "ELEVATION_REQUIRED"
-    if "access denied" in lower or "permission denied" in lower or "доступ запрещ" in lower:
+    if ("access denied" in lower or "permission denied" in lower or
+            "доступ запрещ" in lower or "отказано в доступе" in lower):
         return "ACCESS_DENIED"
     if "timed out" in lower or "timeout" in lower or "время ожидания" in lower:
         return "OPERATION_TIMEOUT"
@@ -360,7 +361,8 @@ def export_report(destination: Path, *, directory: Path | None = None, metadata:
             "context": {
                 str(k)[:50]: redact(v, exported=True)[:250]
                 for k, v in event_context.items()
-                if str(k) in {"operation", "state", "action", "exit_code", "source"}
+                if str(k) in {"operation", "state", "action", "exit_code", "source",
+                              "errors", "coverage"}
             },
         })
     approved = {"app_version", "os_name", "os_release", "python_version", "language"}
