@@ -19,7 +19,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/site-verification.yml
+
   deploy:
+    needs: validate
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
