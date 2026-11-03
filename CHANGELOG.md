@@ -9,6 +9,7 @@ Detailed security architecture, trust-boundary sequencing, service/task identiti
 - improves Windows Guard startup and recovery after running AntiOS as administrator;
 - keeps independent protection status available when a component cannot be read;
 - reduces repeated diagnostic messages when navigating the interface;
+- fixes interface cleanup when changing themes during a scan;
 - clarifies incompatible Guard settings and Windows access errors;
 - adds isolated regression checks for startup, status reporting and Windows compatibility.
 

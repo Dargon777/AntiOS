@@ -654,6 +654,8 @@ class AntivirusPanel:
             record_event(source, "INFO", "Operation started: " + kind,
                          code="OPERATION_STARTED", context={"operation": kind})
 
+        result_queue = self.app.antivirus_queue
+
         def worker() -> None:
             try:
                 value = operation()
@@ -661,9 +663,9 @@ class AntivirusPanel:
                     record_event(source, "INFO", "Operation returned: " + kind,
                                  code="OPERATION_COMPLETED",
                                  context={"operation": kind})
-                self.app.antivirus_queue.put((kind, value))
+                result_queue.put((kind, value))
             except Exception as exc:
-                self.app.antivirus_queue.put(("error", {
+                result_queue.put(("error", {
                     "message": str(exc),
                     "component": {
                         "scan": "Scanner",
@@ -677,7 +679,7 @@ class AntivirusPanel:
                     "operation": kind,
                 }))
             finally:
-                self.app.antivirus_queue.put(("idle", None))
+                result_queue.put(("idle", None))
 
         threading.Thread(
             target=worker,
@@ -688,6 +690,8 @@ class AntivirusPanel:
         path, signatures = self.app.antivirus_path, self.app.antivirus_signatures
         engine = "clamav"
         self.app.antivirus_engine = engine
+        cancelled = self.app.antivirus_cancel.is_set
+        result_queue = self.app.antivirus_queue
         self._run(
             "scan",
             lambda: run_scan_process(
@@ -695,8 +699,8 @@ class AntivirusPanel:
                 signature_path=signatures,
                 engine=engine,
                 require_verified_peer=(sys.platform == "win32"),
-                cancelled=self.app.antivirus_cancel.is_set,
-                progress=lambda data: self.app.antivirus_queue.put(("progress", data)),
+                cancelled=cancelled,
+                progress=lambda data: result_queue.put(("progress", data)),
             ),
             cancelable=True,
         )
@@ -1259,6 +1263,7 @@ class AntivirusPanel:
         self._selection_changed()
 
     def _poll(self) -> None:
+        result_queue = self.app.antivirus_queue
         if (
             os.name == "nt"
             and time.monotonic() - self.last_protection_probe >= 20
@@ -1274,7 +1279,7 @@ class AntivirusPanel:
                     value = collect_protection_status()
                 except Exception as exc:
                     value = {"error": str(exc)}
-                self.app.antivirus_queue.put(("protection-state", value))
+                result_queue.put(("protection-state", value))
 
             threading.Thread(target=probe_protection, daemon=True).start()
 
@@ -1292,7 +1297,7 @@ class AntivirusPanel:
                     value = read_guard_state()
                 except Exception as exc:
                     value = {"state": "unavailable", "detail": str(exc)}
-                self.app.antivirus_queue.put(("guard-state", value))
+                result_queue.put(("guard-state", value))
 
             threading.Thread(target=probe_guard, daemon=True).start()
 
@@ -1375,6 +1380,10 @@ class AntivirusPanel:
         self.after_id = self.app.root.after(100, self._poll)
 
     def _destroy(self, event: Any) -> None:
-        if event.widget == self.parent and self.after_id is not None:
-            self.app.root.after_cancel(self.after_id)
-            self.after_id = None
+        if event.widget == self.parent:
+            if self.after_id is not None:
+                self.app.root.after_cancel(self.after_id)
+                self.after_id = None
+            # Dispose Tk variables on the UI thread even while a job survives
+            # a theme/language rebuild. A worker must never finalize them.
+            self.engine_var = None
