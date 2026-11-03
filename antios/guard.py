@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import errno
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import stat
@@ -666,8 +667,18 @@ def load_policy(path):
     data = json.loads(content)
     if not isinstance(data, dict) or data.get('schema') != 1:
         raise ValueError('Guard policy must use schema 1')
-    if set(data) - {'schema', 'roots', 'auto_quarantine', 'engine_service'}:
-        raise ValueError('Unknown guard policy field')
+    unknown = set(data) - {'schema', 'roots', 'auto_quarantine', 'engine_service'}
+    if unknown:
+        # Show safe *field names* in diagnostics without leaking arbitrary JSON
+        # keys. Never ignore unknown policy options or weaken Guard defaults.
+        names = sorted(
+            field if isinstance(field, str) and re.fullmatch(r'[a-z_][a-z0-9_]{0,40}', field)
+            else '<invalid-name>' for field in unknown
+        )
+        raise ValueError(
+            'Unknown guard policy field(s): ' + ', '.join(names[:8]) +
+            '; reconfigure Resident Guard to regenerate startup-policy.json'
+        )
     roots = data.get('roots')
     if not isinstance(roots, list) or not all(isinstance(p, str) for p in roots):
         raise ValueError('Guard roots must be a list of paths')
