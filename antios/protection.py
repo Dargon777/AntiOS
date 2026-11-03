@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 
@@ -238,7 +239,16 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     except (OSError, RuntimeError, ValueError) as exc:
         engine = {"available": False, "detail": str(exc)[:500]}
 
-    guard = read_guard_state()
+    # A denied/corrupt Guard state database must not make the entire protection
+    # probe fail and be incorrectly reported as a ClamAV engine failure. Keep
+    # the Guard explicitly unavailable (fail closed) while inspecting the other
+    # independent layers.
+    try:
+        guard = read_guard_state()
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        guard = {"running": False, "state": "unavailable",
+                 "pre_execution_blocking": False,
+                 "detail": f"Guard state unreadable: {exc}"[:500]}
     managed = _managed_runtime_status()
     native = _native_status()
     defender = defender_status()

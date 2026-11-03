@@ -1049,3 +1049,16 @@ def test_guard_journal_reader_uses_wal_for_concurrent_status(tmp_path):
         assert any(entry["kind"] == "probe" for entry in status["events"])
     finally:
         store.close()
+
+
+def test_unknown_policy_field_is_identified_without_leaking_unsafe_key(tmp_path):
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps({
+        "schema": 1, "roots": [str(tmp_path)],
+        "legacy_mode": "old", "secret=value": True,
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="Unknown guard policy field") as exc:
+        guard.load_policy(path)
+    assert "legacy_mode" in str(exc.value)
+    assert "secret=value" not in str(exc.value)
+    assert "reconfigure Resident Guard" in str(exc.value)
