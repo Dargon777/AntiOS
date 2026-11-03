@@ -4,6 +4,18 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 2.0.0a31 - 2026-11-03
+
+Alpha 31 improves protection diagnostics and reliability:
+
+- keeps protection status reporting available when a companion component cannot be read;
+- improves Windows permission-error messages and gives clearer guidance for incompatible Guard settings;
+- reduces repeated diagnostic notices without concealing the underlying failure;
+- distinguishes incomplete scan coverage from successful process completion;
+- improves privacy-conscious support reports and adds regression coverage.
+
+This prerelease does not replace Windows Defender or other antivirus products. An inaccessible Windows resource may still require a local repair.
+
 ## 2.0.0a30 - 2026-10-31
 
 Alpha 30 expands AntiOS companion support across Windows and Linux:
