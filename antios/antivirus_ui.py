@@ -1134,13 +1134,19 @@ class AntivirusPanel:
         # Engine probe failures are recorded once per distinct reason; a
         # twenty-second heartbeat must never generate a flood of duplicates.
         reason = str(value.get("error") or "") if isinstance(value, dict) else ""
-        if reason and (reason != self._last_engine_failure or
+        component = "Protection"
+        guard = value.get("guard") if isinstance(value, dict) else None
+        if not reason and isinstance(guard, dict) and guard.get("state") == "unavailable":
+            reason = str(guard.get("detail") or "")
+            component = "Guard"
+        failure_key = component + ":" + reason
+        if reason and (failure_key != self._last_engine_failure or
                        time.monotonic() - self._last_engine_failure_at >= 300):
-            # collect_protection_status probes multiple components; a failed
-            # Guard database read must not be misattributed to ClamAV.
-            self._error({"message": reason, "component": "Protection",
+            # A probe failure may originate from the Guard status database, not
+            # ClamAV. Preserve component attribution and bound duplicate noise.
+            self._error({"message": reason, "component": component,
                          "operation": "status-probe"})
-            self._last_engine_failure = reason
+            self._last_engine_failure = failure_key
             self._last_engine_failure_at = time.monotonic()
         if hasattr(self, "app"):
             ready = bool(caps.get("standalone_detection_engine"))
