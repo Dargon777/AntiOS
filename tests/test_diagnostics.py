@@ -368,3 +368,71 @@ def test_support_export_replaces_target_only_after_zip_is_complete(tmp_path):
         assert bundle.testzip() is None
         assert json.loads(bundle.read("summary.json"))["events"] == 1
     assert not list(tmp_path.glob(".antios-diagnostics-*.tmp"))
+
+
+def test_russian_windows_access_denied_is_classified_correctly():
+    assert diagnostics.classify_error(
+        "[WinError 5] Отказано в доступе: '[PATH]'",
+        component="Protection",
+    ) == "ACCESS_DENIED"
+
+
+def test_scan_completion_diagnostics_retain_coverage_and_errors_not_fake_exit_code(
+    tmp_path, monkeypatch
+):
+    from antios import antivirus_ui
+    store = tmp_path / "events"
+    original = diagnostics.record_event
+
+    monkeypatch.setattr(
+        antivirus_ui, "record_event",
+        lambda *args, **kwargs: original(*args, **kwargs, directory=store),
+    )
+    antivirus_ui._record_scan_completion({
+        "verdict": "incomplete", "coverage": "limited",
+        "summary": {"errors": 0},
+    })
+    event = diagnostics.recent_events(directory=store)[0]
+    assert event["level"] == "WARNING"
+    assert event["context"]["coverage"] == "limited"
+    assert event["context"]["errors"] == "0"
+    assert "exit_code" not in event["context"]
+    target = tmp_path / "support.zip"
+    assert diagnostics.export_report(target, directory=store) == 1
+    with ZipFile(target) as report:
+        context = json.loads(report.read("events.json"))[0]["context"]
+    assert context["coverage"] == "limited"
+    assert context["errors"] == "0"
+    assert "exit_code" not in context
+
+
+def test_intermittent_status_probe_failure_is_throttled_and_not_misattributed(monkeypatch):
+    from antios.antivirus_ui import AntivirusPanel
+    from antios import antivirus_ui
+    from types import SimpleNamespace
+
+    class Label:
+        def configure(self, **kwargs):
+            pass
+
+    errors = []
+    monkeypatch.setattr(antivirus_ui, "record_event", lambda *args, **kwargs: None)
+    panel = SimpleNamespace(
+        app=SimpleNamespace(language="ru"),
+        engine_chip=Label(), palette={"muted": "gray", "ok": "green"},
+        _last_engine_failure=None, _last_engine_failure_at=0.0,
+        _last_engine_ready=None, guard_state="not-running",
+        layered_active=False,
+        _error=lambda error: errors.append(error),
+        t=lambda key: key,
+    )
+    monkeypatch.setattr(antivirus_ui.time, "monotonic", lambda: 100.0)
+    AntivirusPanel._sync_protection_ui(panel, {"error": "denied"})
+    AntivirusPanel._sync_protection_ui(panel, {"capabilities": {}})
+    AntivirusPanel._sync_protection_ui(panel, {"error": "denied"})
+    assert len(errors) == 1
+    assert errors[0]["component"] == "Protection"
+    assert errors[0]["operation"] == "status-probe"
+    monkeypatch.setattr(antivirus_ui.time, "monotonic", lambda: 401.0)
+    AntivirusPanel._sync_protection_ui(panel, {"error": "denied"})
+    assert len(errors) == 2
