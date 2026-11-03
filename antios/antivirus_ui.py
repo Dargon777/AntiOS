@@ -33,6 +33,25 @@ _ACTIVE_GUARD_STATES = {
 _HEALTHY_GUARD_STATES = {"monitoring", "scanning"}
 
 
+def _record_scan_completion(value: dict) -> None:
+    """Report scan coverage/errors, never invent a child process exit code."""
+    summary = value.get("summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+    record_event(
+        "Scanner",
+        "WARNING" if value.get("coverage") == "limited"
+        or summary.get("errors") else "INFO",
+        "On-demand file scan finished",
+        code="SCAN_COMPLETED",
+        context={
+            "state": str(value.get("verdict") or "unknown"),
+            "coverage": str(value.get("coverage") or "unknown"),
+            "errors": str(summary.get("errors", 0)),
+        },
+    )
+
+
 class AntivirusPanel:
     def __init__(self, app: Any, parent: Any, palette: dict) -> None:
         self.app, self.parent, self.palette = app, parent, palette
@@ -48,6 +67,7 @@ class AntivirusPanel:
         self.advanced_visible = False
         self._last_guard_state_logged: str | None = None
         self._last_engine_failure: str | None = None
+        self._last_engine_failure_at = 0.0
         self._last_engine_ready: bool | None = None
         self.labels: list[Any] = []
         self.buttons: list[Any] = []
@@ -1114,12 +1134,14 @@ class AntivirusPanel:
         # Engine probe failures are recorded once per distinct reason; a
         # twenty-second heartbeat must never generate a flood of duplicates.
         reason = str(value.get("error") or "") if isinstance(value, dict) else ""
-        if reason and reason != self._last_engine_failure:
-            self._error({"message": reason, "component": "ClamAV",
-                         "operation": "engine-probe"})
+        if reason and (reason != self._last_engine_failure or
+                       time.monotonic() - self._last_engine_failure_at >= 300):
+            # collect_protection_status probes multiple components; a failed
+            # Guard database read must not be misattributed to ClamAV.
+            self._error({"message": reason, "component": "Protection",
+                         "operation": "status-probe"})
             self._last_engine_failure = reason
-        if not reason:
-            self._last_engine_failure = None
+            self._last_engine_failure_at = time.monotonic()
         if hasattr(self, "app"):
             ready = bool(caps.get("standalone_detection_engine"))
             if ready != getattr(self, "_last_engine_ready", None):
@@ -1303,18 +1325,7 @@ class AntivirusPanel:
                     fg=self.palette["muted"],
                 )
             elif kind == "scan":
-                result_summary = value.get("summary", {}) if isinstance(value, dict) else {}
-                record_event(
-                    "Scanner",
-                    "WARNING" if value.get("coverage") == "limited"
-                    or result_summary.get("errors") else "INFO",
-                    "On-demand file scan finished",
-                    code="SCAN_COMPLETED",
-                    context={
-                        "state": str(value.get("verdict") or "unknown"),
-                        "exit_code": str(result_summary.get("errors", 0)),
-                    },
-                )
+                _record_scan_completion(value)
                 self.app.antivirus_result = value
                 self.mode = "findings"
                 self._sync_tabs()
