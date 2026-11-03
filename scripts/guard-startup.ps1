@@ -33,6 +33,35 @@ if ($RootsJson) {
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $taskName = "AntiOS Guard ($($identity.User.Value))"
 
+function Restore-GuardUserAccess([string]$Directory) {
+    # Preserve the existing ACL and grant only this token's user. Never walk
+    # arbitrary trees or change permissions through links in a state folder.
+    $current = Get-Item -LiteralPath $Directory -Force
+    if (-not $current.PSIsContainer) { throw 'Guard state must be a directory.' }
+    while ($current) {
+        if ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Guard state directory must not traverse reparse points.'
+        }
+        $current = $current.Parent
+    }
+    foreach ($entry in Get-ChildItem -LiteralPath $Directory -Force) {
+        if ($entry.PSIsContainer -or $entry.LinkType -or
+            ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Guard state contains an unexpected directory or linked file.'
+        }
+    }
+    $directoryItem = Get-Item -LiteralPath $Directory -Force
+    $acl = $directoryItem.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+        $identity.User, [Security.AccessControl.FileSystemRights]::FullControl,
+        [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow)
+    $acl.SetAccessRule($rule)
+    # Persist only the DACL; Set-Acl can request audit/owner privileges on 5.1.
+    $directoryItem.SetAccessControl($acl)
+}
+
 function Assert-GuardTaskOwned($Task, [string]$ExpectedExecutable) {
     if (-not $Task) { return }
     $account = [string]$Task.Principal.UserId
@@ -178,14 +207,19 @@ if ($EngineServiceName) {
 $existing = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existing) { Assert-GuardTaskOwned -Task $existing -ExpectedExecutable $exe }
 
-New-Item -ItemType Directory -Path $folder -Force | Out-Null
-$current = Get-Item -LiteralPath $folder -Force
+$existingParent = $folder
+while (-not (Test-Path -LiteralPath $existingParent)) {
+    $existingParent = Split-Path -Parent $existingParent
+}
+$current = Get-Item -LiteralPath $existingParent -Force
 while ($current) {
     if ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw 'Guard state directory must not traverse reparse points.'
     }
     $current = $current.Parent
 }
+New-Item -ItemType Directory -Path $folder -Force | Out-Null
+Restore-GuardUserAccess $folder
 if ((Test-Path -LiteralPath $policyPath) -and
     ((Get-Item -LiteralPath $policyPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
     throw 'Policy path must not be a reparse point.'

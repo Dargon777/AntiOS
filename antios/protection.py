@@ -42,7 +42,6 @@ def _managed_runtime_status() -> dict:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             timeout=5,
             **hidden_process_kwargs(),
         )
@@ -220,6 +219,15 @@ def _private_core_protection_status(engine_service: str | None = None) -> dict |
     return status
 
 
+def _guard_status() -> dict:
+    try:
+        return read_guard_state()
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        return {"running": False, "state": "unavailable",
+                "pre_execution_blocking": False,
+                "detail": f"Guard state unreadable: {exc}"[:500]}
+
+
 def collect_protection_status(engine_service: str | None = None) -> dict:
     private_status = _private_core_protection_status(engine_service)
     if private_status is not None:
@@ -243,12 +251,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     # probe fail and be incorrectly reported as a ClamAV engine failure. Keep
     # the Guard explicitly unavailable (fail closed) while inspecting the other
     # independent layers.
-    try:
-        guard = read_guard_state()
-    except (OSError, ValueError, sqlite3.Error) as exc:
-        guard = {"running": False, "state": "unavailable",
-                 "pre_execution_blocking": False,
-                 "detail": f"Guard state unreadable: {exc}"[:500]}
+    guard = _guard_status()
     managed = _managed_runtime_status()
     native = _native_status()
     defender = defender_status()
@@ -381,7 +384,7 @@ def collect_linux_protection_status() -> dict:
     except (OSError, RuntimeError, ValueError) as exc:
         engine = {"available": False, "detail": str(exc)[:500]}
 
-    guard = read_guard_state()
+    guard = _guard_status()
     from .linux_companion import collect_linux_companion_status
     companion = collect_linux_companion_status()
     peer_ok = (not engine.get("peer_verification_required") or

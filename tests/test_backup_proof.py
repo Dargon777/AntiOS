@@ -31,7 +31,7 @@ def test_proof_reconstructs_file_in_private_sandbox(tmp_path):
 
 def test_proof_detects_corrupted_backup(tmp_path):
     backup, _ = _backup(tmp_path)
-    manifest = json.loads((__import__("pathlib").Path(backup) / "manifest.json").read_text())
+    manifest = json.loads((__import__("pathlib").Path(backup) / "manifest.json").read_text(encoding="utf-8"))
     stored = __import__("pathlib").Path(manifest["items"][0]["backup_path"])
     stored.write_bytes(b"evil")
     report = prove_cleanup_backup(backup)
@@ -42,7 +42,7 @@ def test_proof_detects_corrupted_backup(tmp_path):
 def test_proof_rejects_manifest_redirect_to_outside_backup(tmp_path):
     backup, _ = _backup(tmp_path)
     manifest_file = __import__("pathlib").Path(backup) / "manifest.json"
-    manifest = json.loads(manifest_file.read_text())
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
     outside = tmp_path / "outside"
     outside.write_bytes(b"secret")
     manifest["items"][0]["path"] = str(outside)
@@ -56,7 +56,7 @@ def test_proof_rejects_manifest_redirect_to_outside_backup(tmp_path):
 
 def test_proof_refuses_symlink_backup(tmp_path):
     backup, _ = _backup(tmp_path)
-    manifest = json.loads((__import__("pathlib").Path(backup) / "manifest.json").read_text())
+    manifest = json.loads((__import__("pathlib").Path(backup) / "manifest.json").read_text(encoding="utf-8"))
     stored = __import__("pathlib").Path(manifest["items"][0]["backup_path"])
     outside = tmp_path / "outside"
     outside.write_bytes(stored.read_bytes())

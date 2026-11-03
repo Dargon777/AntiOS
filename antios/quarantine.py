@@ -84,7 +84,7 @@ def _current_windows_sid() -> str:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        encoding="ascii", errors="replace",
         timeout=5,
         **hidden_process_kwargs(),
     )
