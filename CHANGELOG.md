@@ -4,6 +4,15 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 2.0.0a34 - 2026-11-04
+
+- fixes a first-time ClamAV setup error when an optional engine registration value is not yet present;
+- improves recovery of permissions on existing per-user Guard state files without deleting their history;
+- preserves unrelated local files and third-party protection settings;
+- extends Windows regression tests for installation and Guard state recovery.
+
+This prerelease remains a companion to existing endpoint protection. If older Guard state files are inaccessible, explicit administrator-assisted reconfiguration may still be required.
+
 ## 2.0.0a33 - 2026-11-04
 
 - opens the Windows dashboard on a redesigned protection center with the current access level and a system-drive selector;
