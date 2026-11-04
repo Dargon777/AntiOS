@@ -54,9 +54,11 @@ function Restore-GuardUserAccess([string]$Directory) {
     $acl = $directoryItem.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
     $rule = [Security.AccessControl.FileSystemAccessRule]::new(
         $identity.User, [Security.AccessControl.FileSystemRights]::FullControl,
-        [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+        [Security.AccessControl.InheritanceFlags]::None,
         [Security.AccessControl.PropagationFlags]::None,
         [Security.AccessControl.AccessControlType]::Allow)
+    # Do not grant access to unrelated children by inheritance: only the
+    # allowlisted Guard files below receive their own explicit user ACE.
     $acl.SetAccessRule($rule)
     # Persist only the DACL; Set-Acl can request audit/owner privileges on 5.1.
     $directoryItem.SetAccessControl($acl)
