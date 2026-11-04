@@ -204,8 +204,10 @@ try {
         [IO.File]::ReadAllText($unrelated) -cne 'keep-other-file') {
         throw 'Guard ACL repair must preserve all file content.'
     }
-    if ((Get-Acl -LiteralPath $unrelated).Sddl -cne $unrelatedAcl) {
-        throw 'Guard ACL repair must not modify unrelated file permissions.'
+    $afterUnrelatedAcl = (Get-Acl -LiteralPath $unrelated).Sddl
+    if ($afterUnrelatedAcl -cne $unrelatedAcl) {
+        throw ("Guard ACL repair must not modify unrelated file permissions. Before: " +
+            $unrelatedAcl + "; After: " + $afterUnrelatedAcl)
     }
     New-Item -ItemType Directory -Path (Join-Path $stateDir 'unexpected-subfolder') | Out-Null
     Should-Throw { Restore-GuardUserAccess $stateDir } 'unexpected Guard subdirectory'
