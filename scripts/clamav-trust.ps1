@@ -93,6 +93,55 @@ function Assert-AntiOSArchivePair {
     }
 }
 
+function Assert-AntiOSNonWritableAcl {
+    param([Parameter(Mandatory)][object[]]$Rules)
+
+    $allowed = @(
+        'S-1-5-18',       # SYSTEM
+        'S-1-5-32-544',   # Administrators
+        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464' # TrustedInstaller
+    )
+    # FullControl and Modify are composite permissions that also include read
+    # bits. OR-ing FullControl into a dangerous-rights mask would reject ordinary
+    # ReadAndExecute grants on Program Files.
+    $dangerous = [int64](
+        [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    )
+    # Some Windows ACLs expose raw generic rights rather than their mapped
+    # FileSystemRights equivalents. GENERIC_READ/EXECUTE remain read-only.
+    $dangerous = $dangerous -bor [int64]0x40000000 -bor [int64]0x10000000
+
+    foreach ($rule in $Rules) {
+        if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
+            continue
+        }
+        if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) {
+            continue
+        }
+        # Resolve accounts only when a write-capable ACE is present. Unmapped
+        # read-only identities are harmless here; unmapped writers fail closed.
+        if (([int64]$rule.FileSystemRights -band $dangerous) -eq 0) {
+            continue
+        }
+        try {
+            $sid = $rule.IdentityReference.Translate(
+                [Security.Principal.SecurityIdentifier]).Value
+        } catch [Security.Principal.IdentityNotMappedException] {
+            throw 'Cannot verify the identity of a write-capable ClamAV ACL entry.'
+        }
+        if ($sid -notin $allowed) {
+            throw 'Unprivileged write permissions found on the managed ClamAV installation.'
+        }
+    }
+}
+
 function Assert-AntiOSProtectedEngineRoot {
     param([Parameter(Mandatory)][string]$Root)
     $programFiles = [IO.Path]::GetFullPath(
@@ -103,17 +152,6 @@ function Assert-AntiOSProtectedEngineRoot {
     if ($actual -ine $expected) {
         throw 'Managed ClamAV archive trust requires the exact Program Files installation path.'
     }
-    $allowed = @(
-        'S-1-5-18',       # SYSTEM
-        'S-1-5-32-544',   # Administrators
-        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464' # TrustedInstaller
-    )
-    $dangerous = [Security.AccessControl.FileSystemRights]::Write -bor
-                 [Security.AccessControl.FileSystemRights]::Modify -bor
-                 [Security.AccessControl.FileSystemRights]::FullControl -bor
-                 [Security.AccessControl.FileSystemRights]::Delete -bor
-                 [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
-                 [Security.AccessControl.FileSystemRights]::TakeOwnership
     $current = $actual
     while ($true) {
         $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
@@ -121,19 +159,7 @@ function Assert-AntiOSProtectedEngineRoot {
             throw 'Managed ClamAV ancestor is a reparse point.'
         }
         $acl = Get-Acl -LiteralPath $current -ErrorAction Stop
-        foreach ($rule in $acl.Access) {
-            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
-                continue
-            }
-            if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) {
-                continue
-            }
-            $sid = $rule.IdentityReference.Translate(
-                [Security.Principal.SecurityIdentifier]).Value
-            if ((($rule.FileSystemRights -band $dangerous) -ne 0) -and $sid -notin $allowed) {
-                throw 'Unprivileged write permissions found on the managed ClamAV installation.'
-            }
-        }
+        Assert-AntiOSNonWritableAcl -Rules @($acl.Access)
         if ($current -ieq $programFiles) { break }
         $parent = Split-Path -Parent $current
         if (-not $parent -or $parent -ieq $current) {
@@ -142,7 +168,6 @@ function Assert-AntiOSProtectedEngineRoot {
         $current = $parent
     }
 }
-
 
 function Assert-AntiOSInstalledPair {
     param(

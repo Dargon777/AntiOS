@@ -10,6 +10,75 @@ function Must-Throw([scriptblock]$Action, [string]$Reason) {
     if (-not $rejected) { throw "Security regression: $Reason was accepted." }
 }
 
+# Behavioral ACL tests use synthetic ACEs only; do not change machine ACLs.
+# In particular, Program Files ReadAndExecute and generic read/execute bits
+# must not be mistaken for write access.
+function New-TestClamAclRule {
+    param(
+        [Parameter(Mandatory)]$Identity,
+        [Parameter(Mandatory)][int64]$Rights,
+        [Security.AccessControl.AccessControlType]$Type = [Security.AccessControl.AccessControlType]::Allow,
+        [Security.AccessControl.PropagationFlags]$Propagation = [Security.AccessControl.PropagationFlags]::None
+    )
+    return [pscustomobject]@{
+        IdentityReference = $Identity
+        FileSystemRights = $Rights
+        AccessControlType = $Type
+        PropagationFlags = $Propagation
+    }
+}
+
+function Must-RejectAcl([object[]]$Rules, [string]$Reason, [string]$ExpectedMessage) {
+    $failure = $null
+    try { Assert-AntiOSNonWritableAcl -Rules $Rules } catch { $failure = $_.Exception.Message }
+    if (-not $failure -or $failure -notmatch $ExpectedMessage) {
+        throw "ACL regression: $Reason was not rejected for the expected reason. Actual: $failure"
+    }
+}
+
+$users = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+$admins = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+$systemSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+$trustedInstaller = [Security.Principal.SecurityIdentifier]::new(
+    'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+)
+$unknownName = [Security.Principal.NTAccount]::new(
+    'AntiOS-Unknown-' + [guid]::NewGuid().ToString('N')
+)
+$rw = 'Unprivileged write permissions'
+$unresolved = 'Cannot verify the identity'
+
+$safe = @(
+    (New-TestClamAclRule $users ([Security.AccessControl.FileSystemRights]::ReadAndExecute)),
+    (New-TestClamAclRule $users ([int64]-1610612736)),
+    (New-TestClamAclRule $systemSid ([Security.AccessControl.FileSystemRights]::FullControl)),
+    (New-TestClamAclRule $admins ([Security.AccessControl.FileSystemRights]::Modify)),
+    (New-TestClamAclRule $trustedInstaller ([Security.AccessControl.FileSystemRights]::FullControl)),
+    (New-TestClamAclRule $users ([Security.AccessControl.FileSystemRights]::FullControl) -Propagation InheritOnly),
+    (New-TestClamAclRule $users ([Security.AccessControl.FileSystemRights]::FullControl) -Type Deny),
+    (New-TestClamAclRule $unknownName ([Security.AccessControl.FileSystemRights]::ReadAndExecute))
+)
+Assert-AntiOSNonWritableAcl -Rules $safe
+
+foreach ($right in @(
+    [Security.AccessControl.FileSystemRights]::WriteData,
+    [Security.AccessControl.FileSystemRights]::AppendData,
+    [Security.AccessControl.FileSystemRights]::WriteAttributes,
+    [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes,
+    [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles,
+    [Security.AccessControl.FileSystemRights]::Delete,
+    [Security.AccessControl.FileSystemRights]::ChangePermissions,
+    [Security.AccessControl.FileSystemRights]::TakeOwnership,
+    [Security.AccessControl.FileSystemRights]::Modify,
+    [Security.AccessControl.FileSystemRights]::FullControl,
+    [int64]0x40000000, # GENERIC_WRITE
+    [int64]0x10000000  # GENERIC_ALL
+)) {
+    Must-RejectAcl @((New-TestClamAclRule $users $right)) "Users $right" $rw
+}
+Must-RejectAcl @((New-TestClamAclRule $unknownName ([Security.AccessControl.FileSystemRights]::WriteData))) 'unmapped writable identity' $unresolved
+Write-Host 'PASS: read-only and inherited ACLs accepted; unsafe or unmapped write ACLs denied.'
+
 $root = Join-Path $env:RUNNER_TEMP ('AntiOS-Trust-Test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root -Force | Out-Null
 try {
