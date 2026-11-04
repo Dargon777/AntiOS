@@ -1,6 +1,13 @@
 name: Windows protection acceptance
 
 on:
+  pull_request:
+    paths:
+      - "scripts/protection-*.ps1"
+      - "scripts/clamav-trust.ps1"
+      - "config/clamav/**"
+      - "release/clamav-windows.json"
+      - ".github/workflows/windows-protection-acceptance.yml"
   workflow_dispatch:
 
 permissions:
@@ -8,6 +15,7 @@ permissions:
 
 jobs:
   managed-clamav:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
