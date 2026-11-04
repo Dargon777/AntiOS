@@ -101,14 +101,13 @@ namespace AntiOS {
             if (!GetKernelObjectSecurity(handle, dacl, bytes, size, out size)) throw new Win32Exception();
             FileSystemSecurity acl = directory ? (FileSystemSecurity)new DirectorySecurity() : new FileSecurity();
             acl.SetSecurityDescriptorBinaryForm(bytes, AccessControlSections.Access);
-            var rights = FileSystemRights.FullControl;
-            var inherit = InheritanceFlags.None;
-            foreach (FileSystemAccessRule rule in acl.GetAccessRules(true, true, typeof(SecurityIdentifier))) {
-                if (!rule.IsInherited && rule.IdentityReference.Equals(user) && rule.AccessControlType == AccessControlType.Allow &&
-                    rule.PropagationFlags == PropagationFlags.None && (rule.InheritanceFlags & inherit) == inherit &&
-                    (rule.FileSystemRights & rights) == rights) return;
-            }
-            acl.AddAccessRule(new FileSystemAccessRule(user, rights, inherit, PropagationFlags.None, AccessControlType.Allow));
+            // Do not short-circuit on the ACL returned by the native handle:
+            // its inherited ACE flags can be normalized differently from Get-Acl.
+            // An inherited grant is NOT proof of an explicit grant on this file.
+            // Set only the current user's explicit allow rule, preserving other SIDs.
+            acl.SetAccessRule(new FileSystemAccessRule(
+                user, FileSystemRights.FullControl, InheritanceFlags.None,
+                PropagationFlags.None, AccessControlType.Allow));
             // Set only this handle's DACL, without propagating into unrelated children.
             if (!SetKernelObjectSecurity(handle, dacl, acl.GetSecurityDescriptorBinaryForm())) throw new Win32Exception();
         }
