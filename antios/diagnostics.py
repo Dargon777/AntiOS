@@ -107,6 +107,14 @@ _HELP = {
                "Resident monitoring is not confirmed; protection must not be shown as active.",
                "Check ClamAV and restart Guard after resolving engine errors."),
     },
+    "GUARD_POLICY_INVALID": {
+        "ru": ("Настройки Guard несовместимы",
+               "Guard не смог загрузить сохранённые параметры запуска.",
+               "Обновите AntiOS и заново включите Guard, чтобы пересоздать настройки."),
+        "en": ("Guard settings are incompatible",
+               "Guard could not load its saved startup settings.",
+               "Update AntiOS and enable Guard again to regenerate its settings."),
+    },
     "GUARD_STATE_CHANGED": {
         "ru": ("Изменилось состояние Guard",
                "Состояние резидентной защиты изменилось. Это не всегда ошибка.",
@@ -164,9 +172,11 @@ def classify_error(message: str, *, component: str = "") -> str:
         "require" in lower or "deny" in lower or "cancel" in lower
     ):
         return "ELEVATION_REQUIRED"
-    if ("access denied" in lower or "permission denied" in lower or
+    if ("[winerror 5]" in lower or "access denied" in lower or "permission denied" in lower or
             "доступ запрещ" in lower or "отказано в доступе" in lower):
         return "ACCESS_DENIED"
+    if component == "Guard" and "unknown guard policy field" in lower:
+        return "GUARD_POLICY_INVALID"
     if "timed out" in lower or "timeout" in lower or "время ожидания" in lower:
         return "OPERATION_TIMEOUT"
     if ("unresponsive" in lower or "не отвечает" in lower) and component == "Guard":

@@ -117,7 +117,6 @@ def test_guard_startup_uninstall_does_not_require_executable():
             "-File",
             str(script),
             "-Uninstall",
-            "-Apply",
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,

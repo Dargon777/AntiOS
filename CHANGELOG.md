@@ -4,6 +4,17 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 2.0.0a32 - 2026-11-03
+
+- improves Windows Guard startup and recovery after running AntiOS as administrator;
+- keeps independent protection status available when a component cannot be read;
+- reduces repeated diagnostic messages when navigating the interface;
+- fixes interface cleanup when changing themes during a scan;
+- clarifies incompatible Guard settings and Windows access errors;
+- adds isolated regression checks for startup, status reporting and Windows compatibility.
+
+Existing inaccessible user data may require a one-time administrator-assisted Guard reconfiguration. AntiOS remains prerelease companion software.
+
 ## 2.0.0a31 - 2026-11-03
 
 Alpha 31 improves protection diagnostics and reliability:

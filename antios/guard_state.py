@@ -8,14 +8,40 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
+import subprocess
 import time
 
 from .antivirus import checked_path
 from .quarantine import default_quarantine_path
+from .windows_process import hidden_process_kwargs, system_executable
 
 
 def default_guard_path():
     return default_quarantine_path().parent / "Guard"
+
+
+def _grant_creator_access(folder: Path) -> None:
+    """Keep a newly created private directory usable by the unelevated user.
+
+    Windows mkdir(0700) uses OWNER RIGHTS; an elevated token can make the
+    Administrators group the owner. Grant the actual token user explicitly.
+    Call only on a new, empty, checked directory, never recursively.
+    """
+    if os.name != "nt":
+        return
+    from .quarantine import _current_windows_sid
+    try:
+        sid = _current_windows_sid()
+        result = subprocess.run(
+            [system_executable("icacls.exe"), str(folder), "/grant:r",
+             f"*{sid}:(OI)(CI)F", "/L", "/Q"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=10, **hidden_process_kwargs(),
+        )
+    except subprocess.SubprocessError as exc:
+        raise OSError("Unable to prepare current-user Guard access") from exc
+    if result.returncode:
+        raise PermissionError("Unable to grant the current user access to Guard state")
 
 
 class GuardState:
@@ -26,8 +52,26 @@ class GuardState:
         while not ancestor.exists():
             ancestor = ancestor.parent
         checked_path(ancestor)
-        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        created = False
+        try:
+            folder.mkdir(parents=True, mode=0o700)
+            created = True
+        except FileExistsError:
+            pass
         self.folder = checked_path(folder)
+        if not self.folder.is_dir():
+            raise ValueError("Guard state location must be a directory")
+        if created:
+            try:
+                _grant_creator_access(self.folder)
+            except OSError:
+                # Never leave a failed, empty directory looking initialized on
+                # the next attempt. rmdir refuses to remove any actual data.
+                try:
+                    self.folder.rmdir()
+                except OSError:
+                    pass
+                raise
         self.path = folder / "guard.sqlite3"
         if self.path.exists():
             checked_path(self.path)

@@ -153,7 +153,12 @@ def _read_recent_startup_error(max_age: float = 120.0) -> str | None:
 
 def ensure_resident_guard(*, wait_seconds: float = 6.0) -> dict:
     """Self-heal persistent Guard startup for an installed build."""
-    current = read_guard_state()
+    try:
+        current = read_guard_state()
+    except PermissionError:
+        # Reconfiguration can repair an older directory ACL when the caller
+        # already has permission. Never elevate implicitly from background work.
+        current = {"state": "unavailable", "running": False}
     if current.get("running") and str(current.get("state")) in _ACTIVE_STATES:
         return dict(current, startup_configured=True, changed=False)
 

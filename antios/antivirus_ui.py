@@ -33,6 +33,21 @@ _ACTIVE_GUARD_STATES = {
 _HEALTHY_GUARD_STATES = {"monitoring", "scanning"}
 
 
+def _diagnostic_changed(panel, key: str, value, *, repeat_after=None) -> bool:
+    """Keep bounded probe history across panel rebuilds within one app."""
+    owner = getattr(panel, "app", panel)
+    cache = getattr(owner, "_protection_diagnostics", None)
+    if cache is None:
+        cache = owner._protection_diagnostics = {}
+    now = time.monotonic()
+    previous = cache.get(key)
+    if (previous is not None and previous[0] == value and
+            (repeat_after is None or now - previous[1] < repeat_after)):
+        return False
+    cache[key] = (value, now)
+    return True
+
+
 def _record_scan_completion(value: dict) -> None:
     """Report scan coverage/errors, never invent a child process exit code."""
     summary = value.get("summary", {})
@@ -65,10 +80,6 @@ class AntivirusPanel:
         self.layered_active = False
         self.guard_state = "not-running"
         self.advanced_visible = False
-        self._last_guard_state_logged: str | None = None
-        self._last_engine_failure: str | None = None
-        self._last_engine_failure_at = 0.0
-        self._last_engine_ready: bool | None = None
         self.labels: list[Any] = []
         self.buttons: list[Any] = []
         # ClamAV is the product engine. AMSI remains a CLI compatibility path.
@@ -643,6 +654,8 @@ class AntivirusPanel:
             record_event(source, "INFO", "Operation started: " + kind,
                          code="OPERATION_STARTED", context={"operation": kind})
 
+        result_queue = self.app.antivirus_queue
+
         def worker() -> None:
             try:
                 value = operation()
@@ -650,9 +663,9 @@ class AntivirusPanel:
                     record_event(source, "INFO", "Operation returned: " + kind,
                                  code="OPERATION_COMPLETED",
                                  context={"operation": kind})
-                self.app.antivirus_queue.put((kind, value))
+                result_queue.put((kind, value))
             except Exception as exc:
-                self.app.antivirus_queue.put(("error", {
+                result_queue.put(("error", {
                     "message": str(exc),
                     "component": {
                         "scan": "Scanner",
@@ -666,7 +679,7 @@ class AntivirusPanel:
                     "operation": kind,
                 }))
             finally:
-                self.app.antivirus_queue.put(("idle", None))
+                result_queue.put(("idle", None))
 
         threading.Thread(
             target=worker,
@@ -677,6 +690,8 @@ class AntivirusPanel:
         path, signatures = self.app.antivirus_path, self.app.antivirus_signatures
         engine = "clamav"
         self.app.antivirus_engine = engine
+        cancelled = self.app.antivirus_cancel.is_set
+        result_queue = self.app.antivirus_queue
         self._run(
             "scan",
             lambda: run_scan_process(
@@ -684,8 +699,8 @@ class AntivirusPanel:
                 signature_path=signatures,
                 engine=engine,
                 require_verified_peer=(sys.platform == "win32"),
-                cancelled=self.app.antivirus_cancel.is_set,
-                progress=lambda data: self.app.antivirus_queue.put(("progress", data)),
+                cancelled=cancelled,
+                progress=lambda data: result_queue.put(("progress", data)),
             ),
             cancelable=True,
         )
@@ -1005,18 +1020,17 @@ class AntivirusPanel:
     def _sync_guard_ui(self, value: dict) -> None:
         state = str(value.get("state") or "unavailable")
         self.guard_state = state
-        if state != self._last_guard_state_logged:
+        if _diagnostic_changed(self, "guard-state", state):
             # Poll every 3 s, but never flood the journal with unchanged state.
             record_event(
                 "Guard",
                 "ERROR" if state in {"failed", "unresponsive"} else
-                "WARNING" if state in {"degraded", "attention"} else "INFO",
+                "WARNING" if state in {"degraded", "attention", "unavailable"} else "INFO",
                 "Resident Guard: " + state,
                 code="GUARD_UNRESPONSIVE" if state in {"unresponsive", "failed"}
                 else "GUARD_STATE_CHANGED",
                 context={"state": state},
             )
-            self._last_guard_state_logged = state
         self.app.set_protection_state(value)
         healthy = state in _HEALTHY_GUARD_STATES
 
@@ -1140,24 +1154,21 @@ class AntivirusPanel:
             reason = str(guard.get("detail") or "")
             component = "Guard"
         failure_key = component + ":" + reason
-        if reason and (failure_key != self._last_engine_failure or
-                       time.monotonic() - self._last_engine_failure_at >= 300):
+        if reason and _diagnostic_changed(self, "probe-error", failure_key, repeat_after=300):
             # A probe failure may originate from the Guard status database, not
             # ClamAV. Preserve component attribution and bound duplicate noise.
             self._error({"message": reason, "component": component,
                          "operation": "status-probe"})
-            self._last_engine_failure = failure_key
-            self._last_engine_failure_at = time.monotonic()
-        if hasattr(self, "app"):
-            ready = bool(caps.get("standalone_detection_engine"))
-            if ready != getattr(self, "_last_engine_ready", None):
+        # An incomplete aggregate response says nothing about engine health.
+        ready = caps.get("standalone_detection_engine")
+        if hasattr(self, "app") and isinstance(ready, bool):
+            if _diagnostic_changed(self, "engine-ready", ready):
                 record_event(
                     "ClamAV", "INFO" if ready else "WARNING",
                     "Managed ClamAV ready" if ready else "Managed ClamAV not ready",
                     code="OPERATION_COMPLETED" if ready else "ENGINE_NOT_READY",
                     context={"state": "ready" if ready else "unavailable"},
                 )
-                self._last_engine_ready = ready
                 if not ready and hasattr(self, "last_error_label"):
                     self.last_error_label.configure(
                         text=explanation("ENGINE_NOT_READY", self.app.language)[0],
@@ -1252,6 +1263,7 @@ class AntivirusPanel:
         self._selection_changed()
 
     def _poll(self) -> None:
+        result_queue = self.app.antivirus_queue
         if (
             os.name == "nt"
             and time.monotonic() - self.last_protection_probe >= 20
@@ -1267,7 +1279,7 @@ class AntivirusPanel:
                     value = collect_protection_status()
                 except Exception as exc:
                     value = {"error": str(exc)}
-                self.app.antivirus_queue.put(("protection-state", value))
+                result_queue.put(("protection-state", value))
 
             threading.Thread(target=probe_protection, daemon=True).start()
 
@@ -1285,7 +1297,7 @@ class AntivirusPanel:
                     value = read_guard_state()
                 except Exception as exc:
                     value = {"state": "unavailable", "detail": str(exc)}
-                self.app.antivirus_queue.put(("guard-state", value))
+                result_queue.put(("guard-state", value))
 
             threading.Thread(target=probe_guard, daemon=True).start()
 
@@ -1368,6 +1380,10 @@ class AntivirusPanel:
         self.after_id = self.app.root.after(100, self._poll)
 
     def _destroy(self, event: Any) -> None:
-        if event.widget == self.parent and self.after_id is not None:
-            self.app.root.after_cancel(self.after_id)
-            self.after_id = None
+        if event.widget == self.parent:
+            if self.after_id is not None:
+                self.app.root.after_cancel(self.after_id)
+                self.after_id = None
+            # Dispose Tk variables on the UI thread even while a job survives
+            # a theme/language rebuild. A worker must never finalize them.
+            self.engine_var = None
