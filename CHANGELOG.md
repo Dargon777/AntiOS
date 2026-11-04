@@ -10,6 +10,7 @@ Detailed security architecture, trust-boundary sequencing, service/task identiti
 - adds an interactive administrator scan window for installed copies;
 - scans the full file selection by default and streams large files through ClamAV;
 - reports inaccessible files and incomplete engine analysis in scan results.
+- fixes false-positive permission checks that could prevent the ClamAV engine from installing on otherwise standard Windows folders;
 
 ## 2.0.0a32 - 2026-11-03
 
