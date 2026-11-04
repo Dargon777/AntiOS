@@ -170,7 +170,10 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
         $_.IdentityReference -eq $identity.User -and $_.AccessControlType -eq 'Allow' -and
         ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq [Security.AccessControl.FileSystemRights]::FullControl
     })
-    @{rejected=$rejected; failure=$failure; explicit_user=($rules.Count -gt 0); outside_unchanged=($before -eq (Get-Acl -LiteralPath $env:ANTIOS_TEST_OUTSIDE).Sddl)} | ConvertTo-Json -Compress
+    $ruleDetails = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {
+        '{0}:{1}:inherited={2}' -f $_.IdentityReference.Value,$_.FileSystemRights,$_.IsInherited
+    })
+    @{rejected=$rejected; failure=$failure; explicit_user=($rules.Count -gt 0); folder_rules=$ruleDetails; folder_sddl=$acl.Sddl; outside_unchanged=($before -eq (Get-Acl -LiteralPath $env:ANTIOS_TEST_OUTSIDE).Sddl)} | ConvertTo-Json -Compress
     '''
     env = dict(os.environ, ANTIOS_TEST_SCRIPT=str(Path("scripts/guard-startup.ps1").absolute()),
                ANTIOS_TEST_FOLDER=str(folder), ANTIOS_TEST_OUTSIDE=str(outside),
@@ -187,7 +190,7 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
     assert data["rejected"] is linked, data["failure"]
     assert data["outside_unchanged"] is True
     if not linked:
-        assert data["explicit_user"] is True
+        assert data["explicit_user"] is True, data
     assert state_file.read_bytes() == before_bytes
     if not linked:
         with sqlite3.connect(state_file) as db:
