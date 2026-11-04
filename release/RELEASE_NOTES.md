@@ -1,13 +1,13 @@
-# AntiOS public prerelease — v2.0.0-alpha.33
+# AntiOS public prerelease — v2.0.0-alpha.34
 
-This prerelease includes a Windows protection center with an administrator scan option, improved on-demand scanning of selected files and folders, and more transparent reports for files that could not be fully examined.
+This release improves Windows protection-engine installation and resident protection reliability.
 
-Alpha 33 also includes a reliability fix for the Windows protection-engine installation: legitimate read-only folder permissions no longer prevent setup, while unsafe write access remains prohibited.
+- First-time ClamAV setup now handles missing optional registration settings correctly.
+- Guard can restore access to existing user state files during explicitly approved reconfiguration while retaining scan history.
+- The recovery path preserves unrelated user files and does not alter Microsoft Defender or other antivirus settings.
 
-AntiOS continues to operate as a companion to existing antivirus software and does not replace Microsoft Defender or change its protection policy.
+If an older Guard state directory was created with administrator-only permissions, a one-time elevated AntiOS session may be necessary to reconfigure Guard. Actual protection is not assumed active until the engine and Guard independently report healthy status.
 
-Public release metadata intentionally omits internal security implementation details that could make reconnaissance, reverse engineering or bypass development easier.
+Public notes intentionally omit implementation-level security details. For usage, limitations, privacy information and responsible vulnerability reporting, see `README.md`, `PRIVACY.md` and `SECURITY.md`.
 
-For supported usage, current limitations, privacy information and responsible vulnerability reporting, see `README.md`, `PRIVACY.md` and `SECURITY.md`.
-
-AntiOS v2 remains prerelease software.
+AntiOS v2 remains prerelease companion software.
