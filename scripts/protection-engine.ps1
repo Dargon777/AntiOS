@@ -72,16 +72,28 @@ function Get-ConfigSource {
     throw 'AntiOS ClamAV configuration templates are missing.'
 }
 
+# An AntiOS registry key can exist before the engine is installed. Missing
+# optional values are normal; a failure to read an existing key is NOT.
+# Get-ItemPropertyValue may emit a terminating error for a missing value under
+# Windows PowerShell 5.1, even when -ErrorAction SilentlyContinue is supplied.
+function Get-OptionalEngineRegistryValue([string]$Path, [string]$Name) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $record = Get-ItemProperty -LiteralPath $Path -ErrorAction Stop
+    $property = $record.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
 function Remove-OwnedRegistry {
     if (Test-Path $AntiOSRegistry) {
-        $current = Get-ItemPropertyValue -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue
+        $current = Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName'
         if ($current -eq $EngineServiceName) {
             Remove-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue
         }
     }
     if (Test-Path $ClamRegistry) {
-        $confDir = Get-ItemPropertyValue -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
-        $dataDir = Get-ItemPropertyValue -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
+        $confDir = Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'ConfDir'
+        $dataDir = Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'DataDir'
         if ($confDir -eq $ConfigRoot) {
             Remove-ItemProperty -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
         }
@@ -121,14 +133,14 @@ function Assert-FreshEngineInstallTargets {
         }
     }
     if (Test-Path $AntiOSRegistry) {
-        $existingService = Get-ItemPropertyValue -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue
+        $existingService = Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName'
         if ($existingService) {
             throw 'Existing AntiOS engine registry binding found; use an explicit repair/uninstall workflow.'
         }
     }
     if (Test-Path $ClamRegistry) {
-        $existingConf = Get-ItemPropertyValue -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
-        $existingData = Get-ItemPropertyValue -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
+        $existingConf = Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'ConfDir'
+        $existingData = Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'DataDir'
         if ($existingConf -or $existingData) {
             throw 'Existing machine-wide ClamAV ConfDir/DataDir registry configuration was found; refusing to overwrite another installation.'
         }
