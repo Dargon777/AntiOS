@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 
-from .windows_process import hidden_process_kwargs, system_executable
+from .windows_process import hidden_process_kwargs, system_executable, windows_powershell_env
 
 
 def assert_protected_install(executable: Path, program_files: Path) -> None:
@@ -75,13 +75,15 @@ while ($true) {
 'AntiOS protected install verified'
 """
     script = script.replace("EXE_PATH", encoded_exe).replace("ROOT_PATH", encoded_root)
+    powershell = str(system_executable("WindowsPowerShell/v1.0/powershell.exe"))
     completed = subprocess.run(
-        [str(system_executable("WindowsPowerShell/v1.0/powershell.exe")),
+        [powershell,
          "-NoProfile", "-NonInteractive", "-Command", script],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True, errors="replace",
+        env=windows_powershell_env(powershell),
         timeout=25,
         **hidden_process_kwargs(),
     )

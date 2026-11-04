@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .windows_process import windows_powershell_env
+
 
 def _powershell() -> str:
     root = Path(os.environ.get("SystemRoot") or r"C:\Windows")
@@ -51,6 +53,7 @@ def _run_script(*args: str) -> subprocess.CompletedProcess[str]:
         encoding="utf-8",
         errors="replace",
         creationflags=flags,
+        env=windows_powershell_env(command[0]),
         check=False,
     )
     if result.returncode != 0:

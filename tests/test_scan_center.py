@@ -114,8 +114,9 @@ def test_explicit_uac_uses_only_the_verified_gui_and_fixed_arguments(monkeypatch
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires a Windows system image")
-def test_windows_allows_trusted_readonly_install_permissions():
+def test_windows_allows_trusted_readonly_install_permissions(monkeypatch, tmp_path):
     from pathlib import Path
     from antios.windows_acl import assert_protected_install
+    monkeypatch.setenv("PSModulePath", str(tmp_path / "unrelated-host-modules"))
     root = Path(os.environ["SystemRoot"]) / "System32"
     assert_protected_install(root / "whoami.exe", root)
