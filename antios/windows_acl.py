@@ -39,11 +39,10 @@ $allowed = @(
     'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'  # TrustedInstaller
 )
 $dangerous = [Security.AccessControl.FileSystemRights]::Write -bor
-             [Security.AccessControl.FileSystemRights]::Modify -bor
-             [Security.AccessControl.FileSystemRights]::FullControl -bor
+             [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
              [Security.AccessControl.FileSystemRights]::Delete -bor
              [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
-             [Security.AccessControl.FileSystemRights]::TakeOwnership
+             [Security.AccessControl.FileSystemRights]::TakeOwnership -bor 0x50000000
 $current = $exe
 while ($true) {
     $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
@@ -51,15 +50,17 @@ while ($true) {
         throw "AntiOS privileged executable path traverses a reparse point"
     }
     $acl = Get-Acl -LiteralPath $current -ErrorAction Stop
-    foreach ($rule in $acl.Access) {
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $allowed) {
+        throw "AntiOS privileged executable or ancestor has an untrusted owner"
+    }
+    foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
         if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
             continue
         }
         if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) {
             continue
         }
-        $sid = $rule.IdentityReference.Translate(
-            [Security.Principal.SecurityIdentifier]).Value
+        $sid = $rule.IdentityReference.Value
         if ((($rule.FileSystemRights -band $dangerous) -ne 0) -and $sid -notin $allowed) {
             throw "AntiOS privileged executable or ancestor has untrusted write access"
         }
@@ -80,7 +81,7 @@ while ($true) {
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        text=True, errors="replace",
         timeout=25,
         **hidden_process_kwargs(),
     )

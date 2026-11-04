@@ -43,14 +43,18 @@ def is_administrator() -> bool:
 
 
 def managed_cli_path():
-    """Only elevate the installed, machine-managed CLI beside this GUI.
+    return _managed_executable("AntiOS.exe")
+
+
+def _managed_executable(name):
+    """Only elevate an executable from the machine-managed installation.
 
     Portable/user-writable executable trees are intentionally not an elevation
     target; they may be replaced between GUI verification and UAC approval.
     """
     from pathlib import Path
     if not getattr(sys, "frozen", False):
-        raise RuntimeError("Install AntiOS first to repair the machine-wide engine from the GUI")
+        raise RuntimeError("Administrator access from this window requires AntiOS installed in Program Files")
     import winreg
 
     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\DargonITP\AntiOS") as key:
@@ -65,17 +69,36 @@ def managed_cli_path():
         program_files_dir, _ = winreg.QueryValueEx(key, "ProgramFilesDir")
     program_files = Path(program_files_dir).resolve()
     if installed != gui_dir or installed == program_files or program_files not in installed.parents:
-        raise RuntimeError("Privileged repair requires an installed AntiOS in Program Files")
-    cli = installed / "AntiOS.exe"
-    if not cli.is_file() or cli.is_symlink():
-        raise FileNotFoundError("Managed AntiOS.exe for elevated repair is missing or unsafe")
+        raise RuntimeError("Administrator access requires an AntiOS installation in Program Files")
+    if name not in {"AntiOS.exe", "AntiOS-GUI.exe"}:
+        raise ValueError("Unsupported administrator application")
+    executable = installed / name
+    if not executable.is_file() or executable.is_symlink():
+        raise FileNotFoundError(f"The installed {name} is missing or unsafe")
 
     # A signed image can be swapped before UAC if its directory is writable
     # by the current (unelevated) Windows user. Deny that installation instead
     # of elevating from an unsafe location.
     from .windows_acl import assert_protected_install
-    assert_protected_install(cli, program_files)
-    return cli
+    assert_protected_install(executable, program_files)
+    return executable
+
+
+def open_admin_scan_center(language: str) -> None:
+    """Open the installed scan center after an interactive Windows UAC prompt."""
+    from .i18n import SUPPORTED_LANGUAGES
+    if os.name != "nt" or language not in SUPPORTED_LANGUAGES:
+        raise ValueError("Unsupported administrator scan session")
+    gui = _managed_executable("AntiOS-GUI.exe")
+    shell = ctypes.WinDLL("shell32", use_last_error=True, winmode=0x800)
+    launch = shell.ShellExecuteW
+    launch.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+                       ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int]
+    launch.restype = ctypes.c_void_p
+    result = launch(None, "runas", str(gui), "--scan-center --lang " + language,
+                    str(gui.parent), 1)
+    if not result or result <= 32:
+        raise PermissionError("Windows did not grant administrator access (UAC)")
 
 
 def request_protection_elevation(action: str) -> dict:

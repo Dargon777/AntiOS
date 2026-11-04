@@ -92,12 +92,73 @@ def load_signatures(path: str | Path | None = None) -> dict[str, str]:
     return signatures
 
 
+def _scan_large_file(item, provider, signatures, stopped, max_bytes):
+    """Hash one stable snapshot and send the same bytes to ClamD in one request."""
+    target = checked_path(item)
+    before = target.lstat()
+    if is_link(before) or not stat.S_ISREG(before.st_mode):
+        raise ValueError("Not a regular file")
+    if max_bytes is not None and before.st_size > max_bytes:
+        raise ValueError("File exceeds the scan size limit")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(target, flags), "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if fingerprint(opened) != fingerprint(before) or not stat.S_ISREG(opened.st_mode):
+            raise ValueError("File changed while opening")
+        digest = hashlib.sha256()
+        complete = False
+
+        def blocks():
+            nonlocal complete
+            remaining = opened.st_size
+            while remaining:
+                if stopped():
+                    raise InterruptedError("Scan cancelled")
+                block = stream.read(min(65536, remaining))
+                if not block:
+                    raise ValueError("File changed while reading")
+                digest.update(block)
+                remaining -= len(block)
+                yield block
+            complete = True
+
+        chunks = blocks()
+        outcome, error = None, None
+        if provider is not None:
+            try:
+                if not hasattr(provider, "scan_stream"):
+                    raise OSError("Engine does not support large-file streaming")
+                outcome = provider.scan_stream(chunks)
+                if not complete or not isinstance(outcome, ScanOutcome):
+                    raise OSError("Engine did not confirm the complete stream")
+            except (OSError, RuntimeError) as exc:
+                # Engine stream limits are per file. Continue hashing and
+                # allow the next file to receive its own engine inspection.
+                outcome, error = None, str(exc)
+        for _block in chunks:
+            pass
+        after = os.fstat(stream.fileno())
+        if (not complete or fingerprint(opened) != fingerprint(after)
+                or fingerprint(after) != fingerprint(checked_path(item).lstat())):
+            raise ValueError("File changed or could not be read completely")
+    sha = digest.hexdigest()
+    finding = None
+    if sha in signatures:
+        finding = {"kind": "threat", "engine": "SHA-256", "name": signatures[sha]}
+    elif outcome and outcome.kind:
+        finding = {"kind": outcome.kind, "engine": "ClamAV", "name": outcome.name}
+    return {"item": item, "info": after, "size": after.st_size, "sha256": sha,
+            "finding": finding, "provider_scanned": outcome is not None,
+            "file_engine_error": error, "limited_result": bool(error or (outcome and outcome.kind == "review"))}
+
+
 def scan_files(
     path: str | Path,
     *,
     signature_path: str | Path | None = None,
-    max_bytes: int = DEFAULT_MAX_BYTES,
-    max_files: int = DEFAULT_MAX_FILES,
+    max_bytes: int | None = None,
+    max_files: int | None = None,
     progress: Callable[[dict], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
     provider_factory: Callable | None = None,
@@ -124,8 +185,13 @@ def scan_files(
                 service_name=engine_service,
                 require_verified_peer=require_verified_peer,
             )
-    if not 1 <= max_bytes <= 256 * 1024 * 1024 or not 1 <= max_files <= 1_000_000:
-        raise ValueError("Scan limits must be 1..256 MiB and 1..1000000 files")
+    if any(v is not None and (type(v) is not int or v <= 0) for v in (max_files, max_bytes)):
+        raise ValueError("Explicit scan limits must be positive integers")
+    if engine == "amsi":
+        max_bytes = max_bytes or DEFAULT_MAX_BYTES
+        if max_bytes > 256 * 1024 * 1024:
+            raise ValueError("AMSI buffer exceeds 256 MiB")
+    buffer_limit = min(max_bytes or DEFAULT_MAX_BYTES, DEFAULT_MAX_BYTES) if engine == "clamav" else max_bytes
     if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
         raise ValueError("Scan workers must be between 1 and 8")
     target = checked_path(path)
@@ -136,7 +202,7 @@ def scan_files(
         "schema": 1, "kind": "antivirus-scan", "path": str(target),
         "started_at": utc_now(), "finished_at": None,
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
-                   "max_entries": max_files * 2, "workers": workers},
+                   "max_entries": max_files * 2 if max_files is not None else None, "workers": workers},
         "engine": {"provider": "Windows AMSI" if engine == "amsi" else "ClamAV", "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or "")},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
@@ -171,42 +237,48 @@ def scan_files(
         if target.is_file():
             yield target
             return
-        stack = [target]
-        while stack:
-            if stopped():
-                return
-            folder = stack.pop()
-            try:
-                checked_path(folder)
-                with os.scandir(folder) as entries:
-                    for entry in entries:
-                        if stopped():
-                            return
-                        if summary["entries_seen"] >= max_files * 2:
-                            summary["limit_reached"] = True
-                            return
-                        summary["entries_seen"] += 1
-                        item = Path(entry.path)
-                        if exclude(item):
-                            issue(item, "quarantine-excluded")
-                            continue
-                        try:
-                            info = entry.stat(follow_symlinks=False)
-                        except OSError as exc:
-                            issue(item, str(exc), error=True)
-                            continue
-                        if is_link(info):
-                            issue(item, "link-or-reparse-point")
-                        elif stat.S_ISDIR(info.st_mode):
-                            # Bound traversal memory, even for directory-only trees.
-                            if len(stack) >= max_files:
-                                summary["limit_reached"] = True
-                                return
-                            stack.append(item)
-                        else:
-                            yield item
-            except (OSError, ValueError) as exc:
-                issue(folder, str(exc), error=True)
+        # Keep one iterator per active ancestor. A drive with many sibling
+        # directories never needs a drive-sized list of pending paths.
+        stack = []
+        def children(folder):
+            with os.scandir(checked_path(folder)) as entries:
+                yield from entries
+
+        def descend(folder):
+            stack.append((folder, children(folder)))
+        descend(target)
+        try:
+            while stack and not stopped():
+                folder, entries = stack[-1]
+                try:
+                    entry = next(entries)
+                except (StopIteration, OSError, ValueError) as exc:
+                    if not isinstance(exc, StopIteration):
+                        issue(folder, str(exc), error=True)
+                    stack.pop()[1].close()
+                    continue
+                if max_files is not None and summary["entries_seen"] >= max_files * 2:
+                    summary["limit_reached"] = True
+                    return
+                summary["entries_seen"] += 1
+                item = Path(entry.path)
+                if exclude(item):
+                    issue(item, "quarantine-excluded")
+                    continue
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except OSError as exc:
+                    issue(item, str(exc), error=True)
+                    continue
+                if is_link(info):
+                    issue(item, "link-or-reparse-point")
+                elif stat.S_ISDIR(info.st_mode):
+                    descend(item)
+                else:
+                    yield item
+        finally:
+            for _folder, entries in stack:
+                entries.close()
 
     provider_failed = threading.Event()
     cache = None
@@ -248,6 +320,8 @@ def scan_files(
             result["engine"]["failed_during_scan"] = True
         if outcome.get("limited_result"):
             result["engine"]["limited_results"] += 1
+        if outcome.get("file_engine_error"):
+            issue(item, "ClamAV could not finish this file: " + outcome["file_engine_error"], error=True)
         finding = outcome.get("finding")
         if finding:
             finding.update(
@@ -258,7 +332,7 @@ def scan_files(
             )
             summary["threats" if finding["kind"] == "threat" else "reviews"] += 1
             result["findings"].append(finding)
-        elif cache is not None and outcome.get("provider_scanned"):
+        elif cache is not None and outcome.get("provider_scanned") and outcome["size"] <= DEFAULT_MAX_BYTES:
             try:
                 cache.put(
                     item, outcome["info"], cache_engine, cache_signatures, outcome["sha256"]
@@ -273,9 +347,11 @@ def scan_files(
             info = item.lstat()
             if not stat.S_ISREG(info.st_mode) or is_link(info):
                 return {"item": item, "issue": "not-a-regular-file"}
-            if info.st_size > max_bytes:
+            if max_bytes is not None and info.st_size > max_bytes:
                 return {"item": item, "issue": "file-size-limit"}
-            content, info = read_regular(item, max_bytes)
+            if engine == "clamav" and info.st_size > DEFAULT_MAX_BYTES:
+                return _scan_large_file(item, provider, signatures, stopped, max_bytes)
+            content, info = read_regular(item, buffer_limit)
             digest = hashlib.sha256(content).hexdigest()
             label = signatures.get(digest)
             if label is None and 68 <= len(content) <= 128:
@@ -332,10 +408,10 @@ def scan_files(
             if not stat.S_ISREG(info.st_mode) or is_link(info):
                 issue(item, "not-a-regular-file")
                 return False, None
-            if info.st_size > max_bytes:
+            if max_bytes is not None and info.st_size > max_bytes:
                 issue(item, "file-size-limit")
                 return False, None
-            if cache is not None:
+            if cache is not None and info.st_size <= DEFAULT_MAX_BYTES:
                 try:
                     digest = cache.get(item, info, cache_engine, cache_signatures)
                 except (OSError, sqlite3.Error):
@@ -343,12 +419,12 @@ def scan_files(
                 if digest:
                     # Metadata is only a lookup hint. Re-read and hash the file
                     # through the same stable-snapshot path before trusting a hit.
-                    content, verified_info = read_regular(item, max_bytes)
+                    content, verified_info = read_regular(item, buffer_limit)
                     if hashlib.sha256(content).hexdigest() == digest:
                         account_cached(item, verified_info, digest)
                         return False, verified_info
             return True, info
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             issue(item, str(exc), error=True)
             return False, None
 
@@ -391,7 +467,7 @@ def scan_files(
         for item in candidates():
             if stopped():
                 break
-            if summary["files_seen"] >= max_files:
+            if max_files is not None and summary["files_seen"] >= max_files:
                 summary["limit_reached"] = True
                 break
             summary["files_seen"] += 1

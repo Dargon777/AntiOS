@@ -131,6 +131,10 @@ class AntivirusPanel:
     def _resize(self, event: Any) -> None:
         if event.widget != self.parent or event.width <= 150:
             return
+        if event.width < 820:
+            self.core_visual.grid_remove()
+        else:
+            self.core_visual.grid()
         wrap = max(180, event.width - 100)
         for label in self.labels:
             try:
@@ -148,40 +152,39 @@ class AntivirusPanel:
         outer.grid_columnconfigure(0, weight=1)
         outer.grid_rowconfigure(3, weight=1, minsize=230)
 
-        # Large protection hero. The orbit uses a restrained phi-like sequence
-        # of radii to echo the Overview without turning status into decoration.
         self.hero = self._card(outer)
         self.hero.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.hero.grid_columnconfigure(2, weight=1)
-        self.hero.grid_columnconfigure(3, minsize=235)
+        self.hero.grid_columnconfigure(3, minsize=180)
 
         self.hero_accent = tk.Frame(self.hero, bg=self.palette["warn"], width=4)
         self.hero_accent.grid(row=0, column=0, sticky="ns")
 
         visual = tk.Canvas(
             self.hero,
-            width=190,
-            height=175,
+            width=128,
+            height=128,
             bg=self.palette["surface"],
             highlightthickness=0,
             bd=0,
         )
-        visual.grid(row=0, column=1, padx=(18, 8), pady=14)
-        for box, start, extent, width in [
-            ((12, 8, 178, 174), 205, 268, 3),
-            ((29, 25, 161, 157), 18, 245, 2),
-            ((48, 44, 142, 138), 215, 215, 2),
-            ((64, 60, 126, 122), 45, 175, 1),
-        ]:
-            visual.create_arc(*box, start=start, extent=extent, style="arc",
-                              outline=self.palette["accent"], width=width)
-        visual.create_oval(58, 54, 132, 128, fill=self.palette["accent_soft"],
-                           outline=self.palette["accent"], width=2)
-        visual.create_text(95, 91, text="✓", fill=self.palette["accent"],
-                           font=("Segoe UI", 30, "bold"))
+        visual.grid(row=0, column=1, padx=(18, 4), pady=8)
+        self.core_visual = visual
+        # An original faceted shield. Its geometry is decorative; the status
+        # beside it comes from the running protection probe.
+        hull = [(64, 13), (108, 31), (101, 75), (84, 98), (64, 115),
+                (44, 98), (27, 75), (20, 31)]
+        center = (64, 61)
+        for index, point in enumerate(hull):
+            visual.create_polygon(*point, *hull[(index + 1) % len(hull)], *center,
+                                  fill=self.palette["accent_soft" if index % 3 else "surface_alt"],
+                                  outline=self.palette["accent"], width=1)
+        visual.create_polygon(64, 35, 83, 53, 76, 71, 64, 85, 52, 71, 45, 53,
+                              outline=self.palette["accent"], fill=self.palette["surface"], width=2)
+        visual.create_line(54, 62, 64, 48, 74, 62, fill=self.palette["accent"], width=3)
 
         hero_text = tk.Frame(self.hero, bg=self.palette["surface"])
-        hero_text.grid(row=0, column=2, sticky="nsew", padx=(10, 18), pady=24)
+        hero_text.grid(row=0, column=2, sticky="nsew", padx=(12, 14), pady=14)
 
         kicker_row = tk.Frame(hero_text, bg=self.palette["surface"])
         kicker_row.pack(fill="x")
@@ -191,7 +194,7 @@ class AntivirusPanel:
         )
         self.protection_dot.pack(side="left", padx=(0, 7))
         self.protection_kicker = tk.Label(
-            kicker_row, text=self.t("resident_title"),
+            kicker_row, text="AntiOS   /   " + self.t("scan_center_title"),
             bg=self.palette["surface"], fg=self.palette["muted_2"],
             font=("Segoe UI Semibold", 8)
         )
@@ -199,7 +202,7 @@ class AntivirusPanel:
 
         self.protection_title = tk.Label(
             hero_text,
-            text=self.t("protection_off"),
+            text=self.app.t("overview.checking_title"),
             bg=self.palette["surface"],
             fg=self.palette["text"],
             font=("Segoe UI", 24, "bold"),
@@ -208,7 +211,7 @@ class AntivirusPanel:
         self.protection_title.pack(fill="x", pady=(6, 4))
         self.protection_detail = tk.Label(
             hero_text,
-            text=self.t("protection_off_detail"),
+            text=self.app.t("overview.checking_detail"),
             bg=self.palette["surface"],
             fg=self.palette["muted"],
             font=("Segoe UI", 9),
@@ -259,6 +262,17 @@ class AntivirusPanel:
         )
         self.engine_chip.pack(pady=(8, 16))
 
+        from .elevation import is_administrator
+        elevated = is_administrator()
+        tk.Label(score, text=self.t("access_admin" if elevated else "access_user"),
+                 bg=self.palette["surface_soft"], fg=self.palette["text"],
+                 font=("Segoe UI Semibold", 9)).pack(padx=8, pady=(0, 4))
+        if os.name == "nt" and not elevated:
+            self.admin_button = self.app._button(score, self.t("open_admin"),
+                                                self._open_admin, kind="secondary")
+            self.admin_button.pack(padx=8, pady=(0, 7))
+            self.buttons.append(self.admin_button)
+
         from .recovery_ui import open_recovery
         self.app._button(
             score,
@@ -287,11 +301,12 @@ class AntivirusPanel:
             card = self._card(components)
             card.grid(row=0, column=col, sticky="nsew",
                       padx=(0 if col == 0 else 5, 0 if col == 3 else 5))
+            tk.Frame(card, height=2, bg=self.palette["accent" if col < 2 else "info"]).pack(fill="x")
             tk.Label(
                 card, text=icon, bg=self.palette["surface"],
                 fg=self.palette["accent"] if col < 2 else self.palette["info"],
                 font=("Segoe UI", 16, "bold")
-            ).pack(anchor="w", padx=15, pady=(14, 7))
+            ).pack(anchor="w", padx=15, pady=(6, 2))
             tk.Label(
                 card, text=title, bg=self.palette["surface"], fg=self.palette["text"],
                 font=("Segoe UI Semibold", 9)
@@ -307,7 +322,7 @@ class AntivirusPanel:
             tk.Label(
                 card, text=detail, bg=self.palette["surface"], fg=self.palette["muted_2"],
                 font=("Segoe UI", 8), justify="left", wraplength=240
-            ).pack(anchor="w", padx=15, pady=(0, 14))
+            ).pack(anchor="w", padx=15, pady=(0, 7))
             setattr(self, attr, status_label)
 
         self.guard_state_label = self.guard_component_status
@@ -364,10 +379,16 @@ class AntivirusPanel:
             choose, self.t("folder"), lambda: self._choose(True), kind="secondary"
         )
         folder_button.pack(side="left", padx=(7, 0))
-        self.scan_button = self.app._button(choose, self.t("scan"), self._scan, kind="primary")
-        self.scan_button.pack(side="right")
-        self.cancel_button = self.app._button(choose, self.t("stop"), self._cancel, kind="danger")
-        self.cancel_button.pack(side="right", padx=(0, 7))
+        if os.name == "nt":
+            drive = self.app._button(choose, self.t("system_drive"), self._select_system_drive, kind="secondary")
+            drive.pack(side="left", padx=(7, 0))
+            self.buttons.append(drive)
+        actions = tk.Frame(scan_body, bg=self.palette["surface"])
+        actions.pack(fill="x", pady=(8, 0))
+        self.scan_button = self.app._button(actions, self.t("scan"), self._scan, kind="primary")
+        self.scan_button.pack(side="left")
+        self.cancel_button = self.app._button(actions, self.t("stop"), self._cancel, kind="danger")
+        self.cancel_button.pack(side="left", padx=(7, 0))
         self.buttons.extend((file_button, folder_button, self.scan_button))
 
         self.status = tk.Label(
@@ -685,6 +706,17 @@ class AntivirusPanel:
             target=worker,
             daemon=kind not in {"scan", "quarantined", "restored"},
         ).start()
+
+    def _open_admin(self) -> None:
+        from .elevation import open_admin_scan_center
+        language = self.app.language
+        self._run("admin-window", lambda: open_admin_scan_center(language))
+
+    def _select_system_drive(self) -> None:
+        path = Path(os.environ.get("SystemRoot", r"C:\Windows")).anchor
+        if path:
+            self.app.antivirus_path = Path(path)
+            self.scan_path_label.configure(text=path)
 
     def _scan(self) -> None:
         path, signatures = self.app.antivirus_path, self.app.antivirus_signatures
@@ -1314,6 +1346,8 @@ class AntivirusPanel:
             elif kind == "protection-state":
                 self.protection_probe_busy = False
                 self._sync_protection_ui(value)
+            elif kind == "admin-window":
+                self.status.configure(text=self.t("admin_opened"), fg=self.palette["muted"])
             elif kind == "guard-action":
                 self.last_guard_probe = 0
                 engine = value.get("engine") if isinstance(value, dict) else None

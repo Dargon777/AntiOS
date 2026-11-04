@@ -89,7 +89,7 @@ class ClamAVScanner:
             return "future-date"
         return "current" if age <= 7 * 86400 else "stale"
 
-    def _request(self, command: bytes, content: bytes | None = None) -> str:
+    def _request(self, command: bytes, chunks=None) -> str:
         deadline = time.monotonic() + self.timeout
         expected_pid = None
         if self.service_name:
@@ -107,10 +107,8 @@ class ClamAVScanner:
                 raise OSError("ClamD loopback peer is not owned by the configured SCM service")
             remaining()
             connection.sendall(command)
-            if content is not None:
-                view = memoryview(content)
-                for offset in range(0, len(view), 64 * 1024):
-                    chunk = view[offset:offset + 64 * 1024]
+            if chunks is not None:
+                for chunk in chunks:
                     remaining()
                     connection.sendall(struct.pack("!I", len(chunk)))
                     remaining()
@@ -138,8 +136,12 @@ class ClamAVScanner:
             raise OSError("ClamAV response exceeds 4096 bytes")
 
     def scan(self, content: bytes, name: str) -> ScanOutcome:
+        view = memoryview(content)
+        return self.scan_stream(view[n:n + 65536] for n in range(0, len(view), 65536))
+
+    def scan_stream(self, chunks) -> ScanOutcome:
         # Never send a path or ask the daemon to open/change/delete a file.
-        reply = self._request(b"zINSTREAM\0", content)
+        reply = self._request(b"zINSTREAM\0", chunks)
         if reply == "stream: OK":
             return ScanOutcome()
         match = re.fullmatch(r"stream: ([A-Za-z0-9_.:+/() -]{1,200}) FOUND", reply)

@@ -18,7 +18,7 @@ from .windows_process import hidden_process_kwargs
 import time
 from typing import Callable
 
-from .antivirus import scan_files, utc_now
+from .antivirus import DEFAULT_MAX_BYTES, scan_files, utc_now
 from .quarantine import default_quarantine_path
 from .scan_cache import default_scan_cache_path
 
@@ -52,6 +52,8 @@ def worker_main(request_path: str, events_path: str) -> int:
         try:
             scan_files(request["path"], signature_path=request.get("signatures"),
                        engine=request.get("engine", "clamav"),
+                       max_files=None,
+                       max_bytes=None if request.get("engine", "clamav") == "clamav" else DEFAULT_MAX_BYTES,
                        engine_service=request.get("engine_service"),
                        require_verified_peer=bool(request.get("require_verified_peer", False)),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint,

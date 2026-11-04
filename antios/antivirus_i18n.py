@@ -987,3 +987,17 @@ for _language, _label in {
     "mn": "Хамгаалалтыг засах",
 }.items():
     MESSAGES[_language]["repair_protection"] = _label
+
+
+_CENTER_LABELS = {
+    "en": ("Protection center", "Administrator access", "Standard access", "Open as administrator", "System drive", "Administrator window opened", "Scans every file in the selection. Engine limits and inaccessible files appear in the report."),
+    "ru": ("Центр защиты", "Доступ администратора", "Обычный доступ", "Открыть с правами администратора", "Системный диск", "Открыто окно администратора", "Проверяет все файлы в выбранной области. Ограничения движка и недоступные файлы видны в отчёте."),
+    "es": ("Centro de protección", "Acceso de administrador", "Acceso estándar", "Abrir como administrador", "Disco del sistema", "Ventana de administrador abierta", "Analiza cada archivo seleccionado. El informe muestra los límites del motor y los archivos inaccesibles."),
+    "zh-CN": ("防护中心", "管理员权限", "标准权限", "以管理员身份打开", "系统盘", "管理员窗口已打开", "扫描所选范围内的所有文件。报告显示引擎限制和无法访问的文件。"),
+    "fi": ("Suojauskeskus", "Järjestelmänvalvoja", "Tavallinen käyttö", "Avaa järjestelmänvalvojana", "Järjestelmälevy", "Järjestelmänvalvojan ikkuna avattu", "Tarkistaa valitut tiedostot. Raportti näyttää moottorin rajoitukset ja tiedostot, joita ei voitu lukea."),
+    "pl": ("Centrum ochrony", "Dostęp administratora", "Dostęp standardowy", "Otwórz jako administrator", "Dysk systemowy", "Otwarto okno administratora", "Sprawdza wszystkie wybrane pliki. Raport wskazuje ograniczenia silnika i niedostępne pliki."),
+    "mn": ("Хамгаалалтын төв", "Администраторын эрх", "Энгийн эрх", "Администратороор нээх", "Системийн диск", "Администраторын цонх нээгдлээ", "Сонгосон бүх файлыг шалгана. Хөдөлгүүрийн хязгаар болон унших боломжгүй файлууд тайланд харагдана."),
+}
+for _locale, _labels in _CENTER_LABELS.items():
+    MESSAGES[_locale].update(zip(("scan_center_title", "access_admin", "access_user",
+                                  "open_admin", "system_drive", "admin_opened", "note"), _labels))

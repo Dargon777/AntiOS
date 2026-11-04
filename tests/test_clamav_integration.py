@@ -58,6 +58,24 @@ def real_clamd(tmp_path):
                 process.wait(timeout=5)
 
 
+def test_streaming_detects_a_marker_across_blocks_and_reports_daemon_limit(tmp_path, real_clamd, monkeypatch):
+    from antios import antivirus
+    port, marker = real_clamd
+    monkeypatch.setattr(antivirus, "DEFAULT_MAX_BYTES", 32768)
+    target = tmp_path / "stream.bin"
+    target.write_bytes(b"x" * (65536 - 10) + marker)
+    def scan():
+        return scan_files(target, engine="clamav", max_bytes=None, max_files=None,
+                          provider_factory=lambda: ClamAVScanner(port=port))
+    assert scan()["verdict"] == "threats-found"
+    with target.open("wb") as stream:
+        stream.truncate(3 * 1024 * 1024)
+    over = scan()
+    assert over["summary"]["bytes_scanned"] == target.stat().st_size
+    assert over["coverage"] == "limited"
+    assert over["summary"]["errors"] == 1
+
+
 def test_real_engine_detects_content_inside_zip_and_reports_limits(tmp_path, real_clamd):
     port, marker = real_clamd
     def scan(path):

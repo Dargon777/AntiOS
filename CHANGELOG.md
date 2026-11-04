@@ -4,6 +4,13 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 2.0.0a33 - 2026-11-04
+
+- opens the Windows dashboard on a redesigned protection center with the current access level and a system-drive selector;
+- adds an interactive administrator scan window for installed copies;
+- scans the full file selection by default and streams large files through ClamAV;
+- reports inaccessible files and incomplete engine analysis in scan results.
+
 ## 2.0.0a32 - 2026-11-03
 
 - improves Windows Guard startup and recovery after running AntiOS as administrator;
