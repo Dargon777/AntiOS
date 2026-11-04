@@ -29,6 +29,9 @@ function Should-Throw([scriptblock]$Block, [string]$Description) {
 
 # Function definitions loaded from actual application scripts, not replicas.
 Import-OneFunction '..\scripts\protection-engine.ps1' 'Assert-FreshEngineInstallTargets'
+Import-OneFunction '..\scripts\protection-engine.ps1' 'Get-OptionalEngineRegistryValue'
+Import-OneFunction '..\scripts\protection-engine.ps1' 'Remove-OwnedRegistry'
+Import-OneFunction '..\scripts\guard-startup.ps1' 'Restore-GuardUserAccess'
 Import-OneFunction '..\scripts\guard-startup.ps1' 'Assert-GuardTaskOwned'
 Import-OneFunction '..\scripts\dashboard-startup.ps1' 'Assert-ControlCenterTaskOwned'
 
@@ -92,7 +95,122 @@ function Get-ScheduledTask {
     if ($TaskPath -ne '\' -or $TaskName -ne $UpdaterTaskName) {
         throw 'Expected exact root task lookup.'
     }
-    return [pscustomobject]@{ TaskName = $UpdaterTaskName }
+    if ($script:AuditUpdaterTaskPresent) {
+        return [pscustomobject]@{ TaskName = $UpdaterTaskName }
+    }
+    return $null
 }
+$script:AuditUpdaterTaskPresent = $true
 Should-Throw { Assert-FreshEngineInstallTargets } 'pre-existing FreshClam updater task'
+$script:AuditUpdaterTaskPresent = $false
+
+# A standard AntiOS installation owns HKLM:\SOFTWARE\AntiOS long before a
+# managed ClamAV service exists. Model this case with disposable HKCU keys.
+$testTag = [guid]::NewGuid().ToString('N')
+$AntiOSRegistry = "HKCU:\Software\AntiOS-EngineAudit-$testTag"
+$ClamRegistry = "HKCU:\Software\ClamAV-EngineAudit-$testTag"
+$ConfigRoot = Join-Path $env:RUNNER_TEMP "AntiOS-EngineAudit-$testTag-config"
+$DatabaseRoot = Join-Path $env:RUNNER_TEMP "AntiOS-EngineAudit-$testTag-db"
+try {
+    New-Item -Path $AntiOSRegistry -Force | Out-Null
+    New-Item -Path $ClamRegistry -Force | Out-Null
+    if ($null -ne (Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName')) {
+        throw 'A missing optional registry value must return null.'
+    }
+    Assert-FreshEngineInstallTargets
+
+    New-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -Value 'foreign' -PropertyType String | Out-Null
+    Should-Throw { Assert-FreshEngineInstallTargets } 'foreign engine binding'
+    Remove-OwnedRegistry
+    if ((Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName') -ne 'foreign') {
+        throw 'Registry cleanup must not remove a foreign engine binding.'
+    }
+    Remove-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName
+
+    foreach ($case in @(
+        @{ Name = 'ConfDir'; Value = 'C:\Foreign-ClamAV\config' },
+        @{ Name = 'DataDir'; Value = 'C:\Foreign-ClamAV\database' }
+    )) {
+        New-ItemProperty -Path $ClamRegistry -Name $case.Name -Value $case.Value -PropertyType String | Out-Null
+        Should-Throw { Assert-FreshEngineInstallTargets } "foreign ClamAV $($case.Name)"
+        Remove-OwnedRegistry
+        if ((Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name $case.Name) -ne $case.Value) {
+            throw "Registry cleanup removed a foreign $($case.Name) binding."
+        }
+        Remove-ItemProperty -Path $ClamRegistry -Name $case.Name
+    }
+
+    New-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -Value $EngineServiceName -PropertyType String | Out-Null
+    New-ItemProperty -Path $ClamRegistry -Name ConfDir -Value $ConfigRoot -PropertyType String | Out-Null
+    New-ItemProperty -Path $ClamRegistry -Name DataDir -Value $DatabaseRoot -PropertyType String | Out-Null
+    Remove-OwnedRegistry
+    foreach ($case in @(
+        @{ Path = $AntiOSRegistry; Name = 'EngineServiceName' },
+        @{ Path = $ClamRegistry; Name = 'ConfDir' },
+        @{ Path = $ClamRegistry; Name = 'DataDir' }
+    )) {
+        if ($null -ne (Get-OptionalEngineRegistryValue -Path $case.Path -Name $case.Name)) {
+            throw "Owned registry entry $($case.Name) was not removed."
+        }
+    }
+    # An existing registry key which cannot be read must still fail closed.
+    function Get-ItemProperty { param($LiteralPath, $ErrorAction) throw 'simulated registry access denied' }
+    Should-Throw {
+        Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName'
+    } 'registry read error'
+} finally {
+    Remove-Item Function:Get-ItemProperty -ErrorAction SilentlyContinue
+    Remove-Item -Path $AntiOSRegistry -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $ClamRegistry -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'PASS: optional registry values, ownership boundaries and fail-closed registry read errors.'
+
+# Repair the file-specific DACL from an old elevated Guard run without
+# modifying data, broad system principals or unrelated user files.
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$stateDir = Join-Path $env:RUNNER_TEMP ("AntiOS-GuardACL-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $stateDir | Out-Null
+try {
+    $database = Join-Path $stateDir 'guard.sqlite3'
+    $wal = Join-Path $stateDir 'guard.sqlite3-wal'
+    $unrelated = Join-Path $stateDir 'unrelated.txt'
+    [IO.File]::WriteAllText($database, 'keep-guard-history')
+    [IO.File]::WriteAllText($wal, 'keep-uncommitted-history')
+    [IO.File]::WriteAllText($unrelated, 'keep-other-file')
+
+    $dbInfo = Get-Item -LiteralPath $database -Force
+    $dbAcl = $dbInfo.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+    $dbAcl.SetAccessRuleProtection($true, $false) # imitate old protected file DACL
+    $dbInfo.SetAccessControl($dbAcl)
+    $unrelatedAcl = (Get-Acl -LiteralPath $unrelated).Sddl
+
+    Restore-GuardUserAccess $stateDir
+    foreach ($path in @($database, $wal)) {
+        $rules = (Get-Acl -LiteralPath $path).GetAccessRules(
+            $true, $false, [Security.Principal.SecurityIdentifier]
+        )
+        $owned = @($rules | Where-Object {
+            $_.IdentityReference.Value -eq $identity.User.Value -and
+            $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq
+                [Security.AccessControl.FileSystemRights]::FullControl
+        })
+        if ($owned.Count -lt 1) {
+            throw "Guard repair did not restore explicit current-user access: $path"
+        }
+    }
+    if ([IO.File]::ReadAllText($database) -cne 'keep-guard-history' -or
+        [IO.File]::ReadAllText($wal) -cne 'keep-uncommitted-history' -or
+        [IO.File]::ReadAllText($unrelated) -cne 'keep-other-file') {
+        throw 'Guard ACL repair must preserve all file content.'
+    }
+    if ((Get-Acl -LiteralPath $unrelated).Sddl -cne $unrelatedAcl) {
+        throw 'Guard ACL repair must not modify unrelated file permissions.'
+    }
+    New-Item -ItemType Directory -Path (Join-Path $stateDir 'unexpected-subfolder') | Out-Null
+    Should-Throw { Restore-GuardUserAccess $stateDir } 'unexpected Guard subdirectory'
+} finally {
+    Remove-Item -LiteralPath $stateDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'PASS: pre-existing Guard state ACL repaired in place without deleting history.'
 Write-Host 'PASS: both user startup tasks reject foreign identity/actions; engine preflight blocks task collision.'
