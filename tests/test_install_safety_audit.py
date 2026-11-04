@@ -22,11 +22,16 @@ def test_engine_fresh_install_refuses_existing_scheduler_and_registry_bindings()
         "Get-Service -Name $EngineServiceName",
         "Get-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName",
         "Test-Path -LiteralPath $destination",
-        "EngineServiceName -ErrorAction SilentlyContinue",
-        "ConfDir -ErrorAction SilentlyContinue",
-        "DataDir -ErrorAction SilentlyContinue",
+        "Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName'",
+        "Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'ConfDir'",
+        "Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'DataDir'",
     ):
         assert requirement in preflight, requirement
+    # Missing values are expected on a clean install, but unreadable keys and
+    # existing foreign bindings must still be rejected rather than ignored.
+    assert "function Get-OptionalEngineRegistryValue" in script
+    assert "Get-ItemProperty -LiteralPath $Path -ErrorAction Stop" in script
+    assert "return $property.Value" in script
     assert script.count("Assert-FreshEngineInstallTargets") >= 3
     assert script.index("Assert-Administrator\n# Do not trust a pre-elevation dry-run") < (
         script.index("New-Item -ItemType Directory -Path $InstallRoot -ErrorAction Stop")
