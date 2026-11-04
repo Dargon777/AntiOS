@@ -106,6 +106,10 @@ def _run_startup_script(*args: str, timeout: float = 45.0) -> dict:
     }
 
 
+def repair_guard_state_access() -> None:
+    _run_startup_script("-RepairStateAccess", "-Apply")
+
+
 def configure_resident_guard(*, roots: tuple[Path, ...] | None = None) -> dict:
     """Persist the per-user Guard task and start it immediately."""
     selected = tuple(roots or default_resident_roots())

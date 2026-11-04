@@ -93,6 +93,48 @@ function Assert-AntiOSArchivePair {
     }
 }
 
+function Get-OptionalEngineRegistryValue([string]$Path, [string]$Name) {
+    try { $key = Get-Item -LiteralPath $Path -ErrorAction Stop }
+    catch [System.Management.Automation.ItemNotFoundException] { return $null }
+    try { return ,($key.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)) }
+    finally { $key.Close() }
+}
+
+function Remove-OwnedRegistry([string[]]$Names = @('EngineServiceName', 'ConfDir', 'DataDir')) {
+    foreach ($name in $Names) {
+        $path = if ($name -eq 'EngineServiceName') { $AntiOSRegistry } else { $ClamRegistry }
+        $expected = switch ($name) {
+            'EngineServiceName' { $EngineServiceName }
+            'ConfDir' { $ConfigRoot }
+            'DataDir' { $DatabaseRoot }
+        }
+        $value = Get-OptionalEngineRegistryValue $path $name
+        if ($value -is [string] -and $value -eq $expected) {
+            Remove-ItemProperty -LiteralPath $path -Name $name -ErrorAction Stop
+        }
+    }
+}
+
+function Get-AntiOSEngineBindings {
+    @{ Key=$ClamRegistry; Name='ConfDir'; Value=$ConfigRoot }
+    @{ Key=$ClamRegistry; Name='DataDir'; Value=$DatabaseRoot }
+    @{ Key=$AntiOSRegistry; Name='EngineServiceName'; Value=$EngineServiceName }
+}
+
+function New-AntiOSEngineBinding($Binding) {
+    if (-not (Test-Path -LiteralPath $Binding.Key -ErrorAction Stop)) {
+        New-Item -Path $Binding.Key -ErrorAction Stop | Out-Null
+    }
+    New-ItemProperty -LiteralPath $Binding.Key -Name $Binding.Name -PropertyType String -Value $Binding.Value -ErrorAction Stop | Out-Null
+}
+
+function Get-AntiOSBindingState($Binding) {
+    $current = Get-OptionalEngineRegistryValue $Binding.Key $Binding.Name
+    if ($null -eq $current) { return 'missing' }
+    if ($current -is [string] -and $current -eq $Binding.Value) { return 'managed' }
+    return 'foreign'
+}
+
 function Assert-AntiOSNonWritableAcl {
     param([Parameter(Mandatory)][object[]]$Rules)
 
@@ -142,15 +184,23 @@ function Assert-AntiOSNonWritableAcl {
     }
 }
 
-function Assert-AntiOSProtectedEngineRoot {
-    param([Parameter(Mandatory)][string]$Root)
-    $programFiles = [IO.Path]::GetFullPath(
-        [Environment]::GetFolderPath('ProgramFiles')
-    ).TrimEnd('\')
-    $expected = Join-Path $programFiles 'AntiOS\ClamAV'
-    $actual = [IO.Path]::GetFullPath($Root).TrimEnd('\')
-    if ($actual -ine $expected) {
-        throw 'Managed ClamAV archive trust requires the exact Program Files installation path.'
+function Assert-AntiOSInstallAcl($Acl) {
+    $allowed = @(
+        'S-1-5-18',       # SYSTEM
+        'S-1-5-32-544',   # Administrators
+        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464' # TrustedInstaller
+    )
+    if ($Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $allowed) {
+        throw 'Untrusted owner on the managed AntiOS installation.'
+    }
+    Assert-AntiOSNonWritableAcl -Rules @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+}
+
+function Assert-AntiOSProtectedInstallPath([string]$Path) {
+    $programFiles = [IO.Path]::GetFullPath([Environment]::GetFolderPath('ProgramFiles')).TrimEnd('\')
+    $actual = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if (-not $actual.StartsWith($programFiles + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Managed executable must be inside Program Files.'
     }
     $current = $actual
     while ($true) {
@@ -159,13 +209,29 @@ function Assert-AntiOSProtectedEngineRoot {
             throw 'Managed ClamAV ancestor is a reparse point.'
         }
         $acl = Get-Acl -LiteralPath $current -ErrorAction Stop
-        Assert-AntiOSNonWritableAcl -Rules @($acl.Access)
+        Assert-AntiOSInstallAcl $acl
         if ($current -ieq $programFiles) { break }
         $parent = Split-Path -Parent $current
         if (-not $parent -or $parent -ieq $current) {
             throw 'Managed ClamAV installation escapes trusted Program Files.'
         }
         $current = $parent
+    }
+}
+
+
+function Assert-AntiOSProtectedEngineRoot([string]$Root) {
+    $expected = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'AntiOS\ClamAV'
+    if ([IO.Path]::GetFullPath($Root).TrimEnd('\') -ine $expected) {
+        throw 'Managed ClamAV archive trust requires the exact Program Files installation path.'
+    }
+    Assert-AntiOSProtectedInstallPath $Root
+    foreach ($name in @('engine-trust.json', 'clamd.exe', 'freshclam.exe')) {
+        $item = Get-Item -LiteralPath (Join-Path $Root $name) -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Expected a regular file in the managed engine installation.'
+        }
+        Assert-AntiOSInstallAcl (Get-Acl -LiteralPath $item.FullName -ErrorAction Stop)
     }
 }
 

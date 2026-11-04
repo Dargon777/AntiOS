@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from .windows_process import hidden_process_kwargs, system_executable
+from .windows_process import hidden_process_kwargs, system_executable, windows_powershell_env
 
 
 def _is_windows() -> bool:
@@ -57,8 +57,9 @@ def run_protection_bootstrap(*, timeout: float = 900.0) -> dict:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        text=True, errors="replace",
         timeout=timeout,
+        env=windows_powershell_env(str(powershell)),
         **hidden_process_kwargs(),
     )
     if completed.returncode != 0:
@@ -94,8 +95,9 @@ def run_protection_repair(*, apply: bool = False, update_signatures: bool = Fals
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        text=True, errors="replace",
         timeout=timeout,
+        env=windows_powershell_env(str(powershell)),
         **hidden_process_kwargs(),
     )
     if completed.returncode != 0:

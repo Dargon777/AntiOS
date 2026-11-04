@@ -5,10 +5,10 @@ Unicode true
 !include "FileFunc.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "2.0.0a34"
+  !define APP_VERSION "2.0.0a35"
 !endif
 !ifndef NUMERIC_VERSION
-  !define NUMERIC_VERSION "2.0.34.0"
+  !define NUMERIC_VERSION "2.0.35.0"
 !endif
 !ifndef SOURCE_DIR
   !define SOURCE_DIR "..\installer-stage"
@@ -45,6 +45,7 @@ Var RollbackFailed
   !insertmacro ${OP} "_guard"
   !insertmacro ${OP} "AntiOS-AmsiProvider.dll"
   !insertmacro ${OP} "guard-startup.ps1"
+  !insertmacro ${OP} "guard-state-access.cs"
   !insertmacro ${OP} "dashboard-startup.ps1"
   !insertmacro ${OP} "protection-engine.ps1"
   !insertmacro ${OP} "clamav-trust.ps1"
@@ -153,7 +154,17 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright 2026 Dargon777 and AntiOS
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "Russian"
 
+Var NativePowerShell
+!macro ANTIOS_NATIVE_POWERSHELL
+  StrCpy $NativePowerShell "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+  ${If} ${FileExists} "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+    StrCpy $NativePowerShell "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+  ${EndIf}
+  System::Call 'kernel32::SetEnvironmentVariable(t "PSModulePath", t "$WINDIR\System32\WindowsPowerShell\v1.0\Modules") i'
+!macroend
+
 Function .onInit
+  !insertmacro ANTIOS_NATIVE_POWERSHELL
   ${IfNot} ${RunningX64}
     MessageBox MB_ICONSTOP|MB_OK "AntiOS requires 64-bit Windows." /SD IDOK
     Abort
@@ -179,6 +190,7 @@ Function .onInit
 FunctionEnd
 
 Function un.onInit
+  !insertmacro ANTIOS_NATIVE_POWERSHELL
   SetRegView 64
   SetShellVarContext all
   !insertmacro MUI_UNGETLANGUAGE
@@ -254,7 +266,7 @@ antios_staging_ready:
   ; heartbeat can belong to a still-live process holding guard.lock, so the
   ; cooperative Guard stop alone is not sufficient for upgrades.
   IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
     Pop $1
   IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +4
     nsExec::Exec '"$INSTDIR\AntiOS-Guard.exe" stop'
@@ -291,7 +303,7 @@ antios_payload_copy_ok:
   ; Normalize startup state with the newly installed script as well. This also
   ; repairs upgrades from older builds whose uninstall path was broken.
   IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
     Pop $1
 
   ; The new Uninstall.exe was generated and staged with the payload before
@@ -322,22 +334,29 @@ antios_payload_copy_ok:
   ${If} $ExistingVersion == ""
     IfFileExists "$INSTDIR\dashboard-startup.ps1" 0 control_center_done
     DetailPrint "Enabling AntiOS Control Center startup..."
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\dashboard-startup.ps1" -Apply -AllowManagedUnsigned'
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\dashboard-startup.ps1" -Apply -AllowManagedUnsigned'
     Pop $4
     WriteRegDWORD HKLM "${INSTALL_KEY}" "DashboardStartupExitCode" $4
 control_center_done:
   ${EndIf}
 
   ${If} $SkipEngine != "1"
+    DetailPrint "Checking current-user Guard database access..."
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -RepairStateAccess -Apply'
+    Pop $2
+    ${If} $2 == "error"
+      StrCpy $2 9001
+    ${EndIf}
+    WriteRegDWORD HKLM "${INSTALL_KEY}" "GuardAccessRepairExitCode" $2
     DetailPrint "Bootstrapping AntiOS protection engine..."
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-bootstrap.ps1" -ManifestPath "$INSTDIR\clamav-windows.json" -Apply'
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-bootstrap.ps1" -ManifestPath "$INSTDIR\clamav-windows.json" -Apply'
     Pop $0
     ${If} $0 == "error"
       StrCpy $0 9001
     ${EndIf}
     WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapExitCode" $0
     ${If} $0 == 0
-      nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply'
+      nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply'
       Pop $2
       ${If} $2 == "error"
         StrCpy $2 9001
@@ -348,7 +367,7 @@ control_center_done:
       IfFileExists "$INSTDIR\AntiOS-AmsiProvider.dll" 0 amsi_done
       IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 amsi_done
       DetailPrint "Configuring AntiOS AMSI coexistence provider..."
-      nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -ProviderDll "$INSTDIR\AntiOS-AmsiProvider.dll" -Apply'
+      nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -ProviderDll "$INSTDIR\AntiOS-AmsiProvider.dll" -Apply'
       Pop $3
       ${If} $3 == "error"
         StrCpy $3 9001
@@ -381,19 +400,19 @@ Section "Uninstall"
   !insertmacro ANTIOS_UNINSTALL_CHECK_PATHS
   SetOutPath "$TEMP"
   IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 +3
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -Uninstall -Apply'
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -Uninstall -Apply'
     Pop $0
   IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +3
     nsExec::Exec '"$INSTDIR\AntiOS-Guard.exe" stop'
     Pop $0
   IfFileExists "$INSTDIR\guard-startup.ps1" 0 +3
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -Uninstall -Apply'
     Pop $0
   IfFileExists "$INSTDIR\dashboard-startup.ps1" 0 +3
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\dashboard-startup.ps1" -Uninstall -Apply'
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\dashboard-startup.ps1" -Uninstall -Apply'
     Pop $0
   IfFileExists "$INSTDIR\protection-engine.ps1" 0 +3
-    nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-engine.ps1" -Uninstall -Apply'
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-engine.ps1" -Uninstall -Apply'
     Pop $0
 
   Delete "$COMMONDESKTOP\AntiOS.lnk"

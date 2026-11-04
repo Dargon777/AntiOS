@@ -28,9 +28,9 @@ function Should-Throw([scriptblock]$Block, [string]$Description) {
 }
 
 # Function definitions loaded from actual application scripts, not replicas.
+. (Join-Path $PSScriptRoot '..\scripts\clamav-trust.ps1')
+$ScriptDirectory = (Resolve-Path (Join-Path $PSScriptRoot '..\scripts')).Path
 Import-OneFunction '..\scripts\protection-engine.ps1' 'Assert-FreshEngineInstallTargets'
-Import-OneFunction '..\scripts\protection-engine.ps1' 'Get-OptionalEngineRegistryValue'
-Import-OneFunction '..\scripts\protection-engine.ps1' 'Remove-OwnedRegistry'
 Import-OneFunction '..\scripts\guard-startup.ps1' 'Restore-GuardUserAccess'
 Import-OneFunction '..\scripts\guard-startup.ps1' 'Assert-GuardTaskOwned'
 Import-OneFunction '..\scripts\dashboard-startup.ps1' 'Assert-ControlCenterTaskOwned'
@@ -153,13 +153,28 @@ try {
             throw "Owned registry entry $($case.Name) was not removed."
         }
     }
+    foreach ($entry in @(@($AntiOSRegistry,'EngineServiceName'), @($ClamRegistry,'ConfDir'), @($ClamRegistry,'DataDir'))) {
+        New-ItemProperty -Path $entry[0] -Name $entry[1] -Value '' -PropertyType String | Out-Null
+        Should-Throw { Assert-FreshEngineInstallTargets } 'existing empty registry binding'
+        Remove-OwnedRegistry
+        if ($null -eq (Get-OptionalEngineRegistryValue $entry[0] $entry[1])) { throw 'Foreign binding removed' }
+        Remove-ItemProperty -Path $entry[0] -Name $entry[1]
+    }
+    $binding = @(Get-AntiOSEngineBindings | Where-Object { $_.Name -eq 'DataDir' })[0]
+    if ((Get-AntiOSBindingState $binding) -ne 'missing') { throw 'Expected a missing binding' }
+    New-AntiOSEngineBinding $binding
+    if ((Get-AntiOSBindingState $binding) -ne 'managed') { throw 'Missing binding was not repaired' }
+    Remove-OwnedRegistry -Names @('EngineServiceName','ConfDir')
+    if ((Get-OptionalEngineRegistryValue $ClamRegistry 'DataDir') -ne $DatabaseRoot) { throw 'Unwritten binding removed' }
+    Remove-OwnedRegistry
+    Assert-FreshEngineInstallTargets
     # An existing registry key which cannot be read must still fail closed.
-    function Get-ItemProperty { param($LiteralPath, $ErrorAction) throw 'simulated registry access denied' }
+    function Get-Item { param($LiteralPath, $ErrorAction) throw 'simulated registry access denied' }
     Should-Throw {
         Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName'
     } 'registry read error'
 } finally {
-    Remove-Item Function:Get-ItemProperty -ErrorAction SilentlyContinue
+    Remove-Item Function:Get-Item -ErrorAction SilentlyContinue
     Remove-Item -Path $AntiOSRegistry -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -Path $ClamRegistry -Recurse -Force -ErrorAction SilentlyContinue
 }

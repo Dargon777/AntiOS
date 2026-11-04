@@ -33,6 +33,18 @@ def test_engine_requires_archive_attestation_or_strict_authenticode():
     assert "Assert-NoReparseTree $stagingRoot" in script
 
 
+
+
+def test_managed_clamav_requires_vendor_cvd_signing_certificates():
+    script = source("scripts/protection-engine.ps1")
+    assert "$certsRoot = Join-Path $InstallRoot 'certs'" in script
+    assert "Join-Path $certsRoot 'clamav.crt'" in script
+    assert "CVDCertsDirectory" in script
+    assert "foreach ($config in @($ClamdConfig, $FreshConfig))" in script
+    assert "Add-Content -LiteralPath $config" in script
+    # A missing certificate must fail installation, never bypass verification.
+    assert "missing its trusted signing certificates" in script
+
 def test_repair_rechecks_installed_hashes_or_code_signatures():
     script = source("scripts/protection-repair.ps1")
     assert "Assert-AntiOSInstalledPair" in script

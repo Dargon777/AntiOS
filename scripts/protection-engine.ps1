@@ -72,37 +72,6 @@ function Get-ConfigSource {
     throw 'AntiOS ClamAV configuration templates are missing.'
 }
 
-# An AntiOS registry key can exist before the engine is installed. Missing
-# optional values are normal; a failure to read an existing key is NOT.
-# Get-ItemPropertyValue may emit a terminating error for a missing value under
-# Windows PowerShell 5.1, even when -ErrorAction SilentlyContinue is supplied.
-function Get-OptionalEngineRegistryValue([string]$Path, [string]$Name) {
-    if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    $record = Get-ItemProperty -LiteralPath $Path -ErrorAction Stop
-    $property = $record.PSObject.Properties[$Name]
-    if ($null -eq $property) { return $null }
-    return $property.Value
-}
-
-function Remove-OwnedRegistry {
-    if (Test-Path $AntiOSRegistry) {
-        $current = Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName'
-        if ($current -eq $EngineServiceName) {
-            Remove-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -ErrorAction SilentlyContinue
-        }
-    }
-    if (Test-Path $ClamRegistry) {
-        $confDir = Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'ConfDir'
-        $dataDir = Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'DataDir'
-        if ($confDir -eq $ConfigRoot) {
-            Remove-ItemProperty -Path $ClamRegistry -Name ConfDir -ErrorAction SilentlyContinue
-        }
-        if ($dataDir -eq $DatabaseRoot) {
-            Remove-ItemProperty -Path $ClamRegistry -Name DataDir -ErrorAction SilentlyContinue
-        }
-    }
-}
-
 function Assert-ManagedClamdService {
     $registered = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction Stop
     $expectedExe = Join-Path $InstallRoot 'clamd.exe'
@@ -132,18 +101,12 @@ function Assert-FreshEngineInstallTargets {
             throw "Managed engine destination already exists: $destination"
         }
     }
-    if (Test-Path $AntiOSRegistry) {
-        $existingService = Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName'
-        if ($existingService) {
-            throw 'Existing AntiOS engine registry binding found; use an explicit repair/uninstall workflow.'
-        }
+    if ($null -ne (Get-OptionalEngineRegistryValue $AntiOSRegistry 'EngineServiceName')) {
+        throw 'Existing AntiOS engine registry binding found; use an explicit repair/uninstall workflow.'
     }
-    if (Test-Path $ClamRegistry) {
-        $existingConf = Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'ConfDir'
-        $existingData = Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name 'DataDir'
-        if ($existingConf -or $existingData) {
-            throw 'Existing machine-wide ClamAV ConfDir/DataDir registry configuration was found; refusing to overwrite another installation.'
-        }
+    if ($null -ne (Get-OptionalEngineRegistryValue $ClamRegistry 'ConfDir') -or
+        $null -ne (Get-OptionalEngineRegistryValue $ClamRegistry 'DataDir')) {
+        throw 'Existing machine-wide ClamAV configuration found; refusing to overwrite another installation.'
     }
 }
 
@@ -256,12 +219,12 @@ $createdInstall = $false
 $createdData = $false
 $serviceInstallAttempted = $false
 $taskInstallAttempted = $false
-$registryTouched = $false
+$writtenRegistry = [Collections.Generic.List[string]]::new()
 try {
     New-Item -ItemType Directory -Path $InstallRoot -ErrorAction Stop | Out-Null
     $createdInstall = $true
     $engineAcl = New-Object Security.AccessControl.DirectorySecurity
-    $engineAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)')
+    $engineAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)', [Security.AccessControl.AccessControlSections]'Owner,Group,Access')
     Set-Acl -LiteralPath $InstallRoot -AclObject $engineAcl
     Copy-Item -Path (Join-Path $Source '*') -Destination $InstallRoot -Recurse -Force
 
@@ -295,7 +258,7 @@ try {
     New-Item -ItemType Directory -Path $DataRoot -ErrorAction Stop | Out-Null
     $createdData = $true
     $dataAcl = New-Object Security.AccessControl.DirectorySecurity
-    $dataAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)')
+    $dataAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)', [Security.AccessControl.AccessControlSections]'Owner,Group,Access')
     Set-Acl -LiteralPath $DataRoot -AclObject $dataAcl
     New-Item -ItemType Directory -Path $ConfigRoot -ErrorAction Stop | Out-Null
     New-Item -ItemType Directory -Path $DatabaseRoot -ErrorAction Stop | Out-Null
@@ -304,12 +267,23 @@ try {
     Copy-Item -LiteralPath (Join-Path $configSource 'clamd.conf.example') -Destination $ClamdConfig
     Copy-Item -LiteralPath (Join-Path $configSource 'freshclam.conf.example') -Destination $FreshConfig
 
-    $registryTouched = $true
-    New-Item -Path $ClamRegistry -Force | Out-Null
-    New-ItemProperty -Path $ClamRegistry -Name ConfDir -PropertyType String -Value $ConfigRoot -Force | Out-Null
-    New-ItemProperty -Path $ClamRegistry -Name DataDir -PropertyType String -Value $DatabaseRoot -Force | Out-Null
-    New-Item -Path $AntiOSRegistry -Force | Out-Null
-    New-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -PropertyType String -Value $EngineServiceName -Force | Out-Null
+    # ClamAV 1.5+ requires official CVD signing certificates from the
+    # verified vendor archive. The compiled default points outside AntiOS.
+    $certsRoot = Join-Path $InstallRoot 'certs'
+    $certsItem = Get-Item -LiteralPath $certsRoot -Force -ErrorAction Stop
+    if (-not $certsItem.PSIsContainer -or
+        ($certsItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        -not (Test-Path -LiteralPath (Join-Path $certsRoot 'clamav.crt') -PathType Leaf)) {
+        throw 'The verified ClamAV package is missing its trusted signing certificates.'
+    }
+    foreach ($config in @($ClamdConfig, $FreshConfig)) {
+        Add-Content -LiteralPath $config -Encoding Ascii -Value ('CVDCertsDirectory "{0}"' -f $certsRoot)
+    }
+
+    foreach ($binding in Get-AntiOSEngineBindings) {
+        New-AntiOSEngineBinding $binding
+        $writtenRegistry.Add($binding.Name)
+    }
 
     & $ManagedFresh "--config-file=$FreshConfig"
     if ($LASTEXITCODE -ne 0) { throw "Initial FreshClam update failed with exit code $LASTEXITCODE" }
@@ -398,8 +372,8 @@ try {
     # If a service/task is still bound to these files, preserve them and the
     # registry data; removing them could break the surviving SYSTEM component.
     if (-not $unsafeToRemovePayload) {
-        if ($registryTouched) {
-            try { Remove-OwnedRegistry }
+        if ($writtenRegistry.Count) {
+            try { Remove-OwnedRegistry -Names $writtenRegistry.ToArray() }
             catch { $rollbackProblems.Add("Registry cleanup: $($_.Exception.Message)") }
         }
         foreach ($ownedRoot in @(

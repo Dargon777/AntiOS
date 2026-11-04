@@ -544,8 +544,10 @@ class Dashboard:
 
     def repair_protection(self) -> dict:
         """Repair/bootstrap the managed engine and restore Resident Guard."""
-        from .resident import ensure_resident_guard
-
+        from .resident import ensure_resident_guard, repair_guard_state_access
+        from .elevation import is_administrator
+        if is_administrator():
+            repair_guard_state_access()
         engine = self._heal_managed_engine(interactive=True)
         guard = ensure_resident_guard()
         return {"engine": engine, "guard": guard}

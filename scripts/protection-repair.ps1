@@ -13,6 +13,8 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'clamav-repair-validation.ps1')
 
 $EngineServiceName = 'clamd'
+$AntiOSRegistry = 'HKLM:\SOFTWARE\AntiOS'
+$ClamRegistry = 'HKLM:\SOFTWARE\ClamAV'
 $UpdaterTaskName = 'AntiOS ClamAV Signature Update'
 $InstallRoot = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'AntiOS\ClamAV'
 $DataRoot = Join-Path $env:ProgramData 'AntiOS-ClamAV'
@@ -101,6 +103,13 @@ if (-not $task) {
     }
 }
 
+$bindings = @(Get-AntiOSEngineBindings)
+foreach ($binding in $bindings) {
+    $state = Get-AntiOSBindingState $binding
+    if ($state -ne 'managed') { $issues.Add("registry-$state-$($binding.Name)") }
+    if ($Apply -and $state -eq 'foreign') { throw "Refusing to replace an existing $($binding.Name) binding." }
+}
+
 $unsafeService = $issues | Where-Object {
     $_ -in @('clamd-service-not-own-process', 'clamd-service-not-system', 'clamd-service-path-mismatch',
                'freshclam-task-path-mismatch')
@@ -164,18 +173,28 @@ if ($Apply) {
     $serviceInstallAttempted = $false
     $taskWriteAttempted = $false
     $servicePolicyWriteAttempted = $false
+    $writtenRegistry = [Collections.Generic.List[string]]::new()
 
     try {
     $engineAcl = New-Object Security.AccessControl.DirectorySecurity
-    $engineAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)')
+    $engineAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)', [Security.AccessControl.AccessControlSections]'Owner,Group,Access')
     Set-Acl -LiteralPath $InstallRoot -AclObject $engineAcl
     $actions.Add('engine-acl-reset')
 
     $dataAcl = New-Object Security.AccessControl.DirectorySecurity
-    $dataAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)')
+    $dataAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)', [Security.AccessControl.AccessControlSections]'Owner,Group,Access')
     Set-Acl -LiteralPath $DataRoot -AclObject $dataAcl
     $actions.Add('data-acl-reset')
 
+    foreach ($binding in $bindings) {
+        $state = Get-AntiOSBindingState $binding
+        if ($state -eq 'foreign') { throw "Registry binding changed during repair." }
+        if ($state -eq 'missing') {
+            New-AntiOSEngineBinding $binding
+            $writtenRegistry.Add($binding.Name)
+            $actions.Add("restored-$($binding.Name)")
+        }
+    }
     if (-not $service) {
         $serviceInstallAttempted = $true
         & $ManagedClamd --install-service
@@ -221,6 +240,9 @@ if ($Apply) {
     Assert-AntiOSRepairPostconditions -Service $afterService -Task $afterTask -ManagedClamd $ManagedClamd -ManagedFresh $ManagedFresh
     if ($engineTrust -eq 'pinned-archive-sha256') {
         Assert-AntiOSInstalledPair -Root $InstallRoot -Manifest (Get-AntiOSPinnedManifest) | Out-Null
+    }
+    foreach ($binding in $bindings) {
+        if ((Get-AntiOSBindingState $binding) -ne 'managed') { throw 'Engine registry verification failed.' }
     }
     $actions.Add('post-repair-service-and-task-verified')
     } catch {
@@ -289,6 +311,10 @@ if ($Apply) {
             } catch {
                 Write-Warning "ClamAV directory ACL rollback failed: $($_.Exception.Message)"
             }
+        }
+        if ($writtenRegistry.Count) {
+            try { Remove-OwnedRegistry -Names $writtenRegistry.ToArray() }
+            catch { Write-Warning "ClamAV registry rollback failed: $($_.Exception.Message)" }
         }
         throw $originalFailure
     }

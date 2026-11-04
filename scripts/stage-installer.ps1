@@ -78,6 +78,7 @@ $required = @(
     "_gui",
     "_guard",
     "guard-startup.ps1",
+    "guard-state-access.cs",
     "dashboard-startup.ps1",
     "protection-engine.ps1",
     "clamav-trust.ps1",
