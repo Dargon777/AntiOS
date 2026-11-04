@@ -139,13 +139,28 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
     if linked:
         os.link(outside, state_file)
     else:
-        state_file.write_text("preserve", encoding="utf-8")
+        with sqlite3.connect(state_file) as db:
+            db.execute("CREATE TABLE history (message TEXT)")
+            db.execute("INSERT INTO history VALUES ('preserve')")
+        db.close()
+    before_bytes = state_file.read_bytes()
     script = r'''
     $ErrorActionPreference = 'Stop'
     $ast = [Management.Automation.Language.Parser]::ParseFile($env:ANTIOS_TEST_SCRIPT, [ref]$null, [ref]$null)
     $fn = $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Restore-GuardUserAccess'}, $true)
     . ([scriptblock]::Create($fn.Extent.Text))
+    $ScriptDirectory = Split-Path -Parent $env:ANTIOS_TEST_SCRIPT
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $dbPath = Join-Path $env:ANTIOS_TEST_FOLDER 'guard.sqlite3'
+    if ($env:ANTIOS_TEST_PROTECTED -eq '1') {
+        # Simulate a legacy file which does not inherit the directory grant.
+        $fileAcl = [Security.AccessControl.FileSecurity]::new()
+        $fileAcl.SetSecurityDescriptorSddlForm("D:P(A;;0x160080;;;$($identity.User.Value))(A;;FA;;;SY)",
+            [Security.AccessControl.AccessControlSections]::Access)
+        (Get-Item -LiteralPath $dbPath).SetAccessControl($fileAcl)
+        try { [IO.File]::ReadAllBytes($dbPath) | Out-Null; throw 'Fixture is readable' }
+        catch [UnauthorizedAccessException] { }
+    }
     $before = (Get-Acl -LiteralPath $env:ANTIOS_TEST_OUTSIDE).Sddl
     $rejected = $false
     $failure = ''
@@ -158,7 +173,8 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
     @{rejected=$rejected; failure=$failure; explicit_user=($rules.Count -gt 0); outside_unchanged=($before -eq (Get-Acl -LiteralPath $env:ANTIOS_TEST_OUTSIDE).Sddl)} | ConvertTo-Json -Compress
     '''
     env = dict(os.environ, ANTIOS_TEST_SCRIPT=str(Path("scripts/guard-startup.ps1").absolute()),
-               ANTIOS_TEST_FOLDER=str(folder), ANTIOS_TEST_OUTSIDE=str(outside))
+               ANTIOS_TEST_FOLDER=str(folder), ANTIOS_TEST_OUTSIDE=str(outside),
+               ANTIOS_TEST_PROTECTED="0" if linked else "1")
     env["PSModulePath"] = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/Modules")
     result = subprocess.run(
         [resident.system_executable("WindowsPowerShell/v1.0/powershell.exe"),
@@ -172,7 +188,12 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
     assert data["outside_unchanged"] is True
     if not linked:
         assert data["explicit_user"] is True
-    assert state_file.read_text(encoding="utf-8") == "preserve"
+    assert state_file.read_bytes() == before_bytes
+    if not linked:
+        with sqlite3.connect(state_file) as db:
+            assert db.execute("SELECT message FROM history").fetchone() == ("preserve",)
+            db.execute("INSERT INTO history VALUES ('writable again')")
+        db.close()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows filesystem ACL integration")

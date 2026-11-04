@@ -2,6 +2,7 @@
   "schema": 1,
   "files": [
     "scripts/guard-startup.ps1",
+    "scripts/guard-state-access.cs",
     "scripts/dashboard-startup.ps1",
     "scripts/protection-engine.ps1",
     "scripts/clamav-trust.ps1",

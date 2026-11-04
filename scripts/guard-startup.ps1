@@ -7,6 +7,7 @@ param(
     [ValidateSet('notify', 'quarantine')][string]$Mode = 'notify',
     [ValidatePattern('^[A-Za-z0-9_-]{1,80}$')][string]$EngineServiceName,
     [switch]$AllowManagedUnsigned,
+    [switch]$RepairStateAccess,
     [switch]$Uninstall,
     [switch]$Apply
 )
@@ -34,8 +35,8 @@ $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $taskName = "AntiOS Guard ($($identity.User.Value))"
 
 function Restore-GuardUserAccess([string]$Directory) {
-    # Preserve the existing ACL and grant only this token's user. Never walk
-    # arbitrary trees or change permissions through links in a state folder.
+    # Change only DACLs on the directory and known Guard files, by verified
+    # handles. This works even when an old database blocks ACL inheritance.
     $current = Get-Item -LiteralPath $Directory -Force
     if (-not $current.PSIsContainer) { throw 'Guard state must be a directory.' }
     while ($current) {
@@ -44,57 +45,24 @@ function Restore-GuardUserAccess([string]$Directory) {
         }
         $current = $current.Parent
     }
-    foreach ($entry in Get-ChildItem -LiteralPath $Directory -Force) {
-        if ($entry.PSIsContainer -or $entry.LinkType -or
-            ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    foreach ($entry in Get-ChildItem -LiteralPath $Directory -Force -ErrorAction Stop) {
+        if ($entry.PSIsContainer -or $entry.LinkType -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
             throw 'Guard state contains an unexpected directory or linked file.'
         }
     }
-    $directoryItem = Get-Item -LiteralPath $Directory -Force
-    $acl = $directoryItem.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
-    $rule = [Security.AccessControl.FileSystemAccessRule]::new(
-        $identity.User, [Security.AccessControl.FileSystemRights]::FullControl,
-        [Security.AccessControl.InheritanceFlags]::None,
-        [Security.AccessControl.PropagationFlags]::None,
-        [Security.AccessControl.AccessControlType]::Allow)
-    # Do not grant access to unrelated children by inheritance: only the
-    # allowlisted Guard files below receive their own explicit user ACE.
-    $acl.SetAccessRule($rule)
-    # Persist only the DACL; Set-Acl can request audit/owner privileges on 5.1.
-    $directoryItem.SetAccessControl($acl)
-
-    # Older elevated Guard runs may have created a protected DACL on SQLite
-    # files. Inheritance from the repaired directory does not update those
-    # protected files, leaving the regular (unelevated) GUI unable to read its
-    # own Guard history. Repair ONLY the known Guard state files, in place.
-    # Never recurse through user-controlled content, touch other files, or
-    # delete/recreate the SQLite database.
-    $managedFiles = @(
-        'guard.sqlite3', 'guard.sqlite3-wal', 'guard.sqlite3-shm',
-        'guard.sqlite3-journal', 'guard.lock',
-        'startup-policy.json', 'startup-error.json'
-    )
-    foreach ($name in $managedFiles) {
-        $path = Join-Path $Directory $name
-        if (-not (Test-Path -LiteralPath $path)) { continue }
-        $file = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-        if ($file -isnot [IO.FileInfo] -or
-            ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
-            $file.LinkType) {
-            throw 'Guard state includes a non-regular or linked managed file.'
-        }
-        $fileAcl = $file.GetAccessControl(
-            [Security.AccessControl.AccessControlSections]::Access
-        )
-        $fileRule = [Security.AccessControl.FileSystemAccessRule]::new(
-            $identity.User, [Security.AccessControl.FileSystemRights]::FullControl,
-            [Security.AccessControl.AccessControlType]::Allow
-        )
-        $fileAcl.SetAccessRule($fileRule)
-        # Preserve data and the existing owner/DACL entries; do not broaden
-        # access to Users, Everyone or Authenticated Users.
-        $file.SetAccessControl($fileAcl)
+    if (-not ('AntiOS.GuardFileAccess' -as [type])) {
+        Add-Type -Path (Join-Path $ScriptDirectory 'guard-state-access.cs')
     }
+    [AntiOS.GuardFileAccess]::Repair($Directory, $identity.User)
+}
+
+if ($RepairStateAccess) {
+    if (-not $Apply -or $Uninstall) { throw 'Guard access repair requires -Apply.' }
+    $interactive = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
+    if (-not $interactive -or $interactive -ine $identity.Name) { return }
+    $folder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AntiOS\Guard'
+    if (Test-Path -LiteralPath $folder -ErrorAction Stop) { Restore-GuardUserAccess $folder }
+    return
 }
 
 function Assert-GuardTaskOwned($Task, [string]$ExpectedExecutable) {
@@ -175,7 +143,7 @@ $resolvedRoots = @($Roots | ForEach-Object {
     $item.FullName
 })
 
-$folder = Join-Path $env:LOCALAPPDATA 'AntiOS\Guard'
+$folder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AntiOS\Guard'
 $policyPath = Join-Path $folder 'startup-policy.json'
 $signature = Get-AuthenticodeSignature -LiteralPath $exe
 
@@ -187,20 +155,8 @@ function Assert-ManagedUnsignedGuard([string]$Path) {
         throw 'Unsigned Guard startup is allowed only for the machine-installed AntiOS-Guard.exe.'
     }
 
-    $dangerousSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
-    $dangerousRights = [Security.AccessControl.FileSystemRights]::Write -bor
-                       [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
-                       [Security.AccessControl.FileSystemRights]::Delete -bor
-                       [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
-                       [Security.AccessControl.FileSystemRights]::TakeOwnership -bor 0x50000000
-    $acl = Get-Acl -LiteralPath $installDir
-    foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
-        if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
-        $sid = $rule.IdentityReference.Value
-        if ($sid -in $dangerousSids -and (($rule.FileSystemRights -band $dangerousRights) -ne 0)) {
-            throw "AntiOS install directory is writable by an untrusted broad principal: $sid"
-        }
-    }
+    . (Join-Path $ScriptDirectory 'clamav-trust.ps1')
+    Assert-AntiOSProtectedInstallPath $expected
 }
 
 [pscustomobject]@{

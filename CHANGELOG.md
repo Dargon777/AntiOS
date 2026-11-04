@@ -4,6 +4,12 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 2.0.0a35 - 2026-11-04
+
+- restores missing settings for existing Windows protection engines while preserving settings owned by other applications;
+- repairs current-user Guard file access during upgrades and administrator-assisted recovery while preserving history;
+- improves installer compatibility on 64-bit Windows.
+
 ## 2.0.0a34 - 2026-11-04
 
 - fixes a first-time ClamAV setup error when an optional engine registration value is not yet present;

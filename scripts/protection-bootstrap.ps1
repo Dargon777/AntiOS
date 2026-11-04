@@ -114,7 +114,7 @@ New-Item -ItemType Directory -Path $tempRoot -ErrorAction Stop | Out-Null
 try {
     $stageAcl = New-Object Security.AccessControl.DirectorySecurity
     $stageAcl.SetSecurityDescriptorSddlForm(
-        'O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
+        'O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)', [Security.AccessControl.AccessControlSections]'Owner,Group,Access'
     )
     Set-Acl -LiteralPath $tempRoot -AclObject $stageAcl
     if ($PackagePath) {

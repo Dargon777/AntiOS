@@ -1,8 +1,8 @@
-# AntiOS public prerelease — v2.0.0-alpha.34
+# AntiOS public prerelease вЂ” v2.0.0-alpha.35
 
 This release improves Windows protection-engine installation and resident protection reliability.
 
-- First-time ClamAV setup now handles missing optional registration settings correctly.
+- The Windows installer and repair action can restore missing engine settings on 64-bit systems.
 - Guard can restore access to existing user state files during explicitly approved reconfiguration while retaining scan history.
 - The recovery path preserves unrelated user files and does not alter Microsoft Defender or other antivirus settings.
 
