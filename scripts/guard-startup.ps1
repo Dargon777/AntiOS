@@ -154,16 +154,14 @@ function Assert-ManagedUnsignedGuard([string]$Path) {
 
     $dangerousSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
     $dangerousRights = [Security.AccessControl.FileSystemRights]::Write -bor
-                       [Security.AccessControl.FileSystemRights]::Modify -bor
-                       [Security.AccessControl.FileSystemRights]::FullControl
+                       [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+                       [Security.AccessControl.FileSystemRights]::Delete -bor
+                       [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+                       [Security.AccessControl.FileSystemRights]::TakeOwnership -bor 0x50000000
     $acl = Get-Acl -LiteralPath $installDir
-    foreach ($rule in $acl.Access) {
+    foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
         if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
-        try {
-            $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-        } catch {
-            continue
-        }
+        $sid = $rule.IdentityReference.Value
         if ($sid -in $dangerousSids -and (($rule.FileSystemRights -band $dangerousRights) -ne 0)) {
             throw "AntiOS install directory is writable by an untrusted broad principal: $sid"
         }

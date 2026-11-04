@@ -174,7 +174,7 @@ def test_special_files_do_not_block_scan(tmp_path):
 
 
 @pytest.mark.parametrize("kwargs", [{"max_bytes": 0}, {"max_bytes": 257 * 1024 * 1024},
-                                  {"max_files": 0}, {"max_files": 1_000_001}])
+                                  {"max_files": 0}, {"max_files": -1}])
 def test_invalid_limits_rejected_before_scanning(tmp_path, kwargs):
     with pytest.raises(ValueError):
         antivirus.scan_files(tmp_path, **kwargs)

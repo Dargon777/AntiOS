@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .build_info import render_version, version_info
-from .antivirus import DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES, render_antivirus_scan, scan_files
+from .antivirus import DEFAULT_MAX_BYTES, render_antivirus_scan, scan_files
 from .config import default_config_path, load_config, write_default_config
 from .consumer import evaluate_health, render_quick_check
 from .core import (
@@ -220,8 +220,8 @@ def build_parser() -> argparse.ArgumentParser:
     av.add_argument("--engine", choices=("clamav", "amsi"), default="clamav",
                     help="Independent managed ClamAV (default) or Windows AMSI compatibility mode.")
     av.add_argument("--signatures", help="Optional local schema-1 SHA-256 signature database.")
-    av.add_argument("--max-mb", type=int, default=DEFAULT_MAX_BYTES // (1024 * 1024))
-    av.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
+    av.add_argument("--max-mb", type=int, help="Optional per-file limit in MiB. ClamAV streams large files by default.")
+    av.add_argument("--max-files", type=int, help="Optional maximum number of files. Default: scan the entire selection.")
     av.add_argument("--workers", type=int, default=4,
                     help="ClamD scan concurrency, 1..8 (default: 4). AMSI remains sequential.")
     av.add_argument("--no-cache", action="store_true",
@@ -537,7 +537,9 @@ def main(argv: list[str] | None = None) -> int:
             result = scan_files(args.path, signature_path=args.signatures,
                                 engine=args.engine,
                                 require_verified_peer=(args.engine == "clamav" and os.name == "nt"),
-                                max_bytes=args.max_mb * 1024 * 1024, max_files=args.max_files,
+                                max_bytes=(args.max_mb * 1024 * 1024 if args.max_mb is not None
+                                           else DEFAULT_MAX_BYTES if args.engine == "amsi" else None),
+                                max_files=args.max_files,
                                 workers=args.workers,
                                 cache_path=default_scan_cache_path(),
                                 use_cache=not args.no_cache,

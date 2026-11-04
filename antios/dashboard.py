@@ -3705,7 +3705,7 @@ class Dashboard:
         )
 
 
-def launch(language: str | None = None, *, background: bool = False) -> int:
+def launch(language: str | None = None, *, background: bool = False, scan_center: bool = False) -> int:
     if sys.platform.startswith("linux"):
         from .linux_dashboard import launch as launch_linux
         return launch_linux(language, background=background)
@@ -3726,7 +3726,10 @@ def launch(language: str | None = None, *, background: bool = False) -> int:
     if background:
         root.withdraw()
     _apply_window_icon(root, "not-running")
-    dashboard = Dashboard(root, language=language)
+    dashboard = Dashboard(root, language=language, tray_enabled=not scan_center,
+                          auto_refresh=not scan_center, background_services=not scan_center)
+    if not background:
+        dashboard.show_page("antivirus")
     if background and (
         dashboard._dashboard_tray is None
         or not dashboard._dashboard_tray.running
@@ -3760,6 +3763,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Start the AntiOS Control Center in the notification area.",
     )
+    parser.add_argument("--scan-center", action="store_true", help="Open an interactive scan session.")
     args = parser.parse_args(argv)
     if args.self_test:
         assert "bg" in THEME and "ok" in STATUS_STYLE
@@ -3795,4 +3799,9 @@ def main(argv: list[str] | None = None) -> int:
     # The control center is an asInvoker application: monitoring, quarantine
     # and ordinary diagnostics must use the *interactive user's* identity.
     # Privileged service repair is requested only after explicit user action.
+    if args.scan_center:
+        from .elevation import is_administrator
+        if args.background or not is_administrator():
+            raise PermissionError("The administrator scan center requires Windows UAC approval")
+        return launch(args.lang, scan_center=True)
     return launch(args.lang, background=args.background)

@@ -4,8 +4,8 @@
 
 AntiOS is an endpoint-security companion and system-maintenance toolkit for Windows, with supplemental Linux support.
 
-> **Development tree:** `2.0.0a32`  
-> **Latest published release:** `v2.0.0-alpha.30`  
+> **Development tree:** `2.0.0a33`<br>
+> **Latest published release:** [GitHub Releases](https://github.com/Dargon777/AntiOS/releases)<br>
 > **Status:** pre-release software
 
 ## What AntiOS provides

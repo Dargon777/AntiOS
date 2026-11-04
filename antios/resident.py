@@ -9,7 +9,7 @@ import sys
 import time
 
 from .guard_state import read_guard_state
-from .windows_process import hidden_process_kwargs, system_executable
+from .windows_process import hidden_process_kwargs, system_executable, windows_powershell_env
 
 
 _ACTIVE_STATES = {"starting", "scanning", "monitoring", "attention", "degraded"}
@@ -94,6 +94,7 @@ def _run_startup_script(*args: str, timeout: float = 45.0) -> dict:
         stderr=subprocess.PIPE,
         text=True,
         timeout=timeout,
+        env=windows_powershell_env(powershell),
         **hidden_process_kwargs(),
     )
     if completed.returncode != 0:

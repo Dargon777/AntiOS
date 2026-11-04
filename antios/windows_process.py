@@ -25,6 +25,13 @@ def system_executable(relative: str) -> str:
     return ntpath.join(root, "System32", *relative.replace("/", "\\").split("\\"))
 
 
+def windows_powershell_env(executable: str) -> dict[str, str]:
+    """Use the matching built-in modules even when launched from PowerShell 7."""
+    env = {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
+    env["PSModulePath"] = ntpath.join(ntpath.dirname(executable), "Modules")
+    return env
+
+
 def hidden_process_kwargs(*, extra_creationflags: int = 0) -> dict[str, Any]:
     """subprocess kwargs that suppress a console window on Windows.
 
