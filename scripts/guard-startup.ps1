@@ -60,6 +60,39 @@ function Restore-GuardUserAccess([string]$Directory) {
     $acl.SetAccessRule($rule)
     # Persist only the DACL; Set-Acl can request audit/owner privileges on 5.1.
     $directoryItem.SetAccessControl($acl)
+
+    # Older elevated Guard runs may have created a protected DACL on SQLite
+    # files. Inheritance from the repaired directory does not update those
+    # protected files, leaving the regular (unelevated) GUI unable to read its
+    # own Guard history. Repair ONLY the known Guard state files, in place.
+    # Never recurse through user-controlled content, touch other files, or
+    # delete/recreate the SQLite database.
+    $managedFiles = @(
+        'guard.sqlite3', 'guard.sqlite3-wal', 'guard.sqlite3-shm',
+        'guard.sqlite3-journal', 'guard.lock',
+        'startup-policy.json', 'startup-error.json'
+    )
+    foreach ($name in $managedFiles) {
+        $path = Join-Path $Directory $name
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $file = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($file -isnot [IO.FileInfo] -or
+            ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $file.LinkType) {
+            throw 'Guard state includes a non-regular or linked managed file.'
+        }
+        $fileAcl = $file.GetAccessControl(
+            [Security.AccessControl.AccessControlSections]::Access
+        )
+        $fileRule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $identity.User, [Security.AccessControl.FileSystemRights]::FullControl,
+            [Security.AccessControl.AccessControlType]::Allow
+        )
+        $fileAcl.SetAccessRule($fileRule)
+        # Preserve data and the existing owner/DACL entries; do not broaden
+        # access to Users, Everyone or Authenticated Users.
+        $file.SetAccessControl($fileAcl)
+    }
 }
 
 function Assert-GuardTaskOwned($Task, [string]$ExpectedExecutable) {
