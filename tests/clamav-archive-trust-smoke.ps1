@@ -16,7 +16,7 @@ function Must-Throw([scriptblock]$Action, [string]$Reason) {
 function New-TestClamAclRule {
     param(
         [Parameter(Mandatory)]$Identity,
-        [Parameter(Mandatory)][Security.AccessControl.FileSystemRights]$Rights,
+        [Parameter(Mandatory)][int64]$Rights,
         [Security.AccessControl.AccessControlType]$Type = [Security.AccessControl.AccessControlType]::Allow,
         [Security.AccessControl.PropagationFlags]$Propagation = [Security.AccessControl.PropagationFlags]::None
     )
@@ -50,7 +50,7 @@ $unresolved = 'Cannot verify the identity'
 
 $safe = @(
     (New-TestClamAclRule $users ([Security.AccessControl.FileSystemRights]::ReadAndExecute)),
-    (New-TestClamAclRule $users ([Security.AccessControl.FileSystemRights](-1610612736))),
+    (New-TestClamAclRule $users ([int64]-1610612736)),
     (New-TestClamAclRule $systemSid ([Security.AccessControl.FileSystemRights]::FullControl)),
     (New-TestClamAclRule $admins ([Security.AccessControl.FileSystemRights]::Modify)),
     (New-TestClamAclRule $trustedInstaller ([Security.AccessControl.FileSystemRights]::FullControl)),
@@ -71,8 +71,8 @@ foreach ($right in @(
     [Security.AccessControl.FileSystemRights]::TakeOwnership,
     [Security.AccessControl.FileSystemRights]::Modify,
     [Security.AccessControl.FileSystemRights]::FullControl,
-    [Security.AccessControl.FileSystemRights]0x40000000, # GENERIC_WRITE
-    [Security.AccessControl.FileSystemRights]0x10000000  # GENERIC_ALL
+    [int64]0x40000000, # GENERIC_WRITE
+    [int64]0x10000000  # GENERIC_ALL
 )) {
     Must-RejectAcl @((New-TestClamAclRule $users $right)) "Users $right" $rw
 }
