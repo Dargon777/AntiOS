@@ -1,4 +1,4 @@
-# AntiOS public prerelease вЂ” v2.0.0-alpha.35
+# AntiOS public prerelease — v2.0.0-alpha.35
 
 This release improves Windows protection-engine installation and resident protection reliability.
 
