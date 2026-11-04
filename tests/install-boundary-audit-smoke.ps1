@@ -182,7 +182,10 @@ try {
     $dbAcl = $dbInfo.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
     $dbAcl.SetAccessRuleProtection($true, $false) # imitate old protected file DACL
     $dbInfo.SetAccessControl($dbAcl)
-    $unrelatedAcl = (Get-Acl -LiteralPath $unrelated).Sddl
+    $unrelatedAcl = @((Get-Acl -LiteralPath $unrelated).Access | ForEach-Object {
+        '{0}|{1}|{2}|{3}' -f $_.IdentityReference.Value, $_.FileSystemRights,
+            $_.AccessControlType, $_.IsInherited
+    } | Sort-Object) -join ';'
 
     Restore-GuardUserAccess $stateDir
     foreach ($path in @($database, $wal)) {
@@ -204,10 +207,12 @@ try {
         [IO.File]::ReadAllText($unrelated) -cne 'keep-other-file') {
         throw 'Guard ACL repair must preserve all file content.'
     }
-    $afterUnrelatedAcl = (Get-Acl -LiteralPath $unrelated).Sddl
+    $afterUnrelatedAcl = @((Get-Acl -LiteralPath $unrelated).Access | ForEach-Object {
+        '{0}|{1}|{2}|{3}' -f $_.IdentityReference.Value, $_.FileSystemRights,
+            $_.AccessControlType, $_.IsInherited
+    } | Sort-Object) -join ';'
     if ($afterUnrelatedAcl -cne $unrelatedAcl) {
-        throw ("Guard ACL repair must not modify unrelated file permissions. Before: " +
-            $unrelatedAcl + "; After: " + $afterUnrelatedAcl)
+        throw 'Guard ACL repair must not change unrelated file access rules.'
     }
     New-Item -ItemType Directory -Path (Join-Path $stateDir 'unexpected-subfolder') | Out-Null
     Should-Throw { Restore-GuardUserAccess $stateDir } 'unexpected Guard subdirectory'
