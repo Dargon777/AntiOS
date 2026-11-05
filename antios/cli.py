@@ -128,6 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
     version_cmd.add_argument("--json", action="store_true")
+    check_cmd = sub.add_parser("self-check", help="Run harmless local engine and backup functional checks.")
+    check_cmd.add_argument("--json", action="store_true")
+    check_cmd.add_argument("--language", choices=("en", "ru"), default="en")
 
     update_cmd = sub.add_parser(
         "update",
@@ -327,6 +330,14 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args.config) if args.config else default_config_path()
 
     try:
+        if args.command == "self-check":
+            from .protection_check import run_checks, render_report
+            report = run_checks()
+            if args.json:
+                _print_json(report)
+            else:
+                print(render_report(report, args.language))
+            return 0 if report["status"] == "passed" else 1
         if args.command == "recovery":
             from .recovery import main as recovery_main
             return recovery_main(args.recovery_args)

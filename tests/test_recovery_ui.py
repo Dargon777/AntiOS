@@ -163,3 +163,41 @@ def test_selected_recovery_uses_listed_archive_and_rejects_replacement(tmp_path,
         assert not errors
     finally:
         root.destroy()
+
+
+@isolated_tk_test
+def test_compare_and_recover_only_prior_changed_versions(tmp_path, monkeypatch):
+    import tkinter as tk
+    from tkinter import filedialog
+    from antios.dashboard import Dashboard, THEME
+    from antios.recovery_ui import open_recovery
+    root = tk.Tk()
+    root.withdraw()
+    app = Dashboard(root, language="ru", auto_refresh=False, tray_enabled=False, background_services=False)
+    window = open_recovery(app, THEME)
+    window.window.withdraw()
+    try:
+        source = tmp_path / "file.txt"
+        source.write_bytes(b"old")
+        before, after = tmp_path / "before.zip", tmp_path / "after.zip"
+        recovery.create([source], before)
+        source.write_bytes(b"new")
+        extra = tmp_path / "new.txt"
+        extra.write_bytes(b"added")
+        recovery.create([source, extra], after)
+        window.set_archive(before)
+        monkeypatch.setattr(filedialog, "askopenfilename", lambda **kw: str(after))
+        monkeypatch.setattr(filedialog, "askdirectory", lambda **kw: str(tmp_path))
+        window.compare()
+        drain(root, window)
+        assert len(window.changed_rows) == 1
+        assert len(window.results.get_children()) == 2
+        window.recover_changes()
+        drain(root, window)
+        recovered = list(tmp_path.glob("AntiOS-recovered-*/*/file.txt"))
+        assert len(recovered) == 1 and recovered[0].read_bytes() == b"old"
+        assert source.read_bytes() == b"new"
+        assert not list(tmp_path.glob("AntiOS-recovered-*/*/new.txt"))
+        window.close()
+    finally:
+        root.destroy()

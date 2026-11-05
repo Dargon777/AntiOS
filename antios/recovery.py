@@ -353,6 +353,41 @@ def check(source: Path, *, cancelled: Callable[[], bool] | None = None,
             "note": "Changes are not malware verdicts; new files are not enumerated."}
 
 
+def compare(before: Path, after: Path, *, cancelled: Callable[[], bool] | None = None,
+            progress: Callable[[dict], None] | None = None) -> dict:
+    """Compare verified saved bytes without opening original paths from either archive."""
+    old = inventory(before, cancelled=cancelled, progress=progress)
+    new = inventory(after, cancelled=cancelled, progress=progress)
+
+    def indexed(items):
+        result = {}
+        for item in items:
+            path = item["path"]
+            key = ntpath.normcase(ntpath.normpath(path)) if ntpath.splitdrive(path)[0] else os.path.normcase(path)
+            if key in result:
+                raise ValueError("Ambiguous file paths in snapshot")
+            result[key] = item
+        return result
+
+    left, right = indexed(old["files"]), indexed(new["files"])
+    files = []
+    counts = dict.fromkeys(("added", "removed", "changed", "unchanged"), 0)
+    for key in sorted(left.keys() | right.keys()):
+        previous, current = left.get(key), right.get(key)
+        state = ("added" if previous is None else "removed" if current is None else
+                 "unchanged" if previous["sha256"] == current["sha256"] else "changed")
+        _checkpoint(cancelled, progress, len(files), (previous or current)["path"])
+        counts[state] += 1
+        files.append({"path": (previous or current)["path"], "state": state,
+                      "index": previous["index"] if previous else None,
+                      "before_size": previous["size"] if previous else None,
+                      "after_size": current["size"] if current else None})
+    return {"archive_id": old["archive_id"], "compared_id": new["archive_id"],
+            "compared_archive": str(after), "files": files, "counts": counts,
+            "coverage": "selected-files" if old["coverage"] == new["coverage"] == "selected-files" else "partial",
+            "note": "Comparison of saved snapshots only. Changes do not mean infection."}
+
+
 def export(source: Path, destination: Path, *, cancelled: Callable[[], bool] | None = None,
            progress: Callable[[dict], None] | None = None,
            indices: list[int] | None = None, named: bool = False,

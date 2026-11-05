@@ -17,6 +17,7 @@ class RecoveryWindow:
         self.archive: Path | None = None
         self.archive_id: str | None = None
         self.entry_indices: dict[str, int] = {}
+        self.changed_rows = []
         self.busy = False
         self.closed = False
         self.closing = False
@@ -80,6 +81,11 @@ class RecoveryWindow:
         self.button(actions, self.text("Дополнить эталон", "Extend baseline"), lambda: self.create(extend=True)).pack(side="left")
         self.button(actions, self.text("Проверить", "Check changes"), self.check).pack(side="left", padx=8)
         self.button(actions, self.text("Содержимое", "Contents"), self.contents).pack(side="left")
+        smart = tk.Frame(outer, bg=palette["bg"])
+        smart.pack(fill="x", pady=(0, 10))
+        self.button(smart, self.text("Сравнить два снимка", "Compare two snapshots"), self.compare).pack(side="left")
+        self.button(smart, self.text("Извлечь прежние версии изменений", "Recover earlier changed files"),
+                    self.recover_changes).pack(side="left", padx=8)
 
         self.label(outer, self.text("03  Содержимое и изменения", "03  Contents and changes"), color="text",
                    font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 8))
@@ -168,6 +174,7 @@ class RecoveryWindow:
         self.archive = Path(path)
         self.archive_id = None
         self.entry_indices.clear()
+        self.changed_rows.clear()
         self.archive_label.configure(text=str(path))
         self.results.delete(*self.results.get_children())
 
@@ -215,6 +222,31 @@ class RecoveryWindow:
         else:
             self.status.configure(text=self.text("Сначала откройте архив.", "Open an archive first."))
 
+    def compare(self):
+        from tkinter import filedialog
+        if self.busy:
+            return
+        if not self.archive:
+            self.status.configure(text=self.text("Сначала откройте исходный эталон.", "Open the earlier baseline first."))
+            return
+        other = filedialog.askopenfilename(parent=self.window,
+            title=self.text("Выберите более новый снимок", "Choose a newer snapshot"),
+            filetypes=[("AntiOS backup", "*.zip")])
+        if other:
+            baseline = self.archive
+            self.start("compare", lambda **kw: recovery.compare(baseline, Path(other), **kw))
+
+    def recover_changes(self):
+        if self.busy:
+            return
+        if not self.changed_rows:
+            self.status.configure(text=self.text(
+                "Сначала проверьте изменения или сравните снимки. Выбираются только изменённые и отсутствующие файлы эталона.",
+                "Check changes or compare snapshots first. Only changed and missing baseline files are selected."))
+            return
+        self.results.selection_set(self.changed_rows)
+        self.export(selected=True)
+
     def export(self, selected=False):
         from tkinter import filedialog
         if self.busy:
@@ -246,6 +278,7 @@ class RecoveryWindow:
         if action != "export":
             self.results.delete(*self.results.get_children())
             self.entry_indices.clear()
+            self.changed_rows.clear()
         for control in self.controls:
             control.configure(state="disabled")
         self.cancel_button.configure(state="normal")
@@ -305,14 +338,30 @@ class RecoveryWindow:
                 self.results.insert("", "end", values=(issue["error"], issue["path"]))
             self.status.configure(text=self.text("Сохранено файлов: ", "Files saved: ") + str(result["files"]) +
                                   (self.text(" · Покрытие неполное — см. ошибки выше.", " · Incomplete coverage — see errors above.") if result["errors"] else ""))
-        elif action in {"check", "list"}:
+        elif action in {"check", "list", "compare"}:
             self.archive_id = result["archive_id"]
+            self.archive_label.configure(text=str(self.archive) + (
+                "  →  " + result["compared_archive"] if action == "compare" else ""))
             states = {"unchanged": self.text("Без изменений", "Unchanged"), "changed": self.text("Изменён", "Changed"),
                       "missing": self.text("Отсутствует", "Missing"), "unreadable": self.text("Недоступен", "Unreadable"),
-                      "saved": self.text("В архиве", "Saved")}
+                      "saved": self.text("В архиве", "Saved"),
+                      "added": self.text("Новый в снимке", "Added in snapshot"),
+                      "removed": self.text("Нет в новом снимке", "Missing in newer snapshot")}
             for entry in result["files"]:
                 item = self.results.insert("", "end", values=(states[entry["state"]], entry["path"]), tags=(entry["state"],))
-                self.entry_indices[item] = entry["index"]
+                if entry["index"] is not None:
+                    self.entry_indices[item] = entry["index"]
+                    if entry["state"] in {"changed", "missing", "removed"}:
+                        self.changed_rows.append(item)
+            if action == "compare":
+                counts = result["counts"]
+                self.status.configure(text=self.text(
+                    f"Новых: {counts['added']} · Изменённых: {counts['changed']} · Удалённых: {counts['removed']}. "
+                    "Извлечение берёт прежние версии из открытого эталона. Изменение не означает заражение.",
+                    f"Added: {counts['added']} · Changed: {counts['changed']} · Removed: {counts['removed']}. "
+                    "Recovery uses earlier versions from the open baseline. Changes do not mean infection.") +
+                    (self.text(" Снимки неполные.", " Snapshot coverage is incomplete.") if result["coverage"] != "selected-files" else ""))
+                return
             if action == "list":
                 self.status.configure(text=self.text(f"В архиве: {len(result['files'])} файлов. Целостность копий проверена; это не проверка на вирусы.",
                                                      f"Saved: {len(result['files'])} files. Backup integrity verified; this is not a malware scan.") +

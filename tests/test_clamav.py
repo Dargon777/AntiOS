@@ -11,6 +11,13 @@ import pytest
 from antios.antivirus import scan_files
 from antios.clamav import ClamAVScanner
 
+@pytest.fixture(autouse=True)
+def isolate_protocol_listener_from_installed_service(monkeypatch):
+    from antios import clamav
+    # These ephemeral listeners exercise protocol framing, not the host's SCM
+    # registration. Peer-verification tests below inject their own binding.
+    monkeypatch.setattr(clamav, "configured_service_name", lambda explicit=None: explicit)
+
 
 def version(days=0):
     date = datetime.now() - timedelta(days=days)

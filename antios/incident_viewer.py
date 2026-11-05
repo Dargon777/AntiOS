@@ -19,6 +19,7 @@ from .incident_response import (
     isolate_confirmed_findings,
     scan_incident_files,
 )
+from .incident_explanation import format_explanation
 
 
 _RELATION_PRIORITY = {
@@ -493,6 +494,8 @@ class IncidentViewer:
 
     def _show_node(self, row: dict) -> None:
         lines = [
+            format_explanation(self.selected_incident, getattr(self.app, "language", "en")),
+            "",
             row.get("label", ""),
             "",
             f"{self.t('incident_detail_type')}: {self._kind(row.get('kind', 'unknown'))}",
