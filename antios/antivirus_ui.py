@@ -233,6 +233,11 @@ class AntivirusPanel:
         self.incident_button.pack(side="left", padx=(8, 0))
         self.guard_history_button = self.incident_button
         self.buttons.extend((self.guard_start_button, self.incident_button))
+        from .protection_lab_ui import open_protection_lab
+        self.assistant_button = self.app._button(
+            hero_actions, "Помощник" if self.app.language == "ru" else "Assistant",
+            lambda: open_protection_lab(self.app, self.palette), kind="secondary")
+        self.assistant_button.pack(side="left", padx=(8, 0))
 
         score = tk.Frame(self.hero, bg=self.palette["surface_soft"])
         score.grid(row=0, column=3, sticky="nsew", padx=(0, 18), pady=18)

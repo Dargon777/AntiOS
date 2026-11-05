@@ -1,4 +1,24 @@
 from antios import protection
+import os
+from types import SimpleNamespace
+
+import pytest
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows managed runtime inspection")
+def test_protected_configuration_is_unknown_without_hiding_engine_status(monkeypatch):
+    def exists(path):
+        if path.name in {"clamd.conf", "freshclam.conf"}:
+            raise PermissionError("configuration is administrator-only")
+        return True
+    monkeypatch.setattr(protection.Path, "exists", exists)
+    monkeypatch.setattr(protection.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0))
+    managed = protection._managed_runtime_status()
+    assert managed["available"] is True
+    assert managed["healthy"] is None
+    assert managed["inspection_complete"] is False
+    assert managed["files"]["clamd_config"] is None
+    assert managed["access_errors"]["clamd_config"] == "PermissionError"
 
 
 class ReadyScanner:

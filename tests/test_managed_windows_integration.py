@@ -48,6 +48,15 @@ def test_installed_engine_recognizes_standard_test_in_memory():
         engine.close()
 
 
+def test_user_facing_self_check_with_installed_engine():
+    from antios.protection_check import run_checks
+    report = run_checks()
+    states = {item["id"]: item["state"] for item in report["checks"]}
+    for name in ("engine", "database", "benign-scan", "test-detection", "recovery"):
+        assert states[name] == "passed", report
+    assert report["status"] in {"passed", "attention"}, report
+
+
 def test_resident_guard_scans_and_saves_history_with_installed_engine(tmp_path):
     watched = tmp_path / "watched"
     watched.mkdir()

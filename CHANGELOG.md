@@ -4,6 +4,14 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 2.0.0a37 - 2026-11-05
+
+- adds a protection assistant with harmless engine checks, a temporary backup recovery test and actionable results;
+- compares saved file snapshots and recovers earlier copies of changed or missing files;
+- explains recorded activity in plain language while distinguishing confirmed detections from behavioral suspicion;
+- connects the three features in one local workspace and adds Windows acceptance for the user-facing self-check.
+- keeps protection diagnostics available in a normal Windows session when administrator-only configuration cannot be inspected.
+
 ## 2.0.0a36 - 2026-11-05
 
 - repairs missing database-verification settings in older Windows protection-engine installations;

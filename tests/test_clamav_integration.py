@@ -11,6 +11,11 @@ import pytest
 from antios.antivirus import scan_files
 from antios.clamav import ClamAVScanner
 
+@pytest.fixture(autouse=True)
+def isolate_fixture_daemon_from_installed_service(monkeypatch):
+    from antios import clamav
+    monkeypatch.setattr(clamav, "configured_service_name", lambda explicit=None: explicit)
+
 
 @pytest.fixture
 def real_clamd(tmp_path):

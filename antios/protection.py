@@ -33,7 +33,17 @@ def _managed_runtime_status() -> dict:
         "freshclam_config": data / "config" / "freshclam.conf",
         "database": data / "database",
     }
-    files = {key: path.exists() for key, path in required.items()}
+    # Machine configuration is deliberately administrator-only. A normal
+    # desktop session must still report the independently verified engine.
+    access_errors = {}
+    def presence(name, path):
+        try:
+            return path.exists()
+        except OSError as exc:
+            access_errors[name] = type(exc).__name__
+            return None
+    files = {key: presence(key, path) for key, path in required.items()}
+    available = presence("install_root", install)
     task = {"available": False}
     schtasks = system_executable("schtasks.exe")
     try:
@@ -60,10 +70,13 @@ def _managed_runtime_status() -> dict:
     except (OSError, ValueError):
         pass
 
-    healthy = all(files.values()) and task.get("available") is True
+    inspection_complete = not access_errors
+    healthy = (all(files.values()) and task.get("available") is True) if inspection_complete else None
     return {
-        "available": install.exists(),
+        "available": available,
         "healthy": healthy,
+        "inspection_complete": inspection_complete,
+        "access_errors": access_errors,
         "install_root": str(install),
         "data_root": str(data),
         "files": files,
@@ -486,7 +499,7 @@ def render_protection_status(status: dict) -> str:
         f"latest={latest_incident.get('id', 'none')}, "
         f"nodes={latest_incident.get('node_count', 0)}, "
         f"edges={latest_incident.get('edge_count', 0)})",
-        f"Managed runtime: {'healthy' if managed.get('healthy') else 'needs review'}",
+        f"Managed runtime: {'not fully inspected (access unavailable)' if managed.get('inspection_complete') is False else 'healthy' if managed.get('healthy') else 'needs review'}",
         f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
         f"Native coexistence: {native_health.get('state', 'inactive/not-validated')}",

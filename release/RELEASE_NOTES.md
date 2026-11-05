@@ -1,11 +1,14 @@
-# AntiOS public prerelease — v2.0.0-alpha.36
+# AntiOS public prerelease — v2.0.0-alpha.37
 
-This release improves recovery of existing Windows protection installations.
+This release adds a local protection assistant to the Windows antivirus center.
 
-- Older engine configurations are completed during recovery so that signature updates and scanning can work after an upgrade.
-- A running engine reloads repaired configuration; conflicting settings are preserved and reported.
-- Windows acceptance now checks actual scanning and resident protection after installation and recovery, including a large benign file and a standard harmless antivirus test.
+- Self-check uses harmless test data to verify the scanning engine and a temporary backup recovery round trip, with clear next steps when a check needs attention.
+- Snapshot comparison shows added, changed and removed files. Earlier changed copies can be recovered into a new folder.
+- Activity explanations describe recorded evidence in plain language and distinguish confirmed detections, incomplete scans and behavior that needs review.
+- Standard Windows sessions keep engine status visible even when protected installation settings cannot be inspected.
 
-Administrator approval is required for system maintenance. Existing Guard history is preserved. Protection readiness is checked separately after recovery; inaccessible files and incomplete scans remain visible in reports.
+Open Antivirus → Assistant to use the new workspace. The command line also supports antios self-check --json.
 
-AntiOS v2 remains prerelease companion software. See README.md, PRIVACY.md and SECURITY.md for supported usage and limitations.
+All explanations are generated locally. Self-check results describe the moment of testing; they do not guarantee detection of every threat. Snapshot features remain file-level backup tools.
+
+AntiOS v2 remains prerelease companion software.

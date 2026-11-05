@@ -4,7 +4,7 @@
 
 AntiOS is an endpoint-security companion and system-maintenance toolkit for Windows, with supplemental Linux support.
 
-> **Development tree:** `2.0.0a36`<br>
+> **Development tree:** `2.0.0a37`<br>
 > **Latest published release:** [GitHub Releases](https://github.com/Dargon777/AntiOS/releases)<br>
 > **Status:** pre-release software
 
@@ -62,6 +62,12 @@ See:
 - [Antivirus](docs/ANTIVIRUS.md)
 - [Windows third-party antivirus companion mode](docs/WINDOWS_COMPANION.md)
 - [Linux companion](docs/LINUX.md)
+
+## Protection assistant
+
+Choose **Assistant** in the antivirus center to run harmless functional checks, compare file snapshots or review plain-language activity explanations. Earlier changed files are recovered into a new folder. The command line also supports `antios self-check --json`.
+
+Explanations use local evidence. A passing self-check describes current operation; it does not guarantee detection of every threat.
 
 ## Storage and recovery
 
