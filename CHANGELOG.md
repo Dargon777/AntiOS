@@ -4,6 +4,12 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 2.0.0a36 - 2026-11-05
+
+- repairs missing database-verification settings in older Windows protection-engine installations;
+- reloads repaired engine configuration and preserves existing configuration if recovery fails;
+- expands Windows acceptance checks to cover upgrades, large-file scanning, a standard harmless antivirus test and resident Guard scanning.
+
 ## 2.0.0a35 - 2026-11-04
 
 - restores missing settings for existing Windows protection engines while preserving settings owned by other applications;

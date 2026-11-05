@@ -7,6 +7,7 @@ on:
       - "scripts/clamav-trust.ps1"
       - "config/clamav/**"
       - "release/clamav-windows.json"
+      - "tests/test_managed_windows_integration.py"
       - ".github/workflows/windows-protection-acceptance.yml"
   workflow_dispatch:
 
@@ -29,7 +30,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
+          python -m pip install -e . pytest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Validate protection scripts
@@ -80,6 +81,27 @@ jobs:
               throw "Freshly installed managed runtime already needs repair: $($repair.issues -join ', ')"
             }
 
+            # Reproduce an older, partially configured installation on this
+            # disposable runner, then require a real cold start after repair.
+            Stop-Service -Name clamd -ErrorAction Stop
+            $configs = @('clamd.conf', 'freshclam.conf') | ForEach-Object {
+              Join-Path $env:ProgramData "AntiOS-ClamAV\config\$_"
+            }
+            foreach ($config in $configs) {
+              $lines = @([IO.File]::ReadAllLines($config) | Where-Object { $_ -notmatch '^\s*CVDCertsDirectory(?:\s|$)' })
+              [IO.File]::WriteAllLines($config, $lines, [Text.UTF8Encoding]::new($false))
+            }
+            Remove-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\AntiOS' -Name EngineServiceName -ErrorAction Stop
+            $oldPreviewText = antios protection-repair --json
+            if ($LASTEXITCODE -ne 0) { throw 'Old-installation diagnosis failed.' }
+            $oldPreview = $oldPreviewText | ConvertFrom-Json
+            if ($oldPreview.healthy_before -or
+                'certificate-config-missing:clamd.conf' -notin $oldPreview.issues -or
+                'certificate-config-missing:freshclam.conf' -notin $oldPreview.issues -or
+                'registry-missing-EngineServiceName' -notin $oldPreview.issues) {
+              throw "Incomplete old-installation diagnosis: $($oldPreview.issues -join ', ')"
+            }
+
             $repairApplyText = antios protection-repair --yes --update-signatures --json
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $repairApply = $repairApplyText | ConvertFrom-Json
@@ -87,7 +109,42 @@ jobs:
               throw "Repair apply did not report its policy refresh actions."
             }
 
+            # A running service must reload a repaired configuration as well.
+            $beforePid = (Get-CimInstance Win32_Service -Filter "Name='clamd'").ProcessId
+            $lines = @([IO.File]::ReadAllLines($configs[0]) | Where-Object { $_ -notmatch '^\s*CVDCertsDirectory(?:\s|$)' })
+            [IO.File]::WriteAllLines($configs[0], $lines, [Text.UTF8Encoding]::new($false))
+            $beforeHash = (Get-FileHash -LiteralPath $configs[0]).Hash
+            $freshBytes = [IO.File]::ReadAllBytes($configs[1])
+            try {
+              [IO.File]::AppendAllText($configs[1], "`r`nCVDCertsDirectory `"C:\ForeignFixture`"`r`n")
+              $conflictHash = (Get-FileHash -LiteralPath $configs[1]).Hash
+              $rejected = antios protection-repair --yes --json 2>&1
+              if ($LASTEXITCODE -eq 0) { throw 'Conflicting settings were silently accepted.' }
+              if ((Get-FileHash -LiteralPath $configs[0]).Hash -ne $beforeHash -or
+                  (Get-FileHash -LiteralPath $configs[1]).Hash -ne $conflictHash) {
+                throw 'Failed recovery did not preserve the original configurations.'
+              }
+            } finally {
+              [IO.File]::WriteAllBytes($configs[1], $freshBytes)
+            }
+            $reloadText = antios protection-repair --yes --json
+            if ($LASTEXITCODE -ne 0) { throw 'Running-engine configuration repair failed.' }
+            $reload = $reloadText | ConvertFrom-Json
+            if ('clamd-config-reloaded' -notin $reload.actions -or
+                (Get-CimInstance Win32_Service -Filter "Name='clamd'").ProcessId -eq $beforePid) {
+              throw 'The running engine did not reload its repaired configuration.'
+            }
+
+            $statusText = antios protection-status --json
+            if ($LASTEXITCODE -ne 0) { throw 'Post-repair status failed.' }
+            $status = $statusText | ConvertFrom-Json
+            if (-not $status.managed_runtime.healthy -or -not $status.capabilities.standalone_detection_engine) {
+              throw 'The repaired engine is not healthy and ready.'
+            }
             $statusText | Set-Content -Encoding utf8 .\protection-status.json
+            $env:ANTIOS_TEST_MANAGED = '1'
+            python -m pytest tests/test_managed_windows_integration.py -v --tb=short --junitxml=managed-acceptance.xml
+            if ($LASTEXITCODE -ne 0) { throw 'Installed-engine scan or Guard acceptance failed.' }
           } finally {
             if ($installed -or (Get-Service -Name clamd -ErrorAction SilentlyContinue)) {
               .\scripts\protection-engine.ps1 -Uninstall -Apply
@@ -99,5 +156,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: antios-managed-protection-acceptance
-          path: protection-status.json
+          path: |
+            protection-status.json
+            managed-acceptance.xml
           if-no-files-found: ignore

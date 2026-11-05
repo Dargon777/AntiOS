@@ -19,6 +19,7 @@ function Get-AntiOSPinnedManifest {
     if ($manifest.schema -ne 1 -or $manifest.architecture -ne 'x64' -or
         [string]$manifest.version -notmatch '^\d+\.\d+\.\d+$' -or
         [string]$manifest.sha256 -notmatch '^[a-f0-9]{64}$' -or
+        [string]$manifest.cert_sha256 -notmatch '^[a-f0-9]{64}$' -or
         [int64]$manifest.size -lt 100000000 -or [int64]$manifest.size -gt 500000000 -or
         [string]$manifest.extract_dir -cne ('clamav-' + $manifest.version + '.win.x64') -or
         [string]$manifest.url -cne (
@@ -32,6 +33,68 @@ function Get-AntiOSPinnedManifest {
 
 function Get-AntiOSSha256([string]$LiteralPath) {
     return (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-AntiOSCvdCertDirectory([string]$Root, [bool]$Pinned) {
+    $directory = Join-Path $Root 'certs'
+    if (-not $Pinned -and -not (Test-Path -LiteralPath $directory)) { return $null }
+    Assert-AntiOSProtectedInstallPath $directory
+    if (-not (Get-Item -LiteralPath $directory -Force -ErrorAction Stop).PSIsContainer) {
+        throw 'The managed certificate path must be a directory.'
+    }
+    $files = @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)
+    foreach ($file in $files) {
+        if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'The managed certificate directory contains a redirected or unexpected entry.'
+        }
+        Assert-AntiOSInstallAcl (Get-Acl -LiteralPath $file.FullName -ErrorAction Stop)
+    }
+    if ($Pinned) {
+        $manifest = Get-AntiOSPinnedManifest
+        if ($files.Count -ne 1 -or $files[0].Name -ine 'clamav.crt' -or
+            (Get-AntiOSSha256 $files[0].FullName) -cne $manifest.cert_sha256) {
+            throw 'The installed database-verification certificate differs from the official package.'
+        }
+    }
+    return $directory
+}
+
+function Get-AntiOSCvdConfigState([string]$Path, [string]$Directory) {
+    $lines = @([IO.File]::ReadAllLines($Path) | Where-Object { $_ -match '^\s*CVDCertsDirectory(?:\s|$)' })
+    if (-not $lines.Count) { return 'missing' }
+    if ($lines.Count -eq 1) {
+        $value = ($lines[0] -replace '^\s*CVDCertsDirectory\s*','').Trim()
+        if ($value -ieq $Directory -or $value -ieq ('"' + $Directory + '"')) { return 'managed' }
+    }
+    return 'foreign'
+}
+
+function Set-AntiOSConfigBytes([string]$Path, [byte[]]$Bytes) {
+    # Replace the directory entry, not the old file's contents: a hard-linked
+    # configuration must never cause a write to another name for that file.
+    $temporary = Join-Path (Split-Path $Path -Parent) ('.antios-config-' + [guid]::NewGuid().ToString('N'))
+    try {
+        $stream = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $stream.Write($Bytes, 0, $Bytes.Length); $stream.Flush($true) }
+        finally { $stream.Dispose() }
+        [IO.File]::Replace($temporary, $Path, [NullString]::Value)
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
+function Add-AntiOSCvdConfig([string]$Path, [string]$Directory) {
+    # Preserve old configurations verbatim and fill only an absent directive.
+    if (-not $Directory) { return $false }
+    $state = Get-AntiOSCvdConfigState $Path $Directory
+    if ($state -eq 'managed') { return $false }
+    if ($state -eq 'foreign') {
+        throw 'An existing database-verification certificate setting points elsewhere.'
+    }
+    $suffix = [Text.UTF8Encoding]::new($false).GetBytes(
+        [Environment]::NewLine + 'CVDCertsDirectory "' + $Directory + '"' + [Environment]::NewLine)
+    Set-AntiOSConfigBytes $Path ([byte[]]([IO.File]::ReadAllBytes($Path) + $suffix))
+    return $true
 }
 
 function Assert-AntiOSArchivePair {

@@ -37,13 +37,14 @@ def test_engine_requires_archive_attestation_or_strict_authenticode():
 
 def test_managed_clamav_requires_vendor_cvd_signing_certificates():
     script = source("scripts/protection-engine.ps1")
-    assert "$certsRoot = Join-Path $InstallRoot 'certs'" in script
-    assert "Join-Path $certsRoot 'clamav.crt'" in script
-    assert "CVDCertsDirectory" in script
+    helper = source("scripts/clamav-trust.ps1")
+    assert "Get-AntiOSCvdCertDirectory $InstallRoot ([bool]$TrustedArchivePath)" in script
     assert "foreach ($config in @($ClamdConfig, $FreshConfig))" in script
-    assert "Add-Content -LiteralPath $config" in script
+    assert script.index("Add-AntiOSCvdConfig") < script.index('& $ManagedFresh "--config-file=$FreshConfig"')
     # A missing certificate must fail installation, never bypass verification.
-    assert "missing its trusted signing certificates" in script
+    assert "Get-AntiOSSha256 $files[0].FullName" in helper
+    assert "differs from the official package" in helper
+    assert "cert_sha256" in json.loads(source("release/clamav-windows.json"))
 
 def test_repair_rechecks_installed_hashes_or_code_signatures():
     script = source("scripts/protection-repair.ps1")

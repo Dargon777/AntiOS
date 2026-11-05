@@ -269,15 +269,9 @@ try {
 
     # ClamAV 1.5+ requires official CVD signing certificates from the
     # verified vendor archive. The compiled default points outside AntiOS.
-    $certsRoot = Join-Path $InstallRoot 'certs'
-    $certsItem = Get-Item -LiteralPath $certsRoot -Force -ErrorAction Stop
-    if (-not $certsItem.PSIsContainer -or
-        ($certsItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
-        -not (Test-Path -LiteralPath (Join-Path $certsRoot 'clamav.crt') -PathType Leaf)) {
-        throw 'The verified ClamAV package is missing its trusted signing certificates.'
-    }
+    $certsRoot = Get-AntiOSCvdCertDirectory $InstallRoot ([bool]$TrustedArchivePath)
     foreach ($config in @($ClamdConfig, $FreshConfig)) {
-        Add-Content -LiteralPath $config -Encoding Ascii -Value ('CVDCertsDirectory "{0}"' -f $certsRoot)
+        Add-AntiOSCvdConfig $config $certsRoot | Out-Null
     }
 
     foreach ($binding in Get-AntiOSEngineBindings) {

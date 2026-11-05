@@ -1,13 +1,11 @@
-# AntiOS public prerelease — v2.0.0-alpha.35
+# AntiOS public prerelease — v2.0.0-alpha.36
 
-This release improves Windows protection-engine installation and resident protection reliability.
+This release improves recovery of existing Windows protection installations.
 
-- The Windows installer and repair action can restore missing engine settings on 64-bit systems.
-- Guard can restore access to existing user state files during explicitly approved reconfiguration while retaining scan history.
-- The recovery path preserves unrelated user files and does not alter Microsoft Defender or other antivirus settings.
+- Older engine configurations are completed during recovery so that signature updates and scanning can work after an upgrade.
+- A running engine reloads repaired configuration; conflicting settings are preserved and reported.
+- Windows acceptance now checks actual scanning and resident protection after installation and recovery, including a large benign file and a standard harmless antivirus test.
 
-If an older Guard state directory was created with administrator-only permissions, a one-time elevated AntiOS session may be necessary to reconfigure Guard. Actual protection is not assumed active until the engine and Guard independently report healthy status.
+Administrator approval is required for system maintenance. Existing Guard history is preserved. Protection readiness is checked separately after recovery; inaccessible files and incomplete scans remain visible in reports.
 
-Public notes intentionally omit implementation-level security details. For usage, limitations, privacy information and responsible vulnerability reporting, see `README.md`, `PRIVACY.md` and `SECURITY.md`.
-
-AntiOS v2 remains prerelease companion software.
+AntiOS v2 remains prerelease companion software. See README.md, PRIVACY.md and SECURITY.md for supported usage and limitations.
