@@ -81,6 +81,20 @@ if (Test-Path -LiteralPath $receiptFile) {
     $issues.Add('engine-signature-invalid')
 }
 
+if ($engineTrust -ne 'none') {
+    try {
+        $certs = Get-AntiOSCvdCertDirectory $InstallRoot ($engineTrust -eq 'pinned-archive-sha256')
+        if ($certs) {
+            foreach ($config in @($ClamdConfig, $FreshConfig)) {
+                if (Test-Path -LiteralPath $config -PathType Leaf) {
+                    $state = Get-AntiOSCvdConfigState $config $certs
+                    if ($state -ne 'managed') { $issues.Add("certificate-config-${state}:$(Split-Path $config -Leaf)") }
+                }
+            }
+        }
+    } catch { $issues.Add('certificate-configuration-unverified') }
+}
+
 $service = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction SilentlyContinue
 if (-not $service) {
     $issues.Add('clamd-service-missing')
@@ -174,6 +188,9 @@ if ($Apply) {
     $taskWriteAttempted = $false
     $servicePolicyWriteAttempted = $false
     $writtenRegistry = [Collections.Generic.List[string]]::new()
+    $originalConfigs = @{}
+    $clamdConfigChanged = $false
+    $serviceRestartAttempted = $false
 
     try {
     $engineAcl = New-Object Security.AccessControl.DirectorySecurity
@@ -186,6 +203,21 @@ if ($Apply) {
     Set-Acl -LiteralPath $DataRoot -AclObject $dataAcl
     $actions.Add('data-acl-reset')
 
+    $certs = Get-AntiOSCvdCertDirectory $InstallRoot ($engineTrust -eq 'pinned-archive-sha256')
+    if ($certs) {
+        foreach ($path in @($ConfigRoot, $ClamdConfig, $FreshConfig)) {
+            Assert-AntiOSInstallAcl (Get-Acl -LiteralPath $path -ErrorAction Stop)
+        }
+        foreach ($config in @($ClamdConfig, $FreshConfig)) {
+            if ((Get-AntiOSCvdConfigState $config $certs) -eq 'missing') {
+                $originalConfigs[$config] = [IO.File]::ReadAllBytes($config)
+            }
+            if (Add-AntiOSCvdConfig $config $certs) {
+                $actions.Add("certificate-config-restored:$(Split-Path $config -Leaf)")
+                if ($config -eq $ClamdConfig) { $clamdConfigChanged = $true }
+            }
+        }
+    }
     foreach ($binding in $bindings) {
         $state = Get-AntiOSBindingState $binding
         if ($state -eq 'foreign') { throw "Registry binding changed during repair." }
@@ -197,7 +229,7 @@ if ($Apply) {
     }
     if (-not $service) {
         $serviceInstallAttempted = $true
-        & $ManagedClamd --install-service
+        & $ManagedClamd --install-service | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "clamd --install-service failed with exit code $LASTEXITCODE" }
         $actions.Add('clamd-service-installed')
     }
@@ -215,8 +247,14 @@ if ($Apply) {
     $actions.Add('clamd-service-policy-reset')
 
     $running = Get-Service -Name $EngineServiceName
+    if ($running.Status -eq 'Running' -and $clamdConfigChanged) {
+        $serviceRestartAttempted = $true
+        Restart-Service -Name $EngineServiceName -ErrorAction Stop -WarningAction SilentlyContinue
+        (Get-Service -Name $EngineServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
+        $actions.Add('clamd-config-reloaded')
+    }
     if ($running.Status -ne 'Running') {
-        Start-Service -Name $EngineServiceName
+        Start-Service -Name $EngineServiceName -WarningAction SilentlyContinue
         (Get-Service -Name $EngineServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
         $actions.Add('clamd-service-started')
     }
@@ -247,6 +285,10 @@ if ($Apply) {
     $actions.Add('post-repair-service-and-task-verified')
     } catch {
         $originalFailure = $_
+        foreach ($config in $originalConfigs.Keys) {
+            try { Set-AntiOSConfigBytes $config $originalConfigs[$config] }
+            catch { Write-Warning "Could not restore the original ClamAV configuration: $($_.Exception.Message)" }
+        }
         # Rollback is best effort. Never remove/modify a foreign service or a
         # task whose executable no longer matches the AntiOS-owned path.
         if ($taskWriteAttempted) {
@@ -291,6 +333,9 @@ if ($Apply) {
                         if ($LASTEXITCODE -ne 0) { throw 'Could not restore ClamD service permissions.' }
                         if (-not $serviceWasRunning -and $rollbackService.State -eq 'Running') {
                             Stop-Service -Name $EngineServiceName -ErrorAction Stop
+                        } elseif ($serviceWasRunning -and $serviceRestartAttempted) {
+                            Restart-Service -Name $EngineServiceName -ErrorAction Stop -WarningAction SilentlyContinue
+                            (Get-Service -Name $EngineServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
                         }
                     }
                 }

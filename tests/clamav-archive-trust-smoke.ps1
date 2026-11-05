@@ -82,6 +82,36 @@ Write-Host 'PASS: read-only and inherited ACLs accepted; unsafe or unmapped writ
 $root = Join-Path $env:RUNNER_TEMP ('AntiOS-Trust-Test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root -Force | Out-Null
 try {
+    $config = Join-Path $root 'old.conf'
+    $certDirectory = Join-Path $root ('Vendor Certificates-' + [char]0x416)
+    $originalText = "# CVDCertsDirectory ignored-comment`r`nScanArchive yes"
+    [IO.File]::WriteAllText($config, $originalText, [Text.UTF8Encoding]::new($false))
+    if ((Get-AntiOSCvdConfigState $config $certDirectory) -ne 'missing') { throw 'Old config not diagnosed.' }
+    if (-not (Add-AntiOSCvdConfig $config $certDirectory)) { throw 'Old config not upgraded.' }
+    $updated = [IO.File]::ReadAllText($config)
+    if (-not $updated.StartsWith($originalText) -or
+        (Get-AntiOSCvdConfigState $config $certDirectory) -ne 'managed') { throw 'Old settings were lost.' }
+    $digest = Get-AntiOSSha256 $config
+    if (Add-AntiOSCvdConfig $config $certDirectory) { throw 'Managed config changed twice.' }
+    if ((Get-AntiOSSha256 $config) -ne $digest) { throw 'Idempotent repair changed config bytes.' }
+    Must-Throw { Add-AntiOSCvdConfig $config (Join-Path $root 'other') } 'conflicting certificate configuration'
+    if ((Get-AntiOSSha256 $config) -ne $digest) { throw 'Rejected repair altered config.' }
+    [IO.File]::AppendAllText($config, 'CVDCertsDirectory "' + $certDirectory + '"')
+    $digest = Get-AntiOSSha256 $config
+    Must-Throw { Add-AntiOSCvdConfig $config $certDirectory } 'duplicate certificate configuration'
+    if ((Get-AntiOSSha256 $config) -ne $digest) { throw 'Duplicate config was overwritten.' }
+    [IO.File]::WriteAllText($config, 'CVDCertsDirectory ""' + $certDirectory + '""')
+    Must-Throw { Add-AntiOSCvdConfig $config $certDirectory } 'malformed quoted certificate configuration'
+    [IO.File]::WriteAllText($config, $originalText)
+    $linked = Join-Path $root 'linked.conf'
+    New-Item -ItemType HardLink -Path $linked -Target $config -ErrorAction Stop | Out-Null
+    $digest = Get-AntiOSSha256 $linked
+    Add-AntiOSCvdConfig $config $certDirectory | Out-Null
+    if ((Get-AntiOSSha256 $linked) -ne $digest) { throw 'Config repair changed an external hard link.' }
+    Set-AntiOSConfigBytes $config ([Text.UTF8Encoding]::new($false).GetBytes($originalText))
+    if ((Get-AntiOSSha256 $config) -ne $digest) { throw 'Config rollback did not preserve bytes.' }
+    Write-Host 'PASS: old certificate configuration upgraded once, Unicode retained, conflicts left unchanged.'
+
     $stage = Join-Path $root 'package'
     $folder = Join-Path $stage 'test-archive'
     New-Item -ItemType Directory $folder -Force | Out-Null

@@ -137,15 +137,33 @@ if ($Uninstall) {
         Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false
     }
     if ($service) {
+        # SCM can report Stopped before the executable has finished exiting.
+        # Keep a handle to this exact process before stopping it, then wait
+        # for exit before removing files. Never terminate an unrelated PID.
+        $engineProcess = $null
+        $registered = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction Stop
+        if ($registered.ProcessId) {
+            try {
+                $engineProcess = [Diagnostics.Process]::GetProcessById([int]$registered.ProcessId)
+                $null = $engineProcess.Handle
+            } catch [ArgumentException] { $engineProcess = $null }
+        }
+        try {
         if ($service.Status -ne 'Stopped') {
             Stop-Service -Name $EngineServiceName -Force
             $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+        }
+        if ($engineProcess -and -not $engineProcess.WaitForExit(30000)) {
+            throw 'The managed engine has not finished stopping; its files were retained.'
         }
         # Do not execute an on-disk ClamAV binary with administrator rights
         # during uninstall. The verified SCM service identity is sufficient.
         & "$env:SystemRoot\System32\sc.exe" delete $EngineServiceName | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Could not delete the verified AntiOS ClamD service (sc.exe exit $LASTEXITCODE)"
+        }
+        } finally {
+            if ($engineProcess) { $engineProcess.Dispose() }
         }
     }
     Remove-OwnedRegistry
@@ -269,15 +287,9 @@ try {
 
     # ClamAV 1.5+ requires official CVD signing certificates from the
     # verified vendor archive. The compiled default points outside AntiOS.
-    $certsRoot = Join-Path $InstallRoot 'certs'
-    $certsItem = Get-Item -LiteralPath $certsRoot -Force -ErrorAction Stop
-    if (-not $certsItem.PSIsContainer -or
-        ($certsItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
-        -not (Test-Path -LiteralPath (Join-Path $certsRoot 'clamav.crt') -PathType Leaf)) {
-        throw 'The verified ClamAV package is missing its trusted signing certificates.'
-    }
+    $certsRoot = Get-AntiOSCvdCertDirectory $InstallRoot ([bool]$TrustedArchivePath)
     foreach ($config in @($ClamdConfig, $FreshConfig)) {
-        Add-Content -LiteralPath $config -Encoding Ascii -Value ('CVDCertsDirectory "{0}"' -f $certsRoot)
+        Add-AntiOSCvdConfig $config $certsRoot | Out-Null
     }
 
     foreach ($binding in Get-AntiOSEngineBindings) {
@@ -304,7 +316,7 @@ try {
     & "$env:SystemRoot\System32\sc.exe" sdset $EngineServiceName 'D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCLORC;;;BU)' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to harden the ClamD service ACL.' }
 
-    Start-Service -Name $EngineServiceName
+    Start-Service -Name $EngineServiceName -WarningAction SilentlyContinue
     (Get-Service -Name $EngineServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
 
     $action = New-ScheduledTaskAction -Execute $ManagedFresh -Argument ('--config-file="{0}" --quiet' -f $FreshConfig)
