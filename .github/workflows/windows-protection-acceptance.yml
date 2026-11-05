@@ -60,8 +60,11 @@ jobs:
               throw "Unexpected bootstrap preview."
             }
 
-            .\scripts\protection-bootstrap.ps1 -ManifestPath .\release\clamav-windows.json -Apply
+            # Use the same Python/PowerShell boundary as the desktop action.
+            $bootstrapText = antios protection-bootstrap --yes --json
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $bootstrap = $bootstrapText | ConvertFrom-Json
+            if ($bootstrap.action -ne 'installed') { throw 'Engine installation did not complete.' }
             $installed = $true
 
             $statusText = antios protection-status --json

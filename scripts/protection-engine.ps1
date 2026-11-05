@@ -316,7 +316,7 @@ try {
     & "$env:SystemRoot\System32\sc.exe" sdset $EngineServiceName 'D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCLORC;;;BU)' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to harden the ClamD service ACL.' }
 
-    Start-Service -Name $EngineServiceName
+    Start-Service -Name $EngineServiceName -WarningAction SilentlyContinue
     (Get-Service -Name $EngineServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
 
     $action = New-ScheduledTaskAction -Execute $ManagedFresh -Argument ('--config-file="{0}" --quiet' -f $FreshConfig)
