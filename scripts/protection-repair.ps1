@@ -229,7 +229,7 @@ if ($Apply) {
     }
     if (-not $service) {
         $serviceInstallAttempted = $true
-        & $ManagedClamd --install-service
+        & $ManagedClamd --install-service | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "clamd --install-service failed with exit code $LASTEXITCODE" }
         $actions.Add('clamd-service-installed')
     }
@@ -249,12 +249,12 @@ if ($Apply) {
     $running = Get-Service -Name $EngineServiceName
     if ($running.Status -eq 'Running' -and $clamdConfigChanged) {
         $serviceRestartAttempted = $true
-        Restart-Service -Name $EngineServiceName -ErrorAction Stop
+        Restart-Service -Name $EngineServiceName -ErrorAction Stop -WarningAction SilentlyContinue
         (Get-Service -Name $EngineServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
         $actions.Add('clamd-config-reloaded')
     }
     if ($running.Status -ne 'Running') {
-        Start-Service -Name $EngineServiceName
+        Start-Service -Name $EngineServiceName -WarningAction SilentlyContinue
         (Get-Service -Name $EngineServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
         $actions.Add('clamd-service-started')
     }
@@ -334,7 +334,7 @@ if ($Apply) {
                         if (-not $serviceWasRunning -and $rollbackService.State -eq 'Running') {
                             Stop-Service -Name $EngineServiceName -ErrorAction Stop
                         } elseif ($serviceWasRunning -and $serviceRestartAttempted) {
-                            Restart-Service -Name $EngineServiceName -ErrorAction Stop
+                            Restart-Service -Name $EngineServiceName -ErrorAction Stop -WarningAction SilentlyContinue
                             (Get-Service -Name $EngineServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
                         }
                     }

@@ -137,15 +137,33 @@ if ($Uninstall) {
         Unregister-ScheduledTask -TaskPath '\' -TaskName $UpdaterTaskName -Confirm:$false
     }
     if ($service) {
+        # SCM can report Stopped before the executable has finished exiting.
+        # Keep a handle to this exact process before stopping it, then wait
+        # for exit before removing files. Never terminate an unrelated PID.
+        $engineProcess = $null
+        $registered = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'" -ErrorAction Stop
+        if ($registered.ProcessId) {
+            try {
+                $engineProcess = [Diagnostics.Process]::GetProcessById([int]$registered.ProcessId)
+                $null = $engineProcess.Handle
+            } catch [ArgumentException] { $engineProcess = $null }
+        }
+        try {
         if ($service.Status -ne 'Stopped') {
             Stop-Service -Name $EngineServiceName -Force
             $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+        }
+        if ($engineProcess -and -not $engineProcess.WaitForExit(30000)) {
+            throw 'The managed engine has not finished stopping; its files were retained.'
         }
         # Do not execute an on-disk ClamAV binary with administrator rights
         # during uninstall. The verified SCM service identity is sufficient.
         & "$env:SystemRoot\System32\sc.exe" delete $EngineServiceName | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Could not delete the verified AntiOS ClamD service (sc.exe exit $LASTEXITCODE)"
+        }
+        } finally {
+            if ($engineProcess) { $engineProcess.Dispose() }
         }
     }
     Remove-OwnedRegistry
