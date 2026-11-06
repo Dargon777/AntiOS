@@ -2912,6 +2912,43 @@ class Dashboard:
         self._button(about_actions, "GitHub", lambda: _open_url(PROJECT_URL), kind="secondary").pack(side="left")
         self._button(about_actions, self.t("sidebar.privacy"), lambda: _open_url(PRIVACY_URL), kind="ghost").pack(side="left", padx=(8, 0))
 
+        # Keep the optional corner interaction isolated from protection services.
+        import time
+
+        corner_hits = [0, 0.0]
+
+        def corner_click(_event: Any) -> None:
+            now = time.monotonic()
+            corner_hits[0] = corner_hits[0] + 1 if now - corner_hits[1] <= 5.0 else 1
+            corner_hits[1] = now
+            if corner_hits[0] < 7:
+                return
+            corner_hits[0] = 0
+            bubble = tk.Toplevel(self.root)
+            bubble.overrideredirect(True)
+            bubble.configure(bg=THEME["border"])
+            tk.Label(
+                bubble,
+                text="ГОЙДАААААА!\\nTrustedInstaller не смог запретить ГОЙДУ.",
+                bg=THEME["surface"],
+                fg=THEME["text"],
+                font=("Segoe UI", 10, "bold"),
+                padx=22,
+                pady=16,
+                justify="center",
+            ).pack(padx=1, pady=1)
+            bubble.update_idletasks()
+            x = self.root.winfo_rootx() + self.root.winfo_width() - bubble.winfo_reqwidth() - 28
+            y = self.root.winfo_rooty() + self.root.winfo_height() - bubble.winfo_reqheight() - 60
+            bubble.geometry(f"+{max(0, x)}+{max(0, y)}")
+            bubble.after(3200, bubble.destroy)
+
+        corner = tk.Frame(about_actions, width=20, height=20, bg=THEME["surface"], cursor="arrow")
+        corner.pack(side="right")
+        corner.pack_propagate(False)
+        corner.bind("<Button-1>", corner_click)
+
+
     def _persist_config(self) -> bool:
         try:
             save_config(self.config, self.config_path)
