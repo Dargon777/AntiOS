@@ -47,7 +47,7 @@ def _preferred(left: ScanOutcome, right: ScanOutcome) -> ScanOutcome:
 
 
 def _looks_zip(data: bytes, name: str) -> bool:
-    return data.startswith((b"PK\\x03\\x04", b"PK\\x05\\x06", b"PK\\x07\\x08")) or name.lower().endswith(".zip")
+    return data.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")) or name.lower().endswith(".zip")
 
 
 def _entropy(sample: bytes) -> float:
@@ -61,14 +61,14 @@ def _entropy(sample: bytes) -> float:
 
 
 def _script_signal(data: bytes, name: str) -> ScanOutcome:
-    lower_name = name.replace("\\\\", "/").lower()
+    lower_name = name.replace("\\", "/").lower()
     if not any(lower_name.endswith(ext) for ext in _SCRIPT_EXTENSIONS):
         return ScanOutcome()
     sample = data[:2 * 1024 * 1024].lower()
     # These are context signals, not malware signatures.
     indicators = (
         b"-encodedcommand" in sample or b"frombase64string(" in sample,
-        b"invoke-expression" in sample or re.search(rb"\\biex\\s*\\(", sample) is not None,
+        b"invoke-expression" in sample or re.search(rb"\biex\s*\(", sample) is not None,
         b"downloadstring(" in sample or b"downloadfile(" in sample,
         b"set-mppreference" in sample or b"add-mppreference" in sample,
     )
@@ -83,7 +83,7 @@ def _pe_signal(data: bytes) -> ScanOutcome:
     if len(data) < 64:
         return ScanOutcome("review", "Truncated executable header", "AntiOS native", complete=False)
     offset = struct.unpack_from("<I", data, 0x3C)[0]
-    if offset > len(data) - 24 or data[offset:offset + 4] != b"PE\\x00\\x00":
+    if offset > len(data) - 24 or data[offset:offset + 4] != b"PE\x00\x00":
         return ScanOutcome("review", "Unrecognized executable header", "AntiOS native", complete=False)
     sections = struct.unpack_from("<H", data, offset + 6)[0]
     optional_size = struct.unpack_from("<H", data, offset + 20)[0]
@@ -143,7 +143,7 @@ class AntiOSEngine:
                         return _preferred(outcome, ScanOutcome(
                             "review", "Archive entry limit reached", self.name, complete=False))
                     budget.members -= 1
-                    normalized = item.filename.replace("\\\\", "/")
+                    normalized = item.filename.replace("\\", "/")
                     parts = PurePosixPath(normalized).parts
                     if (not normalized or normalized.startswith("/")
                             or ".." in parts or not parts or ":" in parts[0]):
