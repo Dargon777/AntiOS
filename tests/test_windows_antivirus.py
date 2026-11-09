@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from antios import windows_antivirus
+from antios import windows_defender
 
 
 def test_defender_only_runs_allowlisted_operations(monkeypatch):
@@ -17,12 +17,12 @@ def test_defender_only_runs_allowlisted_operations(monkeypatch):
     def runner(args, **kwargs):
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-    result = windows_antivirus.defender_action("quick", runner=runner)
+    result = windows_defender.defender_action("quick", runner=runner)
     assert result["verdict"] == "see-windows-security"
     assert calls[0][0][-1].endswith("Start-MpScan -ScanType QuickScan")
     assert "shell" not in calls[0][1]
     with pytest.raises(ValueError):
-        windows_antivirus.defender_action("quick; Remove-Item *", runner=runner)
+        windows_defender.defender_action("quick; Remove-Item *", runner=runner)
     assert len(calls) == 1
 
 
@@ -36,23 +36,14 @@ def test_defender_failures_are_not_reported_as_completed(monkeypatch):
     def runner(args, **kwargs):
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="service disabled")
     with pytest.raises(OSError, match="service disabled"):
-        windows_antivirus.defender_action("update", runner=runner)
+        windows_defender.defender_action("update", runner=runner)
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows AMSI native integration")
-def test_native_amsi_accepts_benign_buffer():
-    try:
-        provider = windows_antivirus.AmsiScanner()
-    except OSError as exc:
-        pytest.skip(f"No AMSI provider on this Windows runner: {exc}")
-    try:
-        try:
-            result = provider.scan(b"plain harmless native API test text", "antios-test.txt")
-        except OSError as exc:
-            pytest.skip(f"AMSI provider unavailable: {exc}")
-        assert result < 32768
-    finally:
-        provider.close()
+def test_antios_native_detection_does_not_require_windows_amsi():
+    from antios.engine import AntiOSEngine
+    result = AntiOSEngine().scan(b"inert local scan fixture", "benign.txt")
+    assert result.engine == "AntiOS Engine"
+    assert result.complete is True
 
 
 def test_defender_status_builds_layered_coexistence_profile(monkeypatch):
@@ -74,8 +65,8 @@ def test_defender_status_builds_layered_coexistence_profile(monkeypatch):
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, stdout=payload, stderr="")
 
-    status = windows_antivirus.defender_status(runner=runner)
-    profile = windows_antivirus.coexistence_profile(status)
+    status = windows_defender.defender_status(runner=runner)
+    profile = windows_defender.coexistence_profile(status)
     assert status["realtime_active"] is True
     assert status["tamper_protected"] is True
     assert profile["mode"] == "layered"
@@ -92,9 +83,9 @@ def test_defender_status_failure_is_non_destructive(monkeypatch):
     monkeypatch.setattr(windows_antivirus, "_powershell_executable", lambda: "powershell.exe")
     def runner(args, **kwargs):
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="cmdlet unavailable")
-    status = windows_antivirus.defender_status(runner=runner)
+    status = windows_defender.defender_status(runner=runner)
     assert status["available"] is False
     assert status["reason"] == "query-failed"
-    profile = windows_antivirus.coexistence_profile(status)
+    profile = windows_defender.coexistence_profile(status)
     assert profile["mode"] == "defender-unavailable"
     assert profile["defender_configuration_changed"] is False
