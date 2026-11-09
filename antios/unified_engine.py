@@ -36,7 +36,7 @@ class UnifiedScanner:
         try:
             self._clamav = (clamav_factory or ClamAVScanner)(
                 service_name=engine_service,
-                require_verified_peer=require_verified_peer,
+                require_verified_peer=(require_verified_peer or os.name == "nt"),
             )
         except (OSError, RuntimeError) as exc:
             errors.append(f"ClamAV: {exc}")
