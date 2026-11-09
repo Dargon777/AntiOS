@@ -17,6 +17,15 @@ if ($previousAlpha -lt 1) { throw "Previous alpha release required." }
 if (-not $ExpectedPreviousVersion) { $ExpectedPreviousVersion = "2.0.0a$previousAlpha" }
 if (-not $PreviousTag) { $PreviousTag = "v2.0.0-alpha.$previousAlpha" }
 
+# Previous alpha installers are not Authenticode-signed. Never execute a
+# mutable release asset as administrator without independently pinned bytes.
+$trustedPreviousInstallers = @{
+    "v2.0.0-alpha.36" = "4b8781d630cb10d5418c8ffe335e27d61183266e536f69e6f88faf4fc5cdabe4"
+}
+if (-not $trustedPreviousInstallers.ContainsKey($PreviousTag)) {
+    throw "Unpinned legacy installer $PreviousTag; review and pin the release asset SHA-256 first."
+}
+
 function Invoke-Installer([string]$Setup, [string]$InstallDir, [string]$Option) {
     $argsList = @("/S", $Option, "/D=$InstallDir")
     $process = Start-Process -FilePath $Setup -ArgumentList $argsList -Wait -PassThru
@@ -76,6 +85,10 @@ try {
     Invoke-WebRequest -Uri $downloadUrl -OutFile $previousSetup -UseBasicParsing
     if (-not (Test-Path -LiteralPath $previousSetup -PathType Leaf)) {
         throw "Previous installer was not downloaded."
+    }
+    $actualHash = (Get-FileHash -LiteralPath $previousSetup -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $trustedPreviousInstallers[$PreviousTag]) {
+        throw "Refusing to execute a legacy installer with untrusted SHA-256 ($PreviousTag)."
     }
 
     Write-Host "Installing previous release $PreviousTag without its old engine service"
