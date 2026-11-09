@@ -91,7 +91,8 @@ def _scanner_summary(result: dict) -> tuple[str, bool, bool, bool]:
         engine.get("failed_during_scan") is not True and
         engine.get("database_freshness", "current") == "current"
     )
-    complete = coverage in {"clamav-and-signatures", "provider-and-signatures"} and engine_ready
+    complete = coverage in {"clamav-and-signatures", "provider-and-signatures",
+                            "antios-unified-and-signatures"} and engine_ready
     return verdict, complete, confirmed, review
 
 
