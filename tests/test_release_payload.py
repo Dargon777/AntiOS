@@ -51,7 +51,7 @@ def test_wheel_verification_rejects_modified_native_files(tmp_path):
 
 def test_installer_source_does_not_bootstrap_third_party_engine():
     installer = (Path(__file__).resolve().parents[1] / "installer/AntiOS.nsi").read_text("utf-8")
-    section = installer.split('Section "Install"', 1)[1].split('Section "Uninstall"', 1)[0]
+    section = installer.split('Section "AntiOS" SecMain', 1)[1].split('Section "Uninstall"', 1)[0]
     assert "protection-bootstrap.ps1" not in section
     assert "Install-AmsiProvider.ps1" not in section
     assert "clamav-windows.json" not in section
