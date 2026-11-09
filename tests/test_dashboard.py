@@ -202,10 +202,7 @@ def test_native_engine_verification_never_requests_uac(monkeypatch):
     dashboard = Dashboard.__new__(Dashboard)
     monkeypatch.setattr(protection, "collect_protection_status",
                         lambda: {"capabilities": {"standalone_detection_engine": True}})
-    monkeypatch.setattr(
-        elevation, "request_protection_elevation",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("No UAC")),
-    )
+    assert not hasattr(elevation, "request_protection_elevation")
     assert dashboard._heal_managed_engine()["action"] == "verified-native-engine"
 
 
@@ -235,10 +232,7 @@ def test_missing_native_engine_requires_reinstall_not_external_bootstrap(monkeyp
     dashboard = Dashboard.__new__(Dashboard)
     monkeypatch.setattr(protection, "collect_protection_status",
                         lambda: {"capabilities": {"standalone_detection_engine": False}})
-    monkeypatch.setattr(
-        elevation, "request_protection_elevation",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("No UAC")),
-    )
+    assert not hasattr(elevation, "request_protection_elevation")
     with pytest.raises(RuntimeError, match="unavailable"):
         dashboard._heal_managed_engine(interactive=True)
 
