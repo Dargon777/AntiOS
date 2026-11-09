@@ -32,12 +32,12 @@ def test_coexistence_docs_forbid_primary_registration_and_defender_changes():
     assert "does not add Defender exclusions" in text
 
 
-def test_setup_registers_only_signed_secondary_provider():
+def test_setup_does_not_install_the_retired_amsi_provider():
     setup = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
-    assert "Install-AmsiProvider.ps1" in setup
-    assert "AntiOS-AmsiProvider.dll" in setup
-    assert "AmsiProviderExitCode" in setup
-    assert "-Uninstall -Apply" in setup
-    assert "Set-MpPreference" not in setup
-    assert "DisableRealtimeMonitoring" not in setup
-    assert "SecurityCenter2" not in setup
+    install = setup.split('Section "AntiOS" SecMain', 1)[1].split('Section "Uninstall"', 1)[0]
+    assert "Install-AmsiProvider.ps1" not in install
+    assert "AntiOS-AmsiProvider.dll" not in install
+    assert "protection-bootstrap.ps1" not in install
+    assert "Set-MpPreference" not in install
+    assert "DisableRealtimeMonitoring" not in install
+    assert "SecurityCenter2" not in install
