@@ -164,7 +164,10 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     elif defender_realtime:
         coexistence["mode"] = "defender-active-antios-incomplete"
 
+    legacy = _legacy_registration_status()
     blockers = []
+    if legacy.get("markers"):
+        blockers.append("legacy-engine-registration-requires-migration")
     if not engine_ready:
         blockers.append("antios-native-engine")
     if not guard_operational:
@@ -179,6 +182,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "engine": engine,
         "guard": guard,
         "managed_runtime": managed,
+        "legacy_registrations": legacy,
         "native": native,
         "native_coexistence": native_health,
         "defender": defender,
@@ -325,6 +329,8 @@ def render_protection_status(status: dict) -> str:
         f"edges={latest_incident.get('edge_count', 0)})",
         f"Managed runtime: {'not fully inspected (access unavailable)' if managed.get('inspection_complete') is False else 'healthy' if managed.get('healthy') else 'needs review'}",
         "External engine updater task: not required",
+        "Legacy registration markers: "
+        + status.get("legacy_registrations", {}).get("state", "uninspected"),
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
         f"Native coexistence: {native_health.get('state', 'inactive/not-validated')}",
         f"Native max wait: {native.get('driver', {}).get('max_wait_ms', 'unknown')} ms",
