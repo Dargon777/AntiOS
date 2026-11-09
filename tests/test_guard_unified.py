@@ -8,8 +8,8 @@ import pytest
 from antios import guard, scan_process
 
 
-def test_guard_policy_defaults_to_managed_clamav(tmp_path):
-    assert guard.GuardPolicy((tmp_path,)).scan_engine == "clamav"
+def test_guard_policy_defaults_to_independent_antios(tmp_path):
+    assert guard.GuardPolicy((tmp_path,)).scan_engine == "antios"
     with pytest.raises(ValueError, match="scan engine"):
         guard.GuardPolicy((tmp_path,), scan_engine="unknown").validate()
 
@@ -68,7 +68,8 @@ def test_unified_child_worker_keeps_streaming_limits(tmp_path, monkeypatch):
 def test_native_guard_engine_probe_does_not_contact_clamav(monkeypatch):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("Native guard unexpectedly used ClamAV")
-    monkeypatch.setattr(guard, "ClamAVScanner", forbidden)
+    from antios import clamav
+    monkeypatch.setattr(clamav, "ClamAVScanner", forbidden)
     metadata = guard.probe_engine(scan_engine="antios")
     assert metadata["available"] is True
     assert metadata["database_freshness"] == "local"
