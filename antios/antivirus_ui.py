@@ -20,7 +20,7 @@ from .diagnostics import classify_error, explanation, record_event, recent_event
 from .diagnostics_ui import open_diagnostics
 from .quarantine import Quarantine
 from .scan_process import run_scan_process
-from .windows_antivirus import defender_action
+from .windows_defender import defender_action
 
 
 _ACTIVE_GUARD_STATES = {
