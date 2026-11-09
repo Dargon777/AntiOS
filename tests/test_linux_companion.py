@@ -95,6 +95,8 @@ def test_linux_companion_never_claims_vendor_control(monkeypatch):
     status = companion.collect_linux_companion_status()
 
     assert status["coexistence"]["mode"] == "companion-with-kaspersky"
+    assert status["coexistence"]["antios_native_scan"] is True
+    assert "antios_clamav_scan" not in status["coexistence"]
     assert status["coexistence"]["resident_guard_recommended"] is False
     assert status["policy"]["modify_vendor_settings"] is False
     assert status["policy"]["modify_vendor_exclusions"] is False
