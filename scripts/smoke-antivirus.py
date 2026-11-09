@@ -24,10 +24,6 @@ def validate_benign(code, report, *, require_amsi=False):
                 and report["verdict"] == "no-threats-found")
     if complete and code == 0:
         return "AntiOS Engine benign scan passed"
-    if (not require_amsi and code == 3 and summary["provider_scanned"] == 0
-            and report["coverage"] == "limited" and report["verdict"] == "incomplete"
-            and (summary["errors"] > 0 or not report["engine"]["available"])):
-        return "AntiOS Engine unavailable: native validation still required"
     raise ValueError(f"Invalid or insufficient AntiOS Engine coverage (exit {code})")
 
 
