@@ -86,15 +86,14 @@ def _scanner_summary(result: dict) -> tuple[str, bool, bool, bool]:
         any(isinstance(item, dict) and item.get("kind") == "review" for item in findings)
     )
     engine = result.get("engine") if isinstance(result.get("engine"), dict) else {}
+    # A retired ClamAV/AMSI coverage string must never be promoted to a
+    # complete result by the native risk classifier.
     engine_ready = bool(
-        engine.get("available", True) is not False and
+        engine.get("available") is True and
         engine.get("failed_during_scan") is not True and
-        (engine.get("database_freshness", "current") == "current"
-         or (coverage == "antios-local-inspection"
-             and engine.get("database_freshness") == "local"))
+        engine.get("database_freshness") == "local"
     )
-    complete = coverage in {"clamav-and-signatures", "provider-and-signatures",
-                            "antios-local-inspection"} and engine_ready
+    complete = coverage == "antios-local-inspection" and engine_ready
     return verdict, complete, confirmed, review
 
 
