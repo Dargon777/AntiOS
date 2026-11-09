@@ -14,7 +14,7 @@ def report(*, available=True, errors=0, scanned=1):
                         "skipped": 0, "cancelled": False, "limit_reached": False,
                         "provider_scanned": scanned, "errors": errors},
             "engine": {"available": available}, "findings": [],
-            "coverage": "provider-and-signatures" if complete else "limited",
+            "coverage": "antios-local-inspection" if complete else "limited",
             "verdict": "no-threats-found" if complete else "incomplete"}
 
 
@@ -25,7 +25,8 @@ def test_working_provider_passes_strict_validation():
 @pytest.mark.parametrize("available,errors", [(False, 0), (True, 1)])
 def test_unavailable_provider_is_explicit_and_fails_strict_mode(available, errors):
     result = report(available=available, errors=errors, scanned=0)
-    assert "still required" in smoke.validate_benign(3, result)
+    with pytest.raises(ValueError):
+        smoke.validate_benign(3, result)
     with pytest.raises(ValueError):
         smoke.validate_benign(3, result, require_amsi=True)
 
