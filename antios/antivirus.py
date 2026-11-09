@@ -133,7 +133,9 @@ def _scan_large_file(item, provider, signatures, stopped, max_bytes):
             try:
                 if not hasattr(provider, "scan_stream"):
                     raise OSError("Engine does not support large-file streaming")
-                outcome = provider.scan_stream(chunks)
+                outcome = (provider.scan_stream_named(chunks, str(item))
+                           if hasattr(provider, "scan_stream_named")
+                           else provider.scan_stream(chunks))
                 if not complete or not isinstance(outcome, ScanOutcome):
                     raise OSError("Engine did not confirm the complete stream")
             except (OSError, RuntimeError) as exc:
@@ -310,7 +312,9 @@ def scan_files(
     else:
         result["engine"]["cache"] = "disabled"
 
-    effective_workers = workers if engine in {"clamav", "antios"} and provider is not None else 1
+    effective_workers = (workers if engine == "clamav" and provider is not None
+                         else min(workers, 2) if engine == "antios" and provider is not None
+                         else 1)
     result["limits"]["effective_workers"] = effective_workers
     result["engine"]["limited_results"] = 0
 
