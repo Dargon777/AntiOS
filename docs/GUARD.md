@@ -13,9 +13,10 @@ Resident Guard is AntiOS's optional resident protection layer.
 
 Guard is designed to fail visibly when protection cannot be established.
 
-The default managed scan mode is unchanged. An experimental unified mode is
-available for explicit evaluation with `antios guard run ROOT --engine antios`;
-it must be validated on Windows before enabling it by default.
+The managed scan mode remains the default. An experimental independently
+implemented AntiOS engine can be selected with `antios guard run ROOT --engine antios`.
+It does not require ClamAV or AMSI, and must pass Windows acceptance tests
+before becoming the default.
 
 ## Privacy and coexistence
 
