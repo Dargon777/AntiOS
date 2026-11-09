@@ -63,7 +63,7 @@ class GuardPolicy:
     max_files: int = 50000
     max_queue: int = 256
     engine_service: str | None = None
-    scan_engine: str = "clamav"
+    scan_engine: str = "antios"
 
     def validate(self):
         if not 1 <= len(self.roots) <= 16:
@@ -131,7 +131,7 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
     return files, issues, limited
 
 
-def probe_engine(service_name=None, *, scan_engine='clamav'):
+def probe_engine(service_name=None, *, scan_engine='antios'):
     if scan_engine == 'antios':
         from .antivirus import load_signatures
         from .engine import AntiOSEngine
@@ -705,7 +705,7 @@ def load_policy(path):
     if engine_service is not None:
         from .windows_clamd_peer import validate_service_name
         validate_service_name(engine_service)
-    scan_engine = data.get('scan_engine', 'clamav')
+    scan_engine = data.get('scan_engine', 'antios')
     if not isinstance(scan_engine, str) or scan_engine not in {'clamav', 'antios'}:
         raise ValueError('Unknown Guard scan engine')
     return GuardPolicy(tuple(Path(p) for p in roots), auto_quarantine=automatic,
@@ -751,7 +751,7 @@ def main(argv=None):
     run.add_argument('--auto-quarantine', action='store_true', help='Explicitly permit automatic encrypted isolation of confirmed detections.')
     run.add_argument('--engine-service', help='Windows SCM service name owning the trusted ClamD process.')
     run.add_argument('--engine', choices=('clamav', 'antios'),
-                     help='Use experimental unified scanning (default: clamav).')
+                     help='Native AntiOS detection (default); legacy ClamAV is opt-in only.')
     run.add_argument('--state-dir', type=Path)
     for name in ('status', 'stop', 'history'):
         commands.add_parser(name).add_argument('--state-dir', type=Path)
@@ -769,7 +769,7 @@ def main(argv=None):
         else:
             policy = GuardPolicy(tuple(args.roots), auto_quarantine=args.auto_quarantine,
                                  engine_service=args.engine_service,
-                                 scan_engine=args.engine or 'clamav')
+                                 scan_engine=args.engine or 'antios')
         if policy.auto_quarantine and os.name != 'nt':
             raise ValueError('Automatic encrypted quarantine requires Windows DPAPI')
         print('AntiOS Guard: post-write detection for selected directories; pre-execution blocking is unavailable.', flush=True)
