@@ -103,3 +103,17 @@ def test_current_uninstaller_never_executes_retired_engine_scripts():
     assert "ANTI0S" not in uninstall
     assert '!insertmacro ANTIOS_UNINSTALL_CHECK_PATHS' in uninstall
     assert '!insertmacro ANTIOS_UNINSTALL_OWNED_PAYLOAD' in uninstall
+
+def test_upgrade_smoke_pins_old_unsigned_installer_and_exercises_real_migration():
+    script = Path("scripts/smoke-upgrade.ps1").read_text(encoding="utf-8")
+    assert '"v2.0.0-alpha.36" = "4b8781d630cb10d5418c8ffe335e27d61183266e536f69e6f88faf4fc5cdabe4"' in script
+    assert "Unpinned legacy installer" in script
+    download = script.index("Invoke-WebRequest -Uri $downloadUrl")
+    digest = script.index("(Get-FileHash -LiteralPath $previousSetup -Algorithm SHA256)")
+    execution = script.index('Invoke-Installer $previousSetup $installDir "/NOENGINE=1"')
+    assert download < digest < execution
+    assert 'Invoke-Installer $currentSetup $installDir "/NOGUARD=1"' in script
+    assert "expected 30" in script
+    assert "Assert-NoRollbackDirectories" in script
+    assert "must-preserve" in script
+    assert "Old /NOENGINE installer switch was not rejected" in script
