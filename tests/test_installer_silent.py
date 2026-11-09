@@ -25,3 +25,12 @@ def test_fresh_install_autostart_does_not_override_existing_install_preference()
     source = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
     assert 'ReadRegStr $ExistingVersion HKLM "${INSTALL_KEY}" "Version"' in source
     assert '${If} $ExistingVersion == ""' in source
+
+def test_installer_does_not_silently_reinterpret_legacy_noengine_switch():
+    source = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
+    assert '${GetOptions} "$R0" "/NOENGINE=" $R2' in source
+    assert "SetErrorLevel 31" in source
+    assert '${GetOptions} "$R0" "/NOGUARD=" $R1' in source
+    assert '${If} $SkipGuard != "1"' in source
+    assert "ProtectionBootstrapSkipped" not in source
+    assert "ResidentGuardSetupSkipped" in source
