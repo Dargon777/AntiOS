@@ -72,7 +72,7 @@ class GuardPolicy:
             raise ValueError('Invalid guard time limits')
         if not 1 <= self.max_files <= 100000 or not 1 <= self.max_queue <= 4096:
             raise ValueError('Invalid guard capacity limits')
-        if self.scan_engine not in {"clamav", "antios"}:
+        if not isinstance(self.scan_engine, str) or self.scan_engine not in {"clamav", "antios"}:
             raise ValueError("Unknown Guard scan engine")
         if self.engine_service is not None:
             from .windows_clamd_peer import validate_service_name
@@ -698,7 +698,7 @@ def load_policy(path):
         from .windows_clamd_peer import validate_service_name
         validate_service_name(engine_service)
     scan_engine = data.get('scan_engine', 'clamav')
-    if scan_engine not in {'clamav', 'antios'}:
+    if not isinstance(scan_engine, str) or scan_engine not in {'clamav', 'antios'}:
         raise ValueError('Unknown Guard scan engine')
     return GuardPolicy(tuple(Path(p) for p in roots), auto_quarantine=automatic,
                        engine_service=engine_service, scan_engine=scan_engine)
