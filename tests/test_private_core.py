@@ -82,82 +82,33 @@ def test_private_core_rejects_mismatched_response(monkeypatch, tmp_path):
         private_core.invoke_private_core("core.ping")
 
 
-def test_protection_prefers_private_core(monkeypatch):
-    private_status = {
-        "schema": 1,
-        "kind": "antios-protection-status",
-        "capabilities": {
-            "standalone_detection_engine": True,
-            "pre_execution_blocking": True,
-        },
-        "production_primary_antivirus": False,
-        "remaining_gates": [],
-    }
-
-    def fake_invoke(operation, payload, *, timeout_seconds):
-        assert operation == "protection.status"
-        assert payload == {"engine_service": "managed"}
-        assert timeout_seconds == 10
-        return private_status
-
-    class MustNotRunScanner:
-        def __init__(self, **kwargs):
-            raise AssertionError("open-core scanner must not run when private core answered")
-
-    monkeypatch.setattr(protection, "invoke_private_core", fake_invoke)
-    monkeypatch.setattr(protection, "ClamAVScanner", MustNotRunScanner)
-
-    status = protection.collect_protection_status("managed")
-    assert status["private_core"] == {
-        "active": True,
-        "interface": private_core.INTERFACE_VERSION,
-    }
-    assert status["capabilities"]["pre_execution_blocking"] is True
+def test_protection_ignores_legacy_private_core_even_when_it_claims_enforcement(monkeypatch):
+    """No unverified sidecar may override the bundled engine's capabilities."""
+    from antios import protection
+    legacy = {"schema": 1, "kind": "antios-protection-status",
+              "capabilities": {"pre_execution_blocking": True}}
+    monkeypatch.setattr(private_core, "invoke_private_core",
+                        lambda *_args, **_kwargs: legacy)
+    monkeypatch.setattr(protection, "read_guard_state",
+                        lambda: {"state": "not-running", "running": False})
+    monkeypatch.setattr(protection, "defender_status",
+                        lambda: {"available": False})
+    result = protection.collect_protection_status("managed")
+    assert result["engine"]["version"].startswith("AntiOS Engine/")
+    assert result["capabilities"]["pre_execution_blocking"] is False
+    assert result["production_primary_antivirus"] is False
 
 
-def test_invalid_private_status_falls_back_to_open_core(monkeypatch):
-    monkeypatch.setattr(
-        protection,
-        "invoke_private_core",
-        lambda *args, **kwargs: {"schema": 1, "kind": "wrong", "capabilities": {}},
-    )
-
-    class ReadyScanner:
-        metadata = {
-            "version": "test",
-            "database_freshness": "current",
-            "peer_verification_required": False,
-        }
-
-        def __init__(self, **kwargs):
-            pass
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(protection, "ClamAVScanner", ReadyScanner)
-    monkeypatch.setattr(
-        protection,
-        "read_guard_state",
-        lambda: {"running": False, "state": "not-running"},
-    )
-    monkeypatch.setattr(protection, "_managed_runtime_status", lambda: {"available": False})
-    monkeypatch.setattr(protection, "_native_status", lambda: {"available": False})
-    monkeypatch.setattr(protection, "defender_status", lambda: {"available": False})
-    monkeypatch.setattr(
-        protection,
-        "coexistence_profile",
-        lambda defender: {
-            "mode": "independent-companion",
-            "primary_antivirus_registration": False,
-        },
-    )
-    monkeypatch.setattr(
-        protection,
-        "amsi_provider_status",
-        lambda: {"available": False, "registered": False, "module_exists": False},
-    )
-
-    status = protection.collect_protection_status()
-    assert status["kind"] == "antios-protection-status"
-    assert "private_core" not in status
+def test_local_engine_status_is_fail_closed_when_its_signatures_fail(monkeypatch):
+    from antios import protection
+    def fail():
+        raise ValueError("corrupt native signature database")
+    monkeypatch.setattr(protection, "load_signatures", fail)
+    monkeypatch.setattr(protection, "read_guard_state",
+                        lambda: {"state": "not-running", "running": False})
+    monkeypatch.setattr(protection, "defender_status",
+                        lambda: {"available": False})
+    result = protection.collect_protection_status()
+    assert result["engine"]["available"] is False
+    assert result["capabilities"]["standalone_detection_engine"] is False
+    assert result["capabilities"]["pre_execution_blocking"] is False
