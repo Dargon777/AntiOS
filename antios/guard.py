@@ -694,8 +694,10 @@ def load_policy(path):
     if not isinstance(automatic, bool):
         raise ValueError('auto_quarantine must be boolean')
     engine_service = data.get('engine_service')
-    if engine_service is not None and not isinstance(engine_service, str):
-        raise ValueError('engine_service must be a service name string')
+    if engine_service is not None and (
+            not isinstance(engine_service, str)
+            or re.fullmatch(r'[A-Za-z0-9_-]{1,80}', engine_service) is None):
+        raise ValueError('Invalid legacy engine_service field')
     # Ignore historical service bindings; all new scans are local.
     scan_engine = data.get('scan_engine', 'antios')
     if scan_engine == 'clamav':
