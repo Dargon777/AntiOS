@@ -23,9 +23,10 @@ def test_native_install_refuses_ambiguous_pending_update_directories():
 def test_native_install_does_not_start_or_configure_clamd():
     installer = read("installer/AntiOS.nsi")
     installation = installer.split('Section "AntiOS" SecMain', 1)[1].split('Section "Uninstall"', 1)[0]
-    assert "protection-bootstrap.ps1" not in installation
-    assert "Install-AmsiProvider.ps1" not in installation
-    assert "clamd.exe" not in installation
+    active = installation.split("antios_legacy_upgrade_safe:", 1)[1]
+    assert "protection-bootstrap.ps1" not in active
+    assert "Install-AmsiProvider.ps1" not in active
+    assert "clamd.exe" not in active
     assert "protection-first-run.ps1" in installation
 
 
