@@ -5,7 +5,6 @@
     "scripts/guard-state-access.cs",
     "scripts/dashboard-startup.ps1",
     "scripts/guard-trust.ps1",
-    "scripts/protection-first-run.ps1",
-
+    "scripts/protection-first-run.ps1"
   ]
 }
