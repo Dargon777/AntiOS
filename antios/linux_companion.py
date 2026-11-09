@@ -232,7 +232,7 @@ def collect_linux_companion_status() -> dict[str, Any]:
             "vendor_products_detected": installed,
             "vendor_realtime_confirmed": realtime,
             "antios_role": "supplemental-on-demand",
-            "antios_clamav_scan": True,
+            "antios_native_scan": True,
             "storage_intelligence": True,
             "resident_guard_recommended": not bool(realtime),
             "resident_guard_reason": (
