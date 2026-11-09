@@ -73,7 +73,7 @@ def _script_signal(data: bytes, name: str) -> ScanOutcome:
         b"set-mppreference" in sample or b"add-mppreference" in sample,
     )
     if sum(indicators) >= 2:
-        return ScanOutcome("review", "Script requires manual review", "AntiOS native")
+        return ScanOutcome("review", "Script requires manual review", "AntiOS Engine")
     return ScanOutcome()
 
 
@@ -101,21 +101,21 @@ def _pe_signal(data: bytes) -> ScanOutcome:
         if raw_offset > len(data) or raw_size > len(data) - raw_offset:
             continue
         if _entropy(data[raw_offset:raw_offset + min(raw_size, 32768)]) > 7.5:
-            return ScanOutcome("review", "Unusual executable section", "AntiOS native")
+            return ScanOutcome("review", "Unusual executable section", "AntiOS Engine")
     return ScanOutcome()
 
 
 class AntiOSEngine:
     """Locally owned detection engine with strict, explainable verdict classes."""
 
-    name = "AntiOS native"
+    name = "AntiOS Engine"
 
     def __init__(self, *, signatures: dict[str, str] | None = None) -> None:
         self._signatures = dict(signatures or {})
         if len(self._signatures) > 100_001:
             raise ValueError("Too many local signatures")
         self.metadata = {
-            "version": "AntiOS native/1",
+            "version": "AntiOS Engine/0.1",
             "database_freshness": "local",
             "signature_scope": "local-sha256",
             "components": {"hashes": True, "scripts": True, "pe": True, "zip": True},
