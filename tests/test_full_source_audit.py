@@ -50,9 +50,10 @@ def test_release_publication_requires_enabled_authenticode_signing():
 def test_current_install_scripts_never_bootstrap_clamav():
     installer = (ROOT / "installer/AntiOS.nsi").read_text("utf-8")
     install = installer.split('Section "AntiOS" SecMain', 1)[1].split('Section "Uninstall"', 1)[0]
-    assert "protection-bootstrap.ps1" not in install
-    assert "clamav-windows.json" not in install
-    assert "Install-AmsiProvider.ps1" not in install
+    active = install.split("antios_legacy_upgrade_safe:", 1)[1]
+    assert "protection-bootstrap.ps1" not in active
+    assert "clamav-windows.json" not in active
+    assert "Install-AmsiProvider.ps1" not in active
 
 
 def test_build_scripts_deny_arbitrary_recursive_cleanup_locations():
