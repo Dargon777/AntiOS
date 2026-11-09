@@ -384,7 +384,7 @@ class Dashboard:
         self._storage_action_busy = False
         self.antivirus_path = default_scan_path()
         self.antivirus_signatures: Path | None = None
-        self.antivirus_engine = "clamav"
+        self.antivirus_engine = "antios"
         self.antivirus_result: dict[str, Any] | None = None
         self.antivirus_items: list[dict] = []
         self.antivirus_queue: queue.Queue = queue.Queue()
@@ -487,7 +487,6 @@ class Dashboard:
 
     def _heal_managed_engine(self, *, interactive: bool = False) -> dict:
         from .protection import collect_protection_status
-        from .protection_repair import run_protection_bootstrap, run_protection_repair
 
         status = collect_protection_status()
         caps = status.get("capabilities", {})
