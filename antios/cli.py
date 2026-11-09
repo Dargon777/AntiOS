@@ -221,7 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     av = sub.add_parser("virus-scan", help="Read-only, on-demand antivirus scan of a file or folder.")
     av.add_argument("path")
     av.add_argument("--engine", choices=("clamav", "amsi", "antios"), default="clamav",
-                    help="Managed ClamAV (default), Windows AMSI, or experimental AntiOS unified scanning.")
+                    help="Managed ClamAV (default), Windows AMSI, or experimental independent AntiOS engine.")
     av.add_argument("--signatures", help="Optional local schema-1 SHA-256 signature database.")
     av.add_argument("--max-mb", type=int, help="Optional per-file limit in MiB. ClamAV streams large files by default.")
     av.add_argument("--max-files", type=int, help="Optional maximum number of files. Default: scan the entire selection.")
