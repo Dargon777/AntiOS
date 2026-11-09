@@ -1,4 +1,4 @@
-"""Isolate read-only scans so a blocked filesystem/AMSI call can be terminated.
+"""Isolate read-only native AntiOS scans so blocked filesystem calls can be terminated.
 
 The child appends JSON events to a private temporary directory. This works with
 windowed frozen executables (which have no stdout), and killing a writer cannot
@@ -51,9 +51,9 @@ def worker_main(request_path: str, events_path: str) -> int:
 
         try:
             scan_files(request["path"], signature_path=request.get("signatures"),
-                       engine=request.get("engine", "clamav"),
+                       engine=request.get("engine", "antios"),
                        max_files=None,
-                       max_bytes=None if request.get("engine", "clamav") in {"clamav", "antios"} else DEFAULT_MAX_BYTES,
+                       max_bytes=None if request.get("engine", "antios") in {"clamav", "antios"} else DEFAULT_MAX_BYTES,
                        engine_service=request.get("engine_service"),
                        require_verified_peer=bool(request.get("require_verified_peer", False)),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint,
@@ -85,7 +85,7 @@ def _terminate(process: subprocess.Popen) -> None:
 
 
 def run_scan_process(path: Path, *, signature_path: Path | None = None,
-                     engine: str = "clamav",
+                     engine: str = "antios",
                      engine_service: str | None = None,
                      require_verified_peer: bool = False,
                      workers: int = 4,
