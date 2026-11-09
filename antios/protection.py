@@ -7,7 +7,7 @@ import sqlite3
 from .engine import AntiOSEngine
 from .antivirus import load_signatures
 from .guard_state import read_guard_state
-from .windows_antivirus import coexistence_profile, defender_status
+from .windows_defender import coexistence_profile, defender_status
 
 
 def _managed_runtime_status() -> dict:
