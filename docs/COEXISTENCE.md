@@ -27,3 +27,21 @@ real-time protection product. Upgrading from an older managed ClamAV/AMSI build
 does not authorize deleting any old service or provider without verifying its
 ownership and installer history. The coexistence goal is to add an independent
 layer without weakening existing protection.
+
+## Upgrading legacy AntiOS installations
+
+The native-only setup refuses an in-place upgrade (exit code **30**) when
+older AntiOS engine scripts, binaries, or a recorded managed ClamAV service
+binding remain in the installation. The preflight runs **before** extracting,
+replacing files or stopping Guard.
+
+To migrate, preserve any needed user configuration and quarantine data, use the
+**original installed version's own uninstaller**, and confirm that its managed
+services and AMSI registration have been retired. Then perform a clean AntiOS
+Engine installation. If leftovers remain, stop and investigate their ownership;
+never delete a service, driver, registry entry or another antivirus product
+merely because it has a familiar name. Current AntiOS neither runs retired
+engine uninstall scripts nor claims a legacy service provides protection.
+
+This cautious upgrade gate does not yet substitute for signed installer upgrade
+and rollback tests in a disposable Windows virtual machine.
