@@ -73,9 +73,8 @@ class GuardPolicy:
             raise ValueError('Invalid guard capacity limits')
         if self.scan_engine != "antios":
             raise ValueError("Unknown Guard scan engine")
-        if self.engine_service is not None:
-            from .windows_clamd_peer import validate_service_name
-            validate_service_name(self.engine_service)
+        # Older startup policies may retain engine_service. It is ignored by
+        # the native AntiOS Engine and never used for a network connection.
         roots = tuple(dict.fromkeys(checked_path(root) for root in self.roots))
         if any(not root.is_dir() for root in roots):
             raise ValueError('Guard roots must be directories')
@@ -135,7 +134,7 @@ def probe_engine(service_name=None, *, scan_engine="antios"):
     from .antivirus import load_signatures
     from .engine import AntiOSEngine
 
-    if scan_engine not in {"antios", "clamav"}:
+    if scan_engine != "antios":
         raise ValueError("Unknown Guard scan engine")
     engine = AntiOSEngine(signatures=load_signatures())
     try:
@@ -166,7 +165,7 @@ class Guard:
                 path, **kwargs)
         else:
             self.scanner = scanner
-        self.probe = (lambda: probe_engine(policy.engine_service, scan_engine=policy.scan_engine)) if probe is None else probe
+        self.probe = (lambda: probe_engine(scan_engine=policy.scan_engine)) if probe is None else probe
         self.quarantine_factory = quarantine_factory
         self.watcher_factory = watcher_factory or (DirectoryNotifications if os.name == 'nt' else PollNotifications)
         self.status_observer = status_observer
@@ -697,9 +696,7 @@ def load_policy(path):
     engine_service = data.get('engine_service')
     if engine_service is not None and not isinstance(engine_service, str):
         raise ValueError('engine_service must be a service name string')
-    if engine_service is not None:
-        from .windows_clamd_peer import validate_service_name
-        validate_service_name(engine_service)
+    # Ignore historical service bindings; all new scans are local.
     scan_engine = data.get('scan_engine', 'antios')
     if scan_engine == 'clamav':
         # A policy from an older installation is migrated to our engine.
@@ -747,7 +744,6 @@ def main(argv=None):
     run.add_argument('roots', nargs='*', type=Path)
     run.add_argument('--policy', type=Path)
     run.add_argument('--auto-quarantine', action='store_true', help='Explicitly permit automatic encrypted isolation of confirmed detections.')
-    run.add_argument('--engine-service', help='Windows SCM service name owning the trusted ClamD process.')
     run.add_argument('--engine', choices=('antios',),
                      help='Native AntiOS Engine (default).')
     run.add_argument('--state-dir', type=Path)
@@ -761,12 +757,11 @@ def main(argv=None):
             print(json.dumps(status, indent=2, ensure_ascii=False))
             return 0
         if args.policy:
-            if args.roots or args.auto_quarantine or args.engine_service or args.engine is not None:
+            if args.roots or args.auto_quarantine or args.engine is not None:
                 raise ValueError('Use a policy file or inline roots/options, not both')
             policy = load_policy(args.policy)
         else:
             policy = GuardPolicy(tuple(args.roots), auto_quarantine=args.auto_quarantine,
-                                 engine_service=args.engine_service,
                                  scan_engine=args.engine or 'antios')
         if policy.auto_quarantine and os.name != 'nt':
             raise ValueError('Automatic encrypted quarantine requires Windows DPAPI')
