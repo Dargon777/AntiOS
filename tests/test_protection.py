@@ -31,13 +31,13 @@ def test_bundled_engine_reports_local_database_and_no_external_updater():
 
 
 def test_protection_status_uses_our_engine_without_clamav_amsi_or_private_core(monkeypatch):
-    from antios import clamav, windows_antivirus, private_core
+    from antios import clamav, windows_defender, private_core
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("External engine must not be invoked")
 
     monkeypatch.setattr(clamav, "ClamAVScanner", forbidden)
-    monkeypatch.setattr(windows_antivirus, "AmsiScanner", forbidden)
+    monkeypatch.setattr(windows_defender, "defender_action", forbidden)
     monkeypatch.setattr(private_core, "invoke_private_core", forbidden)
     monkeypatch.setattr(protection, "read_guard_state", lambda: _guard())
     monkeypatch.setattr(protection, "defender_status", _active_defender)
