@@ -95,7 +95,7 @@ def load_signatures(path: str | Path | None = None) -> dict[str, str]:
 
 
 def _scan_large_file(item, provider, signatures, stopped, max_bytes):
-    """Hash one stable snapshot and send the same bytes to ClamD in one request."""
+    """Hash one stable snapshot while sending identical bytes to AntiOS Engine."""
     target = checked_path(item)
     before = target.lstat()
     if is_link(before) or not stat.S_ISREG(before.st_mode):
