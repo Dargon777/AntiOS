@@ -212,32 +212,6 @@ for _locale, _texts in {
                              note=_texts[2], signatures_builtin=_texts[3])
 
 for _locale, _texts in {
-    "en": ("Engine", "ClamAV requires a local daemon; see docs/CLAMAV.md.",
-           "Read-only on-demand scanning with the selected engine and local hashes. 32 MiB per file. Archive analysis depends on the engine. Keep real-time protection enabled.",
-           "Local signatures: EICAR test hash; additional detection uses the selected engine."),
-    "ru": ("Движок", "Для ClamAV нужен локальный сервис; см. docs/CLAMAV.md.",
-           "Проверка выбранным движком и локальными хешами без изменения файлов. Лимит: 32 МиБ на файл. Анализ архивов зависит от движка. Сохраняйте постоянную защиту включённой.",
-           "Локальные сигнатуры: хеш теста EICAR; остальное проверяет выбранный движок."),
-    "es": ("Motor", "ClamAV necesita un servicio local; ver docs/CLAMAV.md.",
-           "Análisis de solo lectura con el motor elegido y hashes locales. 32 MiB por archivo. El análisis de archivos comprimidos depende del motor. Mantén activa la protección en tiempo real.",
-           "Firmas locales: hash de prueba EICAR; el motor elegido realiza el resto del análisis."),
-    "zh-CN": ("引擎", "ClamAV 需要本地服务；参见 docs/CLAMAV.md。",
-              "使用所选引擎和本地哈希进行只读扫描。每个文件限 32 MiB。压缩包分析取决于引擎。请保持实时防护开启。",
-              "本地签名：EICAR 测试哈希；其他检测由所选引擎执行。"),
-    "fi": ("Moottori", "ClamAV tarvitsee paikallisen palvelun; katso docs/CLAMAV.md.",
-           "Vain luku -tarkistus valitulla moottorilla ja paikallisilla tiivisteillä. 32 MiB tiedostoa kohti. Arkistojen analyysi riippuu moottorista. Pidä reaaliaikainen suojaus käytössä.",
-           "Paikalliset tunnisteet: EICAR-testitiiviste; muu tunnistus valitulla moottorilla."),
-    "pl": ("Silnik", "ClamAV wymaga lokalnej usługi; zobacz docs/CLAMAV.md.",
-           "Skanowanie tylko do odczytu wybranym silnikiem i lokalnymi skrótami. 32 MiB na plik. Analiza archiwów zależy od silnika. Zachowaj ochronę w czasie rzeczywistym.",
-           "Lokalne sygnatury: skrót testu EICAR; pozostałe wykrywanie przez wybrany silnik."),
-    "mn": ("Хөдөлгүүр", "ClamAV-д дотоод үйлчилгээ хэрэгтэй; docs/CLAMAV.md-г үзнэ үү.",
-           "Сонгосон хөдөлгүүр болон дотоод хэшээр файлыг өөрчлөхгүй шалгана. Файл бүр 32 МиБ хязгаартай. Архивын шинжилгээ хөдөлгүүрээс хамаарна. Байнгын хамгаалалтыг асаалттай байлгана уу.",
-           "Дотоод гарын үсэг: EICAR туршилтын хэш; бусад илрүүлэлтийг сонгосон хөдөлгүүр гүйцэтгэнэ."),
-}.items():
-    MESSAGES[_locale].update(engine=_texts[0], engine_hint=_texts[1],
-                             note=_texts[2], signatures_builtin=_texts[3])
-
-for _locale, _texts in {
     "en": ("Database date: current", "Database is older than 7 days; run FreshClam", "Database date is unknown", "Database date is in the future; check the clock"),
     "ru": ("Дата базы актуальна", "База старше 7 дней; запустите FreshClam", "Дата базы неизвестна", "Дата базы в будущем; проверьте часы"),
     "es": ("Fecha de la base actual", "Base de más de 7 días; ejecuta FreshClam", "Fecha de la base desconocida", "Fecha futura; comprueba el reloj"),
