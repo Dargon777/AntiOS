@@ -82,6 +82,8 @@ def test_nsis_blocks_legacy_antivirus_upgrade_before_staging_or_guard_shutdown()
     assert all('IfFileExists "$INSTDIR\\' + name in preflight for name in markers)
     assert 'ReadRegStr $0 HKLM "${INSTALL_KEY}" "EngineServiceName"' in preflight
     assert 'ReadRegStr $0 HKLM "SOFTWARE\\AntiOS" "EngineServiceName"' in preflight
+    assert "SOFTWARE\\Microsoft\\AMSI\\Providers\\{8E8A9D7D-814F-4A83-A127-8C4894E41121}" in preflight
+    assert "SOFTWARE\\Classes\\CLSID\\{8E8A9D7D-814F-4A83-A127-8C4894E41121}" in preflight
     assert "antios_legacy_upgrade_blocked:" in preflight
     assert "SetErrorLevel 30" in preflight
     assert "Abort" in preflight
