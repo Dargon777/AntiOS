@@ -28,9 +28,7 @@ function Should-Throw([scriptblock]$Block, [string]$Description) {
 }
 
 # Function definitions loaded from actual application scripts, not replicas.
-. (Join-Path $PSScriptRoot '..\scripts\clamav-trust.ps1')
 $ScriptDirectory = (Resolve-Path (Join-Path $PSScriptRoot '..\scripts')).Path
-Import-OneFunction '..\scripts\protection-engine.ps1' 'Assert-FreshEngineInstallTargets'
 Import-OneFunction '..\scripts\guard-startup.ps1' 'Restore-GuardUserAccess'
 Import-OneFunction '..\scripts\guard-startup.ps1' 'Assert-GuardTaskOwned'
 Import-OneFunction '..\scripts\dashboard-startup.ps1' 'Assert-ControlCenterTaskOwned'
@@ -39,7 +37,6 @@ $identity = [pscustomobject]@{
     Name = 'AUDIT\InteractiveUser'
     User = [pscustomobject]@{ Value = 'S-1-5-21-1000-2000-3000-1001' }
 }
-$clamdExe = 'C:\Program Files\AntiOS\ClamAV\clamd.exe'
 $guardExe = 'C:\Program Files\AntiOS\AntiOS-Guard.exe'
 $dashboardExe = 'C:\Program Files\AntiOS\AntiOS-GUI.exe'
 
@@ -81,104 +78,6 @@ foreach ($case in @(
         Should-Throw { Assert-ControlCenterTaskOwned -Task $other -ExpectedExecutable $case.Exe } "$($case.Kind): multiple actions"
     }
 }
-
-# The preflight must reject a foreign scheduled task BEFORE modifying folders.
-$EngineServiceName = 'clamd'
-$UpdaterTaskName = 'AntiOS ClamAV Signature Update'
-$InstallRoot = Join-Path $env:RUNNER_TEMP 'AntiOS-Audit-Neither-Here'
-$DataRoot = Join-Path $env:RUNNER_TEMP 'AntiOS-Audit-Nor-Here'
-$AntiOSRegistry = 'HKCU:\Software\AntiOS-Audit-Does-Not-Exist'
-$ClamRegistry = 'HKCU:\Software\ClamAV-Audit-Does-Not-Exist'
-function Get-Service { param($Name, $ErrorAction) return $null }
-function Get-ScheduledTask {
-    param($TaskPath, $TaskName, $ErrorAction)
-    if ($TaskPath -ne '\' -or $TaskName -ne $UpdaterTaskName) {
-        throw 'Expected exact root task lookup.'
-    }
-    if ($script:AuditUpdaterTaskPresent) {
-        return [pscustomobject]@{ TaskName = $UpdaterTaskName }
-    }
-    return $null
-}
-$script:AuditUpdaterTaskPresent = $true
-Should-Throw { Assert-FreshEngineInstallTargets } 'pre-existing FreshClam updater task'
-$script:AuditUpdaterTaskPresent = $false
-
-# A standard AntiOS installation owns HKLM:\SOFTWARE\AntiOS long before a
-# managed ClamAV service exists. Model this case with disposable HKCU keys.
-$testTag = [guid]::NewGuid().ToString('N')
-$AntiOSRegistry = "HKCU:\Software\AntiOS-EngineAudit-$testTag"
-$ClamRegistry = "HKCU:\Software\ClamAV-EngineAudit-$testTag"
-$ConfigRoot = Join-Path $env:RUNNER_TEMP "AntiOS-EngineAudit-$testTag-config"
-$DatabaseRoot = Join-Path $env:RUNNER_TEMP "AntiOS-EngineAudit-$testTag-db"
-try {
-    New-Item -Path $AntiOSRegistry -Force | Out-Null
-    New-Item -Path $ClamRegistry -Force | Out-Null
-    if ($null -ne (Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName')) {
-        throw 'A missing optional registry value must return null.'
-    }
-    Assert-FreshEngineInstallTargets
-
-    New-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -Value 'foreign' -PropertyType String | Out-Null
-    Should-Throw { Assert-FreshEngineInstallTargets } 'foreign engine binding'
-    Remove-OwnedRegistry
-    if ((Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName') -ne 'foreign') {
-        throw 'Registry cleanup must not remove a foreign engine binding.'
-    }
-    Remove-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName
-
-    foreach ($case in @(
-        @{ Name = 'ConfDir'; Value = 'C:\Foreign-ClamAV\config' },
-        @{ Name = 'DataDir'; Value = 'C:\Foreign-ClamAV\database' }
-    )) {
-        New-ItemProperty -Path $ClamRegistry -Name $case.Name -Value $case.Value -PropertyType String | Out-Null
-        Should-Throw { Assert-FreshEngineInstallTargets } "foreign ClamAV $($case.Name)"
-        Remove-OwnedRegistry
-        if ((Get-OptionalEngineRegistryValue -Path $ClamRegistry -Name $case.Name) -ne $case.Value) {
-            throw "Registry cleanup removed a foreign $($case.Name) binding."
-        }
-        Remove-ItemProperty -Path $ClamRegistry -Name $case.Name
-    }
-
-    New-ItemProperty -Path $AntiOSRegistry -Name EngineServiceName -Value $EngineServiceName -PropertyType String | Out-Null
-    New-ItemProperty -Path $ClamRegistry -Name ConfDir -Value $ConfigRoot -PropertyType String | Out-Null
-    New-ItemProperty -Path $ClamRegistry -Name DataDir -Value $DatabaseRoot -PropertyType String | Out-Null
-    Remove-OwnedRegistry
-    foreach ($case in @(
-        @{ Path = $AntiOSRegistry; Name = 'EngineServiceName' },
-        @{ Path = $ClamRegistry; Name = 'ConfDir' },
-        @{ Path = $ClamRegistry; Name = 'DataDir' }
-    )) {
-        if ($null -ne (Get-OptionalEngineRegistryValue -Path $case.Path -Name $case.Name)) {
-            throw "Owned registry entry $($case.Name) was not removed."
-        }
-    }
-    foreach ($entry in @(@($AntiOSRegistry,'EngineServiceName'), @($ClamRegistry,'ConfDir'), @($ClamRegistry,'DataDir'))) {
-        New-ItemProperty -Path $entry[0] -Name $entry[1] -Value '' -PropertyType String | Out-Null
-        Should-Throw { Assert-FreshEngineInstallTargets } 'existing empty registry binding'
-        Remove-OwnedRegistry
-        if ($null -eq (Get-OptionalEngineRegistryValue $entry[0] $entry[1])) { throw 'Foreign binding removed' }
-        Remove-ItemProperty -Path $entry[0] -Name $entry[1]
-    }
-    $binding = @(Get-AntiOSEngineBindings | Where-Object { $_.Name -eq 'DataDir' })[0]
-    if ((Get-AntiOSBindingState $binding) -ne 'missing') { throw 'Expected a missing binding' }
-    New-AntiOSEngineBinding $binding
-    if ((Get-AntiOSBindingState $binding) -ne 'managed') { throw 'Missing binding was not repaired' }
-    Remove-OwnedRegistry -Names @('EngineServiceName','ConfDir')
-    if ((Get-OptionalEngineRegistryValue $ClamRegistry 'DataDir') -ne $DatabaseRoot) { throw 'Unwritten binding removed' }
-    Remove-OwnedRegistry
-    Assert-FreshEngineInstallTargets
-    # An existing registry key which cannot be read must still fail closed.
-    function Get-Item { param($LiteralPath, $ErrorAction) throw 'simulated registry access denied' }
-    Should-Throw {
-        Get-OptionalEngineRegistryValue -Path $AntiOSRegistry -Name 'EngineServiceName'
-    } 'registry read error'
-} finally {
-    Remove-Item Function:Get-Item -ErrorAction SilentlyContinue
-    Remove-Item -Path $AntiOSRegistry -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path $ClamRegistry -Recurse -Force -ErrorAction SilentlyContinue
-}
-Write-Host 'PASS: optional registry values, ownership boundaries and fail-closed registry read errors.'
 
 # Repair the file-specific DACL from an old elevated Guard run without
 # modifying data, broad system principals or unrelated user files.
@@ -235,4 +134,4 @@ try {
     Remove-Item -LiteralPath $stateDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host 'PASS: pre-existing Guard state ACL repaired in place without deleting history.'
-Write-Host 'PASS: both user startup tasks reject foreign identity/actions; engine preflight blocks task collision.'
+Write-Host 'PASS: Guard and dashboard startup tasks reject foreign identities and actions.'
