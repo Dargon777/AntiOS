@@ -27,7 +27,7 @@ from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .quarantine import Quarantine, default_quarantine_path
 from .scan_cache import default_scan_cache_path
-from .windows_antivirus import defender_action
+from .windows_defender import defender_action
 from .report import render_doctor_human, render_operations_human, render_scan_human
 from .storage_cleanup import (
     DEFAULT_DUPLICATE_MIN_BYTES,
