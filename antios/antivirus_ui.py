@@ -82,9 +82,9 @@ class AntivirusPanel:
         self.advanced_visible = False
         self.labels: list[Any] = []
         self.buttons: list[Any] = []
-        # ClamAV is the product engine. AMSI remains a CLI compatibility path.
-        self.engine_var = self.app.tk.StringVar(value="clamav")
-        self.app.antivirus_engine = "clamav"
+        # All user-facing scans use the independent AntiOS Engine.
+        self.engine_var = self.app.tk.StringVar(value="antios")
+        self.app.antivirus_engine = "antios"
         self._build()
         parent.bind("<Destroy>", self._destroy, add="+")
         parent.bind("<Configure>", self._resize, add="+")
@@ -300,7 +300,7 @@ class AntivirusPanel:
             ("⌕", "File monitoring" if self.app.language != "ru" else "Проверка файлов",
              self.t("scan_hint"), "file_component_status"),
             ("◈", "Engine & signatures" if self.app.language != "ru" else "Движок и сигнатуры",
-             "Managed ClamAV runtime" if self.app.language != "ru" else "Управляемый движок ClamAV", "engine_component_status"),
+             "AntiOS Engine · local signatures" if self.app.language != "ru" else "AntiOS Engine · локальные сигнатуры", "engine_component_status"),
         ]
         for col, (icon, title, detail, attr) in enumerate(cards):
             card = self._card(components)
@@ -622,7 +622,7 @@ class AntivirusPanel:
             self.provider_status.configure(text=self.t("managed_engine"))
         if hasattr(self, "engine_component_status") and not self.app.antivirus_result:
             self.engine_component_status.configure(
-                text="AntiOS Engine · ClamAV",
+                text="AntiOS Engine",
                 fg=self.palette["muted"],
             )
 
@@ -725,7 +725,7 @@ class AntivirusPanel:
 
     def _scan(self) -> None:
         path, signatures = self.app.antivirus_path, self.app.antivirus_signatures
-        engine = "clamav"
+        engine = "antios"
         self.app.antivirus_engine = engine
         cancelled = self.app.antivirus_cancel.is_set
         result_queue = self.app.antivirus_queue
@@ -735,7 +735,7 @@ class AntivirusPanel:
                 path,
                 signature_path=signatures,
                 engine=engine,
-                require_verified_peer=(sys.platform == "win32"),
+                require_verified_peer=False,
                 cancelled=cancelled,
                 progress=lambda data: result_queue.put(("progress", data)),
             ),
@@ -1000,8 +1000,8 @@ class AntivirusPanel:
     def _diagnose_scan_result(self, result: dict) -> None:
         """Surface engine failures returned as data, not only raised exceptions.
 
-        scan_files intentionally returns a limited-coverage result when ClamAV
-        refuses an unsigned engine. That must still create an ERROR event,
+        scan_files returns a limited-coverage result when native inspection cannot
+        complete. That must still create an ERROR event,
         otherwise the console can miss the exact failure reported in the UI.
         """
         engine = result.get("engine")
@@ -1010,14 +1010,14 @@ class AntivirusPanel:
         detail = str(engine.get("detail") or "").strip()
         if engine.get("available") is False:
             self._error({
-                "message": detail or "ClamAV engine unavailable",
-                "component": "ClamAV",
+                "message": detail or "AntiOS Engine unavailable",
+                "component": "AntiOS Engine",
                 "operation": "scan-engine-start",
             })
         elif engine.get("failed_during_scan") is True:
             self._error({
-                "message": detail or "ClamAV failed while scanning files",
-                "component": "ClamAV",
+                "message": detail or "AntiOS Engine failed while scanning files",
+                "component": "AntiOS Engine",
                 "operation": "scan-engine-runtime",
             })
 
@@ -1193,7 +1193,7 @@ class AntivirusPanel:
         failure_key = component + ":" + reason
         if reason and _diagnostic_changed(self, "probe-error", failure_key, repeat_after=300):
             # A probe failure may originate from the Guard status database, not
-            # ClamAV. Preserve component attribution and bound duplicate noise.
+            # the engine. Preserve component attribution and bound duplicate noise.
             self._error({"message": reason, "component": component,
                          "operation": "status-probe"})
         # An incomplete aggregate response says nothing about engine health.
@@ -1201,8 +1201,8 @@ class AntivirusPanel:
         if hasattr(self, "app") and isinstance(ready, bool):
             if _diagnostic_changed(self, "engine-ready", ready):
                 record_event(
-                    "ClamAV", "INFO" if ready else "WARNING",
-                    "Managed ClamAV ready" if ready else "Managed ClamAV not ready",
+                    "AntiOS Engine", "INFO" if ready else "WARNING",
+                    "AntiOS Engine ready" if ready else "AntiOS Engine not ready",
                     code="OPERATION_COMPLETED" if ready else "ENGINE_NOT_READY",
                     context={"state": "ready" if ready else "unavailable"},
                 )
@@ -1361,9 +1361,9 @@ class AntivirusPanel:
                     self.last_protection_probe = 0
                     self.status.configure(
                         text=(
-                            "Обслуживание завершено, ClamAV проверен. Обновляю состояние защиты."
+                            "Проверка AntiOS Engine завершена. Обновляю состояние защиты."
                             if self.app.language == "ru"
-                            else "Maintenance completed and ClamAV verified. Refreshing protection status."
+                            else "AntiOS Engine checked. Refreshing protection status."
                         ),
                         fg=self.palette["ok"],
                     )
