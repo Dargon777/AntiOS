@@ -96,7 +96,7 @@ def test_suspicious_script_is_review_only_and_not_auto_enforceable(tmp_path):
 
 def test_unreadable_zip_does_not_report_clean(tmp_path):
     target = tmp_path / "damaged.zip"
-    target.write_bytes(b"PK\\x03\\x04corrupt")
+    target.write_bytes(b"PK\x03\x04corrupt")
     result = antivirus.scan_files(target, engine="antios")
     assert result["verdict"] == "review"
     assert result["coverage"] == "limited"
@@ -143,3 +143,25 @@ def test_native_engine_standalone_and_stream_boundary():
     assert native.scan(b"ordinary", "ordinary.txt").kind is None
     assert not native.scan_stream([b"x" * (1024 * 1024 + 1)]).complete
     native.close()
+
+
+def test_zip_magic_is_detected_without_zip_extension(tmp_path):
+    payload = b"inert embedded-known-signature"
+    target = tmp_path / "without-extension"
+    target.write_bytes(_archive({"sample": payload}))
+    database = tmp_path / "signatures.json"
+    database.write_text(json.dumps({
+        "schema": 1,
+        "sha256": {hashlib.sha256(payload).hexdigest(): "Magic-based signature"},
+    }))
+    report = antivirus.scan_files(target, engine="antios", signature_path=database)
+    assert report["verdict"] == "threats-found"
+    assert report["findings"][0]["name"] == "Magic-based signature"
+
+
+def test_invalid_portable_executable_is_review_only(tmp_path):
+    target = tmp_path / "broken.exe"
+    target.write_bytes(b"MZ" + bytes(70))
+    report = antivirus.scan_files(target, engine="antios")
+    assert report["verdict"] == "review"
+    assert report["findings"][0]["engine"] == "AntiOS Engine"
