@@ -72,7 +72,7 @@ def _script_signal(data: bytes, name: str) -> ScanOutcome:
         b"set-mppreference" in sample or b"add-mppreference" in sample,
     )
     if sum(indicators) >= 2:
-        return ScanOutcome("review", "Script requires manual review")
+        return ScanOutcome("review", "Script requires manual review", "AntiOS native")
     return ScanOutcome()
 
 
@@ -80,17 +80,17 @@ def _pe_signal(data: bytes) -> ScanOutcome:
     if not data.startswith(b"MZ"):
         return ScanOutcome()
     if len(data) < 64:
-        return ScanOutcome("review", "Truncated executable header", complete=False)
+        return ScanOutcome("review", "Truncated executable header", "AntiOS native", complete=False)
     offset = struct.unpack_from("<I", data, 0x3C)[0]
     if offset > len(data) - 24 or data[offset:offset + 4] != b"PE\\x00\\x00":
-        return ScanOutcome("review", "Unrecognized executable header", complete=False)
+        return ScanOutcome("review", "Unrecognized executable header", "AntiOS native", complete=False)
     sections = struct.unpack_from("<H", data, offset + 6)[0]
     optional_size = struct.unpack_from("<H", data, offset + 20)[0]
     if sections == 0 or sections > 96 or optional_size < 2:
-        return ScanOutcome("review", "Invalid executable section table", complete=False)
+        return ScanOutcome("review", "Invalid executable section table", "AntiOS native", complete=False)
     table = offset + 24 + optional_size
     if table > len(data) or sections > (len(data) - table) // 40:
-        return ScanOutcome("review", "Truncated executable section table", complete=False)
+        return ScanOutcome("review", "Truncated executable section table", "AntiOS native", complete=False)
     for index in range(sections):
         entry = table + index * 40
         raw_size, raw_offset, flags = struct.unpack_from("<II12xI", data, entry + 16)
@@ -100,7 +100,7 @@ def _pe_signal(data: bytes) -> ScanOutcome:
         if raw_offset > len(data) or raw_size > len(data) - raw_offset:
             continue
         if _entropy(data[raw_offset:raw_offset + min(raw_size, 32768)]) > 7.5:
-            return ScanOutcome("review", "Unusual executable section")
+            return ScanOutcome("review", "Unusual executable section", "AntiOS native")
     return ScanOutcome()
 
 
