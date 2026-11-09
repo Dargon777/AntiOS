@@ -38,30 +38,21 @@ def test_per_user_installer_manifest_lists_only_source_files():
     assert source.index("$owned.Add") < source.index("Copy-Item -Force $CliSource")
 
 
-def test_managed_clamd_uninstall_refuses_foreign_scm_services():
-    source = (ROOT / "scripts/protection-engine.ps1").read_text("utf-8")
-    uninstall = source.split("if ($Uninstall) {", 1)[1].split("if (-not $ClamAVDirectory)", 1)[0]
-    assert "Assert-ManagedClamdService" in uninstall
-    assert "Assert-NoReparseTree" in uninstall
-    assert "Refusing to unregister a non-AntiOS" in uninstall
-    assert "sc.exe" in uninstall and "delete $EngineServiceName" in uninstall
-    assert "--uninstall-service" not in uninstall
-    assert uninstall.index("Assert-ManagedClamdService") < uninstall.index("Stop-Service")
-    assert uninstall.index("Assert-NoReparseTree") < uninstall.index("Stop-Service")
-    assert source.count("Assert-ManagedClamdService") >= 3
+def test_release_publication_requires_enabled_authenticode_signing():
+    workflow = (ROOT / ".github/workflows/windows-release.yml").read_text("utf-8")
+    assert "Refuse unsigned master publication" in workflow
+    assert "vars.ENABLE_ARTIFACT_SIGNING != 'true'" in workflow
+    publish = workflow.split("  publish-release:", 1)[1]
+    assert "vars.ENABLE_ARTIFACT_SIGNING == 'true'" in publish
+    assert "gh release create" in publish
 
 
-
-def test_elevated_bootstrap_never_extracts_clamav_into_user_temp():
-    source = (ROOT / "scripts/protection-bootstrap.ps1").read_text("utf-8")
-    assert "[IO.Path]::GetTempPath()" not in source
-    assert "AntiOS-ClamAV-Staging-" in source
-    assert "GetFolderPath('ProgramFiles')" in source
-    assert "SetSecurityDescriptorSddlForm" in source
-    assert "ReparsePoint" in source
-    assert "SHA256" in source
-    assert "-TrustedArchivePath $zip" in source
-    assert "ClamAV package SHA-256 mismatch" in source
+def test_current_install_scripts_never_bootstrap_clamav():
+    installer = (ROOT / "installer/AntiOS.nsi").read_text("utf-8")
+    install = installer.split('Section "AntiOS" SecMain', 1)[1].split('Section "Uninstall"', 1)[0]
+    assert "protection-bootstrap.ps1" not in install
+    assert "clamav-windows.json" not in install
+    assert "Install-AmsiProvider.ps1" not in install
 
 
 def test_build_scripts_deny_arbitrary_recursive_cleanup_locations():
