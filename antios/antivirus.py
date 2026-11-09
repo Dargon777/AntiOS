@@ -182,6 +182,8 @@ def scan_files(
         provider_factory = lambda: AntiOSEngine(signatures=signatures)
     if any(v is not None and (type(v) is not int or v <= 0) for v in (max_files, max_bytes)):
         raise ValueError("Explicit scan limits must be positive integers")
+    if max_bytes is not None and max_bytes > 256 * 1024 * 1024:
+        raise ValueError("Explicit scan size limit cannot exceed 256 MiB")
     buffer_limit = min(max_bytes or DEFAULT_MAX_BYTES, DEFAULT_MAX_BYTES)
     if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
         raise ValueError("Scan workers must be between 1 and 8")
