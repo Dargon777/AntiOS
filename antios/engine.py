@@ -50,6 +50,18 @@ def _looks_zip(data: bytes, name: str) -> bool:
     return data.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")) or name.lower().endswith(".zip")
 
 
+def _zip_entry_count(data: bytes) -> int | None:
+    """Reject oversized or malformed central directories before ZipFile loads them."""
+    tail = data[-65557:]
+    marker = tail.rfind(b"PK\x05\x06")
+    if marker < 0 or len(tail) - marker < 22:
+        return None
+    comment_size = struct.unpack_from("<H", tail, marker + 20)[0]
+    if marker + 22 + comment_size != len(tail):
+        return None
+    return struct.unpack_from("<H", tail, marker + 10)[0]
+
+
 def _entropy(sample: bytes) -> float:
     if not sample:
         return 0.0
@@ -64,7 +76,14 @@ def _script_signal(data: bytes, name: str) -> ScanOutcome:
     lower_name = name.replace("\\", "/").lower()
     if not any(lower_name.endswith(ext) for ext in _SCRIPT_EXTENSIONS):
         return ScanOutcome()
-    sample = data[:2 * 1024 * 1024].lower()
+    sample = data[:2 * 1024 * 1024]
+    if sample.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            encoding = "utf-16-le" if sample[:2] == b"\xff\xfe" else "utf-16-be"
+            sample = sample[2:].decode(encoding, errors="ignore").encode("utf-8")
+        except UnicodeError:
+            return ScanOutcome()
+    sample = sample.lower()
     # These are context signals, not malware signatures.
     indicators = (
         b"-encodedcommand" in sample or b"frombase64string(" in sample,
@@ -134,6 +153,12 @@ class AntiOSEngine:
             return _preferred(outcome, ScanOutcome(
                 "review", "Nested archive depth limit reached", self.name,
                 complete=False, detail="Nested archive was not fully examined"))
+        declared_members = _zip_entry_count(data)
+        if (declared_members is None or declared_members == 0xFFFF
+                or declared_members > budget.members):
+            return _preferred(outcome, ScanOutcome(
+                "review", "Archive directory requires manual review", self.name,
+                complete=False, detail="Archive could not be safely enumerated"))
         try:
             with zipfile.ZipFile(io.BytesIO(data), "r", allowZip64=True) as archive:
                 for item in archive.infolist():
