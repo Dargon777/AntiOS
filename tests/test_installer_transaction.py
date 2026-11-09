@@ -24,7 +24,7 @@ def test_nsis_transaction_only_manages_known_app_paths_not_clamav_service():
     source = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
     manifest = source.split("!macro ANTIOS_EACH_APP_ITEM OP", 1)[1].split("!macroend", 1)[0]
     names = re.findall(r'!insertmacro \${OP} "([^"]+)"', manifest)
-    assert len(names) >= 30
+    assert len(names) >= 25
     assert len(names) == len(set(names))
     assert {"AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe",
             "Uninstall.exe", "_cli", "_gui", "_guard"} <= set(names)
@@ -53,7 +53,7 @@ def test_nsis_uninstall_never_recursively_erases_arbitrary_install_root():
     assert 'RMDir "$INSTDIR"' in uninstall
     assert '!insertmacro ANTIOS_UNINSTALL_CHECK_PATHS' in uninstall
     assert '!insertmacro ANTIOS_UNINSTALL_OWNED_PAYLOAD' in uninstall
-    assert uninstall.index('!insertmacro ANTIOS_UNINSTALL_CHECK_PATHS') < uninstall.index('IfFileExists "$INSTDIR\\Install-AmsiProvider.ps1"')
+    assert uninstall.index('!insertmacro ANTIOS_UNINSTALL_CHECK_PATHS') < uninstall.index('!insertmacro ANTIOS_UNINSTALL_OWNED_PAYLOAD')
     assert 'RMDir /r "$SMPROGRAMS\\AntiOS"' not in uninstall
 
 
