@@ -34,11 +34,11 @@ def incident(paths, *, score=95, classification="critical-behavior"):
 def scan_result(path, findings=None):
     return {
         "verdict": "threats-found" if findings else "no-threats-found",
-        "coverage": "clamav-and-signatures",
+        "coverage": "antios-local-inspection",
         "findings": findings or [],
         "issues": [],
         "summary": {"files_scanned": 1, "threats": len(findings or [])},
-        "engine": {"provider": "ClamAV", "database_freshness": "current"},
+        "engine": {"provider": "AntiOS Engine", "database_freshness": "local"},
         "path": str(path),
     }
 
@@ -46,7 +46,7 @@ def scan_result(path, findings=None):
 def finding(path, *, kind="threat", digest="a" * 64):
     return {
         "kind": kind,
-        "engine": "ClamAV",
+        "engine": "AntiOS Engine",
         "name": "Inert.Test",
         "path": str(path),
         "sha256": digest,
@@ -97,7 +97,7 @@ def test_response_scan_is_read_only_and_collects_per_path_errors():
         progress=lambda current, total, path: progress.append((current, total, path)),
     )
     assert len(calls) == 2
-    assert all(call[1]["engine"] == "clamav" for call in calls)
+    assert all(call[1]["engine"] == "antios" for call in calls)
     assert all(call[1]["require_verified_peer"] is True for call in calls)
     assert len(result["results"]) == 1
     assert result["errors"][0]["path"].lower().endswith("b.exe")
