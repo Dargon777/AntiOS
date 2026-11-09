@@ -6,7 +6,7 @@ the server side of each established loopback connection belongs to that PID.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from .engine_types import ScanOutcome
 from datetime import datetime
 import math
 import os
@@ -22,13 +22,7 @@ from .windows_clamd_peer import (
 )
 
 
-@dataclass(frozen=True)
-class ScanOutcome:
-    kind: str | None = None
-    name: str = ""
-    engine: str = "ClamAV"
-    complete: bool = True
-    detail: str = ""
+
 
 
 def _is_windows() -> bool:
