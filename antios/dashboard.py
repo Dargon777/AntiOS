@@ -486,56 +486,22 @@ class Dashboard:
             self._start_update_worker(download=True, automatic=True)
 
     def _heal_managed_engine(self, *, interactive: bool = False) -> dict:
+        """Verify the local AntiOS Engine; never bootstrap external AV services."""
         from .protection import collect_protection_status
 
         status = collect_protection_status()
-        caps = status.get("capabilities", {})
-        if caps.get("standalone_detection_engine"):
-            return {"action": "already-ready", "status": status}
-
-        managed = status.get("managed_runtime", {})
-        managed_files = managed.get("files", {}) if isinstance(managed, dict) else {}
-        repairable = bool(managed_files) and all(bool(value) for value in managed_files.values())
-        from .elevation import is_administrator, request_protection_elevation
-
-        if not is_administrator():
-            if interactive:
-                action = "repair" if repairable else "bootstrap"
-                completion = request_protection_elevation(action)
-                # The elevated process has exited successfully. Verify that
-                # the service and its malware database are actually ready.
-                verified = collect_protection_status()
-                if not verified.get("capabilities", {}).get("standalone_detection_engine"):
-                    raise RuntimeError(
-                        "Administrator maintenance finished, but ClamAV is not ready. "
-                        "Inspect protection status and repair logs before enabling Guard."
-                    )
-                return {
-                    "action": "repaired" if repairable else "bootstrapped",
-                    "completion": completion,
-                    "verified": True,
-                    "status": verified,
-                }
-            # Background startup must never prompt for UAC or silently modify
-            # machine-wide service/ACL/engine settings.
-            return {"action": "requires-elevation"}
-        if repairable:
-            result = run_protection_repair(apply=True, update_signatures=True)
-            return {"action": "repaired", "result": result}
-        result = run_protection_bootstrap()
-        return {"action": "bootstrapped", "result": result}
+        if not status.get("capabilities", {}).get("standalone_detection_engine"):
+            raise RuntimeError(
+                "AntiOS Engine is unavailable. Review local scan diagnostics "
+                "before enabling Resident Guard."
+            )
+        return {"action": "verified-native-engine", "verified": True, "status": status}
 
     def _resident_autostart_worker(self) -> None:
         try:
             from .resident import ensure_resident_guard
 
             engine = self._heal_managed_engine()
-            if engine.get("action") == "requires-elevation":
-                self.antivirus_queue.put((
-                    "error",
-                    "Resident engine needs administrator repair. Open Antivirus and choose Repair protection.",
-                ))
-                return
             value = ensure_resident_guard()
             self.antivirus_queue.put(("guard-action", value))
         except Exception as exc:
