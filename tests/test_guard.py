@@ -10,14 +10,14 @@ import pytest
 from antios import guard
 from antios.antivirus import scan_files
 from antios.behavior import BehaviorEngine, ProcessEvent
-from antios.clamav import ScanOutcome
+from antios.engine_types import ScanOutcome
 from antios.guard_notifications import ChangeBatch, PollNotifications
 from antios.guard_state import GuardState, read_guard_state
 from antios.incident import IncidentGraph
 
 
 class Engine:
-    metadata = {'version': 'test-generation', 'database_freshness': 'current'}
+    metadata = {'version': 'test-generation', 'database_freshness': 'local'}
     def scan(self, data, name):
         return ScanOutcome('threat', 'Inert.Test') if b'inert-marker' in data else ScanOutcome()
     def close(self):
@@ -25,7 +25,7 @@ class Engine:
 
 
 def scan(path, **options):
-    return scan_files(path, engine='clamav', provider_factory=Engine, cancelled=options['cancelled'])
+    return scan_files(path, engine='antios', provider_factory=Engine, cancelled=options['cancelled'])
 
 
 def probe():
@@ -257,7 +257,7 @@ def test_reviews_never_enter_automatic_quarantine(tmp_path):
         def scan(self, data, name):
             return ScanOutcome('review', 'Heuristics.Encrypted.Zip')
     def review_scan(path, **options):
-        return scan_files(path, engine='clamav', provider_factory=ReviewEngine)
+        return scan_files(path, engine='antios', provider_factory=ReviewEngine)
     class Vault:
         def add(self, *args, **kwargs):
             calls.append(args)

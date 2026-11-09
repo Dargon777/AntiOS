@@ -44,8 +44,8 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
                 "verdict": "threats-found",
                 "coverage": "complete",
                 "engine": {
-                    "provider": "ClamAV",
-                    "version": "ClamAV UI fixture",
+                    "provider": "AntiOS Engine",
+                    "version": "AntiOS Engine fixture",
                     "database_freshness": "current",
                 },
                 "summary": {
@@ -73,8 +73,8 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
             "verdict": "incomplete",
             "coverage": "limited",
             "engine": {
-                "provider": "ClamAV",
-                "version": "ClamAV UI fixture",
+                "provider": "AntiOS Engine",
+                "version": "AntiOS Engine fixture",
                 "database_freshness": "current",
             },
             "summary": {
@@ -98,7 +98,7 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         app.show_page("antivirus")
 
         panel = app.antivirus_panel
-        assert panel.engine_var.get() == "clamav"
+        assert panel.engine_var.get() == "antios"
         panel._sync_guard_ui({"state": "monitoring", "running": True})
         assert panel.protection_status_text["text"] != "92"
         assert not hasattr(panel, "protection_score")
@@ -132,7 +132,7 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         assert not app.antivirus_busy
         assert app.antivirus_result["summary"]["threats"] == 1
         panel = app.antivirus_panel
-        assert panel.engine_var.get() == "clamav"
+        assert panel.engine_var.get() == "antios"
         assert len(panel.tree.get_children()) == 1
         assert panel.rows["0"]["name"] == "Benign UI test fixture"
         panel.tree.selection_set("0")
@@ -205,7 +205,7 @@ def test_layered_chip_requires_verified_defender_and_antios_engine():
     panel.layered_active = False
     messages = {
         "layered_engine": "Microsoft Defender + AntiOS",
-        "managed_engine": "AntiOS Engine · ClamAV",
+        "managed_engine": "AntiOS Engine",
         "protection_layered_detail": "layered-detail",
         "protection_active_detail": "antios-detail",
     }
@@ -231,7 +231,7 @@ def test_layered_chip_requires_verified_defender_and_antios_engine():
         }
     })
     assert panel.layered_active is False
-    assert panel.engine_chip.values["text"] == "AntiOS Engine · ClamAV"
+    assert panel.engine_chip.values["text"] == "AntiOS Engine"
     assert panel.engine_chip.values["fg"] == "muted"
     assert panel.protection_detail.values["text"] == "antios-detail"
 

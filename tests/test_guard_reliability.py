@@ -46,10 +46,10 @@ def test_panel_rebuild_preserves_dedup_but_records_real_engine_transitions(monke
     for _ in range(3):
         antivirus_ui.AntivirusPanel._sync_protection_ui(panel(app, errors), value)
     assert len(errors) == 1 and errors[0]["component"] == "Guard"
-    assert len(records) == 1 and records[0][2] == "Managed ClamAV ready"
+    assert len(records) == 1 and records[0][2] == "AntiOS Engine ready"
     value["capabilities"]["standalone_detection_engine"] = False
     antivirus_ui.AntivirusPanel._sync_protection_ui(panel(app, errors), value)
-    assert records[-1][2] == "Managed ClamAV not ready"
+    assert records[-1][2] == "AntiOS Engine not ready"
     assert len(records) == 2
 
 
@@ -59,14 +59,14 @@ def test_panel_rebuild_preserves_dedup_but_records_real_engine_transitions(monke
 def test_linux_probe_isolates_guard_failure(monkeypatch, error):
     from antios import linux_companion
     class Scanner:
-        metadata = {"database_freshness": "current"}
+        metadata = {"database_freshness": "local"}
         def __init__(self, **kwargs):
             pass
         def close(self):
             pass
     def fail():
         raise error
-    monkeypatch.setattr(protection, "ClamAVScanner", Scanner)
+    monkeypatch.setattr(protection, "AntiOSEngine", Scanner)
     monkeypatch.setattr(protection, "read_guard_state", fail)
     monkeypatch.setattr(linux_companion, "collect_linux_companion_status", lambda: {
         "coexistence": {"vendor_realtime_confirmed": []}})
