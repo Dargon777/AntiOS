@@ -23,7 +23,7 @@ jobs:
       - name: Reject accidentally published proprietary source
         run: python scripts/check-public-boundary.py
 
-  clamav-integration:
+  native-engine-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -31,16 +31,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Install real ClamD and test dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clamav-daemon
-          python -m pip install pytest -e .
-      - name: Test real engine with inert rules and archives
-        env:
-          ANTIOS_REQUIRE_CLAMD: "1"
-          ANTIOS_TEST_CLAMD: /usr/sbin/clamd
-        run: python -m pytest tests/test_clamav_integration.py -v
+      - name: Install native engine test dependencies
+        run: python -m pip install pytest -e .
+      - name: Test independent AntiOS Engine, archives and Guard
+        run: python -m pytest -v tests/test_unified_engine.py tests/test_guard_unified.py
 
 
   windows10-api-proxy:
