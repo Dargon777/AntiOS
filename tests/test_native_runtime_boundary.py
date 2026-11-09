@@ -1,7 +1,7 @@
 """Native-only installer and Guard trust boundaries.
 
-Legacy ClamAV/AMSI files may remain in historical source but must never be
-installed, registered or executed by the active application runtime.
+Historical ClamAV, AMSI and C-native engines are absent from this source
+tree; no retired engine may be reintroduced into packaged runtime paths.
 """
 import json
 from pathlib import Path
@@ -79,3 +79,14 @@ def test_windows_release_stages_owned_runtime():
     assert '"clamav-trust.ps1"' not in staging
     assert '"Install-AmsiProvider.ps1"' not in staging
     assert '"AntiOS-AmsiProvider.dll"' not in staging
+
+def test_retired_engines_and_native_driver_are_absent_from_source_tree():
+    for removed in (
+        "antios/clamav.py", "antios/windows_clamd_peer.py",
+        "antios/private_core.py", "antios/protection_repair.py",
+        "native/windows/build.ps1", "native/windows/engine/clamd.c",
+        "native/windows/filter/avscan.c", "native/windows/amsi/provider.cpp",
+        "release/clamav-windows.json", "scripts/protection-bootstrap.ps1",
+        "scripts/protection-engine.ps1", "scripts/protection-repair.ps1",
+    ):
+        assert not (ROOT / removed).exists(), removed
