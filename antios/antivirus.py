@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .windows_antivirus import AmsiScanner
-from .clamav import ClamAVScanner, ScanOutcome
-from .unified_engine import UnifiedScanner
+from .clamav import ClamAVScanner
+from .engine import AntiOSEngine
+from .engine_types import ScanOutcome
 from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
 
 DEFAULT_MAX_BYTES = 32 * 1024 * 1024
@@ -153,7 +154,7 @@ def _scan_large_file(item, provider, signatures, stopped, max_bytes):
         finding = {"kind": outcome.kind, "engine": outcome.engine, "name": outcome.name}
     return {"item": item, "info": after, "size": after.st_size, "sha256": sha,
             "finding": finding, "provider_scanned": outcome is not None,
-            "file_engine_error": error or (outcome.detail if outcome else ""),
+            "file_engine_error": error,
             "limited_result": bool(error or (outcome and (outcome.kind == "review" or not outcome.complete)))}
 
 
@@ -181,10 +182,8 @@ def scan_files(
         if engine == "amsi":
             provider_factory = AmsiScanner
         elif engine == "antios":
-            provider_factory = lambda: UnifiedScanner(
-                engine_service=engine_service,
-                require_verified_peer=require_verified_peer,
-            )
+            # The native AntiOS engine uses only local signatures and parsers.
+            provider_factory = lambda: AntiOSEngine(signatures=signatures)
         elif engine_service is None and not require_verified_peer:
             # Preserve the ordinary on-demand provider contract. Strict Windows
             # peer binding is opt-in here and mandatory in Resident Guard.
@@ -213,7 +212,7 @@ def scan_files(
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
                    "max_entries": max_files * 2 if max_files is not None else None, "workers": workers},
         "engine": {"provider": {"amsi": "Windows AMSI", "clamav": "ClamAV",
-                                "antios": "AntiOS unified"}[engine], "available": False,
+                                "antios": "AntiOS native"}[engine], "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or "")},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
                     "bytes_scanned": 0, "cache_hits": 0, "threats": 0, "reviews": 0, "skipped": 0,
@@ -311,7 +310,7 @@ def scan_files(
     else:
         result["engine"]["cache"] = "disabled"
 
-    effective_workers = workers if engine == "clamav" and provider is not None else 1
+    effective_workers = workers if engine in {"clamav", "antios"} and provider is not None else 1
     result["limits"]["effective_workers"] = effective_workers
     result["engine"]["limited_results"] = 0
 
@@ -331,7 +330,7 @@ def scan_files(
         if outcome.get("limited_result"):
             result["engine"]["limited_results"] += 1
         if outcome.get("file_engine_error"):
-            issue(item, "ClamAV could not finish this file: " + outcome["file_engine_error"], error=True)
+            issue(item, "Scan engine could not finish this file: " + outcome["file_engine_error"], error=True)
         finding = outcome.get("finding")
         if finding:
             finding.update(
@@ -373,12 +372,14 @@ def scan_files(
             limited_result = False
             if provider is not None and not provider_failed.is_set():
                 try:
-                    value = provider.scan(content, str(item))
+                    value = (provider.scan_with_digest(content, str(item), digest)
+                             if hasattr(provider, "scan_with_digest")
+                             else provider.scan(content, str(item)))
                     provider_scanned = True
                     if isinstance(value, ScanOutcome):
                         limited_result = value.kind == "review" or not value.complete
-                        if value.detail:
-                            provider_error = value.detail
+                        # Incomplete inspection of a particular file is not a
+                        # global provider crash. Preserve its limited verdict.
                         if value.kind and finding is None:
                             finding = {"kind": value.kind, "engine": value.engine, "name": value.name}
                     elif value >= 32768:
@@ -510,15 +511,18 @@ def scan_files(
     complete = (summary["files_scanned"] > 0 and not any(
         summary[key] for key in ("cancelled", "limit_reached", "errors", "skipped")
     ))
-    if engine in {"clamav", "antios"} and (result["engine"].get("limited_results") or
+    if engine == "clamav" and (result["engine"].get("limited_results") or
             result["engine"].get("database_freshness") != "current" or
             (result["engine"].get("peer_verification_required") and
              result["engine"].get("peer_verified") is not True)):
         complete = False
+    if engine == "antios" and (result["engine"].get("limited_results") or
+                              result["engine"].get("database_freshness") != "local"):
+        complete = False
     if complete and summary["provider_scanned"] == summary["files_scanned"]:
         result["coverage"] = {"amsi": "provider-and-signatures",
                               "clamav": "clamav-and-signatures",
-                              "antios": "antios-unified-and-signatures"}[engine]
+                              "antios": "antios-local-inspection"}[engine]
     if summary["threats"]:
         result["verdict"] = "threats-found"
     elif summary["reviews"]:
