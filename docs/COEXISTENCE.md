@@ -45,3 +45,8 @@ engine uninstall scripts nor claims a legacy service provides protection.
 
 This cautious upgrade gate does not yet substitute for signed installer upgrade
 and rollback tests in a disposable Windows virtual machine.
+
+For unattended installations, `/NOGUARD=1` skips only Resident Guard
+task configuration; the local AntiOS Engine remains part of the application.
+The old `/NOENGINE` option is intentionally rejected rather than silently
+changing its meaning.
