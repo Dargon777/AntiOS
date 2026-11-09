@@ -8,6 +8,6 @@ from dataclasses import dataclass
 class ScanOutcome:
     kind: str | None = None
     name: str = ""
-    engine: str = "ClamAV"
+    engine: str = "AntiOS Engine"
     complete: bool = True
     detail: str = ""
