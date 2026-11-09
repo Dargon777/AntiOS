@@ -26,6 +26,9 @@ from .windows_clamd_peer import (
 class ScanOutcome:
     kind: str | None = None
     name: str = ""
+    engine: str = "ClamAV"
+    complete: bool = True
+    detail: str = ""
 
 
 def _is_windows() -> bool:
