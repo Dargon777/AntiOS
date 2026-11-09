@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 import re
 import struct
 import zipfile
+import zlib
 
 from .engine_types import ScanOutcome
 
@@ -145,7 +146,7 @@ class AntiOSEngine:
                     normalized = item.filename.replace("\\\\", "/")
                     parts = PurePosixPath(normalized).parts
                     if (not normalized or normalized.startswith("/")
-                            or ".." in parts or ":" in parts[0]):
+                            or ".." in parts or not parts or ":" in parts[0]):
                         outcome = _preferred(outcome, ScanOutcome(
                             "review", "Suspicious archive entry path", self.name))
                     if item.flag_bits & 1:
@@ -174,13 +175,16 @@ class AntiOSEngine:
                     )
                     if outcome.kind == "threat":
                         break
-        except (zipfile.BadZipFile, RuntimeError, OSError, EOFError, ValueError, NotImplementedError):
+        except (zipfile.BadZipFile, RuntimeError, OSError, EOFError, ValueError,
+                NotImplementedError, zlib.error, struct.error):
             outcome = _preferred(outcome, ScanOutcome(
                 "review", "Unreadable archive", self.name,
                 complete=False, detail="Archive inspection failed"))
         return outcome
 
     def scan_with_digest(self, content: bytes, name: str, digest: str) -> ScanOutcome:
+        if digest in self._signatures:
+            return ScanOutcome("threat", self._signatures[digest], self.name)
         if len(content) > MAX_INLINE_BYTES:
             return ScanOutcome(None, "", self.name, False,
                                "File exceeds full-content inspection budget")
@@ -190,6 +194,9 @@ class AntiOSEngine:
         return self.scan_with_digest(content, name, hashlib.sha256(content).hexdigest())
 
     def scan_stream(self, chunks) -> ScanOutcome:
+        return self.scan_stream_named(chunks, "")
+
+    def scan_stream_named(self, chunks, name: str) -> ScanOutcome:
         # File scans hash the entire stream in antivirus._scan_large_file.
         # A bounded prefix is used only for advisory structural signals.
         prefix = bytearray()
@@ -202,8 +209,8 @@ class AntiOSEngine:
             # Streaming callers cannot assume ZIP data was retained unless it
             # fits the preview; report incomplete rather than false-clean.
             if size == len(prefix):
-                return self.scan(bytes(prefix), "")
-        advisory = _preferred(_script_signal(bytes(prefix), ""), _pe_signal(bytes(prefix)))
+                return self.scan(bytes(prefix), name)
+        advisory = _preferred(_script_signal(bytes(prefix), name), _pe_signal(bytes(prefix)))
         return ScanOutcome(advisory.kind, advisory.name, self.name, False,
                            "Only local hash and bounded content preview were available")
 
