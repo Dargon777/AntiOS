@@ -35,6 +35,42 @@ def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
             "attention_reasons": [], "telemetry": {}}
 
 
+def _legacy_registration_status(reader=None) -> dict:
+    """Read fixed historical AntiOS registry markers without changing services."""
+    if reader is None:
+        if os.name != "nt":
+            return {"available": False, "state": "not-applicable", "markers": []}
+        import winreg
+
+        def reader(path, name):
+            access = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, access) as key:
+                return winreg.QueryValueEx(key, name)[0]
+
+    clsid = "{8E8A9D7D-814F-4A83-A127-8C4894E41121}"
+    probes = (
+        (r"SOFTWARE\AntiOS", "EngineServiceName", "service-binding"),
+        (r"SOFTWARE\DargonITP\AntiOS", "EngineServiceName", "service-binding"),
+        (rf"SOFTWARE\Microsoft\AMSI\Providers\{clsid}", "", "amsi-registration"),
+        (rf"SOFTWARE\Classes\CLSID\{clsid}\InprocServer32", "", "amsi-registration"),
+    )
+    markers, complete = set(), True
+    for path, name, marker in probes:
+        try:
+            value = reader(path, name)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            complete = False
+            continue
+        if isinstance(value, str) and value.strip():
+            markers.add(marker)
+    return {"available": True, "read_only": True,
+            "state": ("attention" if markers else
+                      "none-observed" if complete else "incomplete"),
+            "markers": sorted(markers), "inspection_complete": complete}
+
+
 def _guard_status() -> dict:
     try:
         return read_guard_state()
