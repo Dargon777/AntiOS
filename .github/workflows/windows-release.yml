@@ -277,7 +277,7 @@ jobs:
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "AntiOS-Setup-Smoke"
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
-          ./installer-output/AntiOS-Setup.exe /S /NOENGINE=1 "/D=$installDir"
+          ./installer-output/AntiOS-Setup.exe /S /NOGUARD=1 "/D=$installDir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "dashboard-startup.ps1", "Uninstall.exe")) {
             if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {
@@ -356,7 +356,7 @@ jobs:
           New-Item -ItemType Directory -Force $junctionTarget | Out-Null
           New-Item -ItemType Junction -Path $junctionInstall -Target $junctionTarget | Out-Null
           try {
-            $rejected = Start-Process -FilePath (Resolve-Path "./installer-output/AntiOS-Setup.exe").Path -ArgumentList @("/S", "/NOENGINE=1", "/D=$junctionInstall") -Wait -PassThru
+            $rejected = Start-Process -FilePath (Resolve-Path "./installer-output/AntiOS-Setup.exe").Path -ArgumentList @("/S", "/NOGUARD=1", "/D=$junctionInstall") -Wait -PassThru
             if ($rejected.ExitCode -eq 0) {
               throw "Installer incorrectly accepted a reparse-point destination"
             }
