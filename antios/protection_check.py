@@ -8,15 +8,16 @@ from pathlib import Path
 import tempfile
 
 from . import recovery
-from .clamav import ClamAVScanner
+from .engine import AntiOSEngine
+from .antivirus import load_signatures
 from .guard_state import read_guard_state
 
 _CHECKS = {
-    "engine": (("Связь с доверенным движком", "Trusted engine connection"),
-               ("Установите или восстановите движок в центре защиты с правами администратора.",
-                "Install or repair the engine from the protection center with administrator rights.")),
-    "database": (("Актуальность антивирусных баз", "Signature database freshness"),
-                 ("Обновите антивирусные базы и повторите проверку.", "Update the signatures and run the check again.")),
+    "engine": (("Работоспособность AntiOS Engine", "AntiOS Engine readiness"),
+               ("Проверьте установку AntiOS Engine.",
+                "Check the installed AntiOS Engine runtime.")),
+    "database": (("Локальная база AntiOS", "Local AntiOS signatures"),
+                 ("Проверьте локальную базу сигнатур.", "Check local signature availability.")),
     "benign-scan": (("Проверка безопасного содержимого", "Benign content control"),
                     ("Движок не подтвердил корректную обработку безопасного образца. Восстановите его и повторите проверку.",
                      "The engine did not correctly process the benign control. Repair it and check again.")),
@@ -79,13 +80,12 @@ def run_checks(*, scanner_factory=None, guard_reader=None,
     try:
         if not cancelled():
             try:
-                factory = scanner_factory or (lambda: ClamAVScanner(
-                    timeout=5, require_verified_peer=os.name == "nt"))
+                factory = scanner_factory or (lambda: AntiOSEngine(signatures=load_signatures()))
                 engine = factory()
                 metadata = dict(engine.metadata)
-                verified = os.name != "nt" or metadata.get("peer_verified") is True
+                verified = metadata.get("database_freshness") in {"local", "current"}
                 record("engine", "passed" if verified else "failed")
-                record("database", "passed" if metadata.get("database_freshness") == "current" else "warning")
+                record("database", "passed" if metadata.get("database_freshness") in {"local", "current"} else "warning")
                 if not verified:
                     engine.close()
                     engine = None
