@@ -13,8 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .windows_antivirus import AmsiScanner
-from .clamav import ClamAVScanner
 from .engine import AntiOSEngine
 from .engine_types import ScanOutcome
 from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
@@ -169,7 +167,7 @@ def scan_files(
     progress: Callable[[dict], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
     provider_factory: Callable | None = None,
-    engine: str = "amsi",
+    engine: str = "antios",
     engine_service: str | None = None,
     require_verified_peer: bool = False,
     excluded_paths: tuple[Path, ...] = (),
@@ -178,30 +176,13 @@ def scan_files(
     cache_path: str | Path | None = None,
     use_cache: bool = True,
 ) -> dict[str, Any]:
-    if engine not in {"amsi", "clamav", "antios"}:
-        raise ValueError("Unknown scan engine")
+    if engine != "antios":
+        raise ValueError("Only the independent AntiOS Engine is supported")
     if provider_factory is None:
-        if engine == "amsi":
-            provider_factory = AmsiScanner
-        elif engine == "antios":
-            # The native AntiOS engine uses only local signatures and parsers.
-            provider_factory = lambda: AntiOSEngine(signatures=signatures)
-        elif engine_service is None and not require_verified_peer:
-            # Preserve the ordinary on-demand provider contract. Strict Windows
-            # peer binding is opt-in here and mandatory in Resident Guard.
-            provider_factory = ClamAVScanner
-        else:
-            provider_factory = lambda: ClamAVScanner(
-                service_name=engine_service,
-                require_verified_peer=require_verified_peer,
-            )
+        provider_factory = lambda: AntiOSEngine(signatures=signatures)
     if any(v is not None and (type(v) is not int or v <= 0) for v in (max_files, max_bytes)):
         raise ValueError("Explicit scan limits must be positive integers")
-    if engine == "amsi":
-        max_bytes = max_bytes or DEFAULT_MAX_BYTES
-        if max_bytes > 256 * 1024 * 1024:
-            raise ValueError("AMSI buffer exceeds 256 MiB")
-    buffer_limit = min(max_bytes or DEFAULT_MAX_BYTES, DEFAULT_MAX_BYTES) if engine in {"clamav", "antios"} else max_bytes
+    buffer_limit = min(max_bytes or DEFAULT_MAX_BYTES, DEFAULT_MAX_BYTES)
     if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
         raise ValueError("Scan workers must be between 1 and 8")
     target = checked_path(path)
@@ -213,8 +194,7 @@ def scan_files(
         "started_at": utc_now(), "finished_at": None,
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
                    "max_entries": max_files * 2 if max_files is not None else None, "workers": workers},
-        "engine": {"provider": {"amsi": "Windows AMSI", "clamav": "ClamAV",
-                                "antios": "AntiOS Engine"}[engine], "available": False,
+        "engine": {"provider": "AntiOS Engine", "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or "")},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
                     "bytes_scanned": 0, "cache_hits": 0, "threats": 0, "reviews": 0, "skipped": 0,
@@ -296,10 +276,8 @@ def scan_files(
     cache_engine = ""
     cache_signatures = make_signature_key(signatures)
     cache_allowed = bool(
-        use_cache and cache_path and engine == "clamav" and provider is not None
-        and result["engine"].get("database_freshness") == "current"
-        and (not result["engine"].get("peer_verification_required")
-             or result["engine"].get("peer_verified") is True)
+        use_cache and cache_path and provider is not None
+        and result["engine"].get("database_freshness") == "local"
     )
     if cache_allowed:
         try:
@@ -312,9 +290,7 @@ def scan_files(
     else:
         result["engine"]["cache"] = "disabled"
 
-    effective_workers = (workers if engine == "clamav" and provider is not None
-                         else min(workers, 2) if engine == "antios" and provider is not None
-                         else 1)
+    effective_workers = min(workers, 2) if provider is not None else 1
     result["limits"]["effective_workers"] = effective_workers
     result["engine"]["limited_results"] = 0
 
@@ -345,7 +321,9 @@ def scan_files(
             )
             summary["threats" if finding["kind"] == "threat" else "reviews"] += 1
             result["findings"].append(finding)
-        elif cache is not None and outcome.get("provider_scanned") and outcome["size"] <= DEFAULT_MAX_BYTES:
+        elif (cache is not None and outcome.get("provider_scanned")
+              and not outcome.get("limited_result") and not outcome.get("provider_error")
+              and outcome["size"] <= DEFAULT_MAX_BYTES):
             try:
                 cache.put(
                     item, outcome["info"], cache_engine, cache_signatures, outcome["sha256"]
@@ -362,7 +340,7 @@ def scan_files(
                 return {"item": item, "issue": "not-a-regular-file"}
             if max_bytes is not None and info.st_size > max_bytes:
                 return {"item": item, "issue": "file-size-limit"}
-            if engine in {"clamav", "antios"} and info.st_size > DEFAULT_MAX_BYTES:
+            if info.st_size > DEFAULT_MAX_BYTES:
                 return _scan_large_file(item, provider, signatures, stopped, max_bytes)
             content, info = read_regular(item, buffer_limit)
             digest = hashlib.sha256(content).hexdigest()
@@ -386,17 +364,8 @@ def scan_files(
                         # global provider crash. Preserve its limited verdict.
                         if value.kind and finding is None:
                             finding = {"kind": value.kind, "engine": value.engine, "name": value.name}
-                    elif value >= 32768:
-                        finding = finding or {
-                            "kind": "threat", "engine": "Windows AMSI",
-                            "name": "AMSI malware detection",
-                        }
-                        finding["amsi_result"] = value
-                    elif 0x4000 <= value <= 0x4FFF and finding is None:
-                        finding = {
-                            "kind": "review", "engine": "Windows AMSI",
-                            "name": "Blocked by administrator policy", "amsi_result": value,
-                        }
+                    else:
+                        raise OSError("AntiOS Engine returned an invalid result")
                 except (OSError, RuntimeError) as exc:
                     provider_failed.set()
                     provider_error = str(exc)
@@ -462,8 +431,7 @@ def scan_files(
 
             # Preserve the failure circuit breaker: prove that the provider is
             # responsive with one request before fanning work out concurrently.
-            # A dead ClamD therefore causes one bounded provider error, not one
-            # timeout per worker.
+            # An unhealthy scanner cannot fan out unbounded failures.
             if executor is not None and not provider_probe_done and pending:
                 first = pending.pop(0)
                 apply_outcome(scan_one(first))
@@ -515,18 +483,11 @@ def scan_files(
     complete = (summary["files_scanned"] > 0 and not any(
         summary[key] for key in ("cancelled", "limit_reached", "errors", "skipped")
     ))
-    if engine == "clamav" and (result["engine"].get("limited_results") or
-            result["engine"].get("database_freshness") != "current" or
-            (result["engine"].get("peer_verification_required") and
-             result["engine"].get("peer_verified") is not True)):
-        complete = False
-    if engine == "antios" and (result["engine"].get("limited_results") or
-                              result["engine"].get("database_freshness") != "local"):
+    if (result["engine"].get("limited_results") or
+            result["engine"].get("database_freshness") != "local"):
         complete = False
     if complete and summary["provider_scanned"] == summary["files_scanned"]:
-        result["coverage"] = {"amsi": "provider-and-signatures",
-                              "clamav": "clamav-and-signatures",
-                              "antios": "antios-local-inspection"}[engine]
+        result["coverage"] = "antios-local-inspection"
     if summary["threats"]:
         result["verdict"] = "threats-found"
     elif summary["reviews"]:
