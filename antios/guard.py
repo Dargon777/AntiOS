@@ -131,8 +131,15 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
     return files, issues, limited
 
 
-def probe_engine(service_name=None):
-    engine = ClamAVScanner(service_name=service_name, require_verified_peer=os.name == 'nt')
+def probe_engine(service_name=None, *, scan_engine='clamav'):
+    if scan_engine == 'antios':
+        from .antivirus import load_signatures
+        from .engine import AntiOSEngine
+        engine = AntiOSEngine(signatures=load_signatures())
+    elif scan_engine == 'clamav':
+        engine = ClamAVScanner(service_name=service_name, require_verified_peer=os.name == 'nt')
+    else:
+        raise ValueError('Unknown Guard scan engine')
     try:
         return dict(engine.metadata, available=True)
     finally:
@@ -162,7 +169,7 @@ class Guard:
                 require_verified_peer=os.name == 'nt', **kwargs)
         else:
             self.scanner = scanner
-        self.probe = (lambda: probe_engine(policy.engine_service)) if probe is None else probe
+        self.probe = (lambda: probe_engine(policy.engine_service, scan_engine=policy.scan_engine)) if probe is None else probe
         self.quarantine_factory = quarantine_factory
         self.watcher_factory = watcher_factory or (DirectoryNotifications if os.name == 'nt' else PollNotifications)
         self.status_observer = status_observer
@@ -611,7 +618,8 @@ class Guard:
                     raise RuntimeError('Guard incident capacity exceeded; review history and reduce watched scope')
                 degraded = (notification_error or self.failures or self.status['inventory_issues'] or
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
-                            self.status['engine'].get('database_freshness') != 'current' or
+                            self.status['engine'].get('database_freshness') != (
+                                'local' if self.policy.scan_engine == 'antios' else 'current') or
                             (self._process_visibility_required and self.process_sampler is None) or
                             self.status['behavior_alerts_dropped'] > 0)
                 behavior_attention = self.status.get('behavior', {}).get('state') in {'attention', 'alert'}
