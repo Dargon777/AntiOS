@@ -211,6 +211,12 @@ antios_path_preflight_done:
   ${If} $0 != ""
     Goto antios_legacy_upgrade_blocked
   ${EndIf}
+  ; Original managed ClamAV installer wrote its binding to a different key.
+  ClearErrors
+  ReadRegStr $0 HKLM "SOFTWARE\AntiOS" "EngineServiceName"
+  ${If} $0 != ""
+    Goto antios_legacy_upgrade_blocked
+  ${EndIf}
   IfFileExists "$INSTDIR\protection-engine.ps1" antios_legacy_upgrade_blocked
   IfFileExists "$INSTDIR\protection-bootstrap.ps1" antios_legacy_upgrade_blocked
   IfFileExists "$INSTDIR\protection-repair.ps1" antios_legacy_upgrade_blocked
