@@ -94,7 +94,7 @@ def scan_incident_files(
             result = scanner(
                 Path(value),
                 signature_path=signature_path,
-                engine="clamav",
+                engine="antios",
                 require_verified_peer=require_verified_peer,
                 cancelled=cancelled,
             )
