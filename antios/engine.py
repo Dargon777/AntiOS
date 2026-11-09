@@ -7,7 +7,7 @@ Input is read-only; ZIP members are decompressed in memory under hard budgets.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import io
 import math
@@ -31,8 +31,8 @@ _SCRIPT_EXTENSIONS = frozenset({".ps1", ".psm1", ".bat", ".cmd", ".vbs", ".vbe",
 
 @dataclass
 class _Budget:
-    members: int = MAX_ARCHIVE_MEMBERS
-    bytes_left: int = MAX_ARCHIVE_TOTAL_BYTES
+    members: int = field(default_factory=lambda: MAX_ARCHIVE_MEMBERS)
+    bytes_left: int = field(default_factory=lambda: MAX_ARCHIVE_TOTAL_BYTES)
 
 
 def _preferred(left: ScanOutcome, right: ScanOutcome) -> ScanOutcome:
