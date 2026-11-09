@@ -183,7 +183,34 @@ for _locale, _texts in {
 }.items():
     MESSAGES[_locale].update(stopping=_texts[0], stopped=_texts[1])
 
-# Engine selection uses stable protocol names in every locale.
+# AntiOS Engine is independently implemented; all user-facing strings must
+# reflect its actual inspection scope, not the retired ClamAV/AMSI backends.
+for _locale, _texts in {
+    "en": ("AntiOS Engine", "Local detection without an external antivirus service.",
+           "Read-only AntiOS scanning: local SHA-256 signatures, bounded ZIP inspection, and advisory PE/script checks. Unknown malware may be missed. Keep your primary real-time protection enabled.",
+           "Local signature set includes an EICAR test hash; load additional trusted SHA-256 rules."),
+    "ru": ("AntiOS Engine", "Собственный движок без сторонней антивирусной службы.",
+           "Проверка AntiOS: локальные SHA-256 сигнатуры, ограниченная проверка ZIP и анализ PE/скриптов. Неизвестные угрозы могут быть пропущены. Не отключайте постоянную защиту.",
+           "Есть тестовая сигнатура EICAR; можно загрузить собственные проверенные SHA-256 правила."),
+    "es": ("AntiOS Engine", "Detección local sin servicios antivirus externos.",
+           "Análisis de solo lectura: SHA-256 local, ZIP limitado y revisión orientativa de PE y scripts. Puede omitir amenazas desconocidas. Mantén activa la protección principal.",
+           "Firmas locales con prueba EICAR; permite añadir reglas SHA-256 de confianza."),
+    "zh-CN": ("AntiOS Engine", "无需外部防病毒服务的本地检测。",
+              "只读检测：本地 SHA-256 特征、有限 ZIP 检查及 PE/脚本的提示性分析。可能漏检未知威胁。请保持主要实时防护开启。",
+              "内置 EICAR 测试哈希；可导入可信的 SHA-256 规则。"),
+    "fi": ("AntiOS Engine", "Paikallinen tunnistus ilman ulkoista virustorjuntapalvelua.",
+           "Vain luku -tarkistus: paikalliset SHA-256-tunnisteet, rajattu ZIP-tarkistus ja PE-/skriptihavainnot. Tuntemattomia uhkia voi jäädä löytymättä. Pidä pääasiallinen reaaliaikainen suojaus käytössä.",
+           "Mukana EICAR-testitiiviste; lisää tarvittaessa luotettuja SHA-256-sääntöjä."),
+    "pl": ("AntiOS Engine", "Lokalne wykrywanie bez zewnętrznej usługi antywirusowej.",
+           "Skanowanie tylko do odczytu: lokalne SHA-256, ograniczona analiza ZIP i wskazówki dotyczące PE/skryptów. Nieznane zagrożenia mogą zostać pominięte. Zachowaj aktywną ochronę główną.",
+           "Dostępny skrót testowy EICAR; można importować zaufane reguły SHA-256."),
+    "mn": ("AntiOS Engine", "Гаднын вирусийн эсрэг үйлчилгээ шаардахгүй локал хөдөлгүүр.",
+           "Локал SHA-256, хязгаартай ZIP шалгалт, PE болон скриптийн сэрэмжлүүлгийн шинжилгээ. Танигдаагүй хортой кодыг алдаж болно. Үндсэн хамгаалалтаа асаалттай байлга.",
+           "EICAR туршилтын хэштэй; итгэмжлэгдсэн SHA-256 дүрэм нэмж болно."),
+}.items():
+    MESSAGES[_locale].update(engine=_texts[0], engine_hint=_texts[1],
+                             note=_texts[2], signatures_builtin=_texts[3])
+
 for _locale, _texts in {
     "en": ("Engine", "ClamAV requires a local daemon; see docs/CLAMAV.md.",
            "Read-only on-demand scanning with the selected engine and local hashes. 32 MiB per file. Archive analysis depends on the engine. Keep real-time protection enabled.",
@@ -289,7 +316,7 @@ for _locale, _texts in {
         "AntiOS found something that needs your attention.",
         "Resident protection is unavailable or stopped. Start it to restore continuous monitoring.",
         "AntiOS is preparing Resident Guard.",
-        "AntiOS Engine · ClamAV",
+        "AntiOS Engine",
         "Scan",
         "Choose a file or folder and run an on-demand check.",
         "Target",
@@ -319,7 +346,7 @@ for _locale, _texts in {
         "AntiOS обнаружил событие, которое требует вашего внимания.",
         "Постоянная защита недоступна или остановлена. Запустите её, чтобы вернуть фоновый контроль.",
         "AntiOS подготавливает Resident Guard.",
-        "AntiOS Engine · ClamAV",
+        "AntiOS Engine",
         "Проверка",
         "Выберите файл или папку и запустите проверку.",
         "Объект проверки",
@@ -349,7 +376,7 @@ for _locale, _texts in {
         "AntiOS detectó algo que requiere tu atención.",
         "La protección residente no está disponible o está detenida. Iníciala para recuperar la supervisión continua.",
         "AntiOS está preparando Resident Guard.",
-        "AntiOS Engine · ClamAV",
+        "AntiOS Engine",
         "Análisis",
         "Elige un archivo o carpeta y ejecuta un análisis.",
         "Objetivo",
@@ -379,7 +406,7 @@ for _locale, _texts in {
         "AntiOS 发现了需要处理的事件。",
         "实时防护不可用或已停止。请启动它以恢复持续监视。",
         "AntiOS 正在准备 Resident Guard。",
-        "AntiOS Engine · ClamAV",
+        "AntiOS Engine",
         "扫描",
         "选择文件或文件夹并运行按需扫描。",
         "扫描目标",
@@ -409,7 +436,7 @@ for _locale, _texts in {
         "AntiOS löysi asian, joka vaatii huomiota.",
         "Taustasuojaus ei ole käytettävissä tai se on pysäytetty. Käynnistä se jatkuvaa valvontaa varten.",
         "AntiOS valmistelee Resident Guardia.",
-        "AntiOS Engine · ClamAV",
+        "AntiOS Engine",
         "Tarkistus",
         "Valitse tiedosto tai kansio ja suorita tarkistus.",
         "Kohde",
@@ -439,7 +466,7 @@ for _locale, _texts in {
         "AntiOS wykrył zdarzenie wymagające uwagi.",
         "Ochrona rezydentna jest niedostępna lub zatrzymana. Uruchom ją, aby przywrócić ciągłe monitorowanie.",
         "AntiOS przygotowuje Resident Guard.",
-        "AntiOS Engine · ClamAV",
+        "AntiOS Engine",
         "Skanowanie",
         "Wybierz plik lub folder i uruchom skanowanie.",
         "Cel",
@@ -469,7 +496,7 @@ for _locale, _texts in {
         "AntiOS анхаарах шаардлагатай үйл явдал илрүүллээ.",
         "Байнгын хамгаалалт боломжгүй эсвэл зогссон байна. Тасралтгүй хяналтыг сэргээхийн тулд эхлүүлнэ үү.",
         "AntiOS Resident Guard-ийг бэлдэж байна.",
-        "AntiOS Engine · ClamAV",
+        "AntiOS Engine",
         "Шалгалт",
         "Файл эсвэл хавтас сонгоод шалгалт ажиллуулна уу.",
         "Шалгах объект",
