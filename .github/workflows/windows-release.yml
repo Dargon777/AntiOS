@@ -39,6 +39,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Refuse unsigned master publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING != 'true'
+        shell: pwsh
+        run: throw 'Refusing to publish unsigned AntiOS executables'
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -593,7 +598,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
     needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
