@@ -8,7 +8,7 @@ AntiOS provides on-demand scanning, findings, quarantine/restore and optional re
 - Results distinguish detections, skipped items, errors and incomplete coverage.
 - Quarantine and restore are explicit operations.
 - AntiOS can coexist with supported primary antivirus products without disabling them.
-- An experimental **independent AntiOS native** on-demand mode is available with `virus-scan PATH --engine antios`. It uses local SHA-256 signatures, structural/script observations and bounded ZIP inspection; it does not call ClamAV or AMSI. Unknown threats may be missed, and heuristic indicators are advisory.
+- An experimental **independent AntiOS Engine** on-demand mode is available with `virus-scan PATH --engine antios`. It uses local SHA-256 signatures, structural/script observations and bounded ZIP inspection; it does not call ClamAV or AMSI. Unknown threats may be missed, and heuristic indicators are advisory.
 - Protection status surfaces degraded or incomplete states instead of silently reporting success.
 - Experimental native protection is not treated as production-certified primary antivirus protection.
 
