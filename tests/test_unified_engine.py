@@ -28,7 +28,7 @@ def test_native_mode_scans_without_clamav_or_amsi(tmp_path, monkeypatch):
     target = tmp_path / "benign"
     target.write_bytes(b"ordinary inert data")
     result = antivirus.scan_files(target, engine="antios")
-    assert result["engine"]["provider"] == "AntiOS native"
+    assert result["engine"]["provider"] == "AntiOS Engine"
     assert result["engine"]["database_freshness"] == "local"
     assert result["coverage"] == "antios-local-inspection"
     assert result["verdict"] == "no-threats-found"
@@ -61,7 +61,7 @@ def test_known_signature_inside_zip_is_detected_and_archive_unchanged(tmp_path):
     }))
     result = antivirus.scan_files(target, engine="antios", signature_path=database)
     assert result["verdict"] == "threats-found"
-    assert result["findings"][0]["engine"] == "AntiOS native"
+    assert result["findings"][0]["engine"] == "AntiOS Engine"
     assert result["findings"][0]["name"] == "Archive signature fixture"
     assert (target.read_bytes(), target.stat().st_mtime_ns) == original
 
@@ -89,7 +89,7 @@ def test_suspicious_script_is_review_only_and_not_auto_enforceable(tmp_path):
     result = antivirus.scan_files(target, engine="antios")
     assert result["verdict"] == "review"
     assert result["findings"][0]["kind"] == "review"
-    assert result["findings"][0]["engine"] == "AntiOS native"
+    assert result["findings"][0]["engine"] == "AntiOS Engine"
     risk = evaluate_risk(str(target), result)
     assert not risk.automatic_enforcement_eligible
 
