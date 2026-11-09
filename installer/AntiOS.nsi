@@ -203,6 +203,31 @@ Section "AntiOS" SecMain
     ${EndIf}
 antios_path_preflight_done:
 
+  ; Fail closed on old anti-malware components. Replacing application files
+  ; without ownership-verified retirement of a SYSTEM service or AMSI DLL
+  ; would leave a misleading and potentially vulnerable mixed installation.
+  ClearErrors
+  ReadRegStr $0 HKLM "${INSTALL_KEY}" "EngineServiceName"
+  ${If} $0 != ""
+    Goto antios_legacy_upgrade_blocked
+  ${EndIf}
+  IfFileExists "$INSTDIR\protection-engine.ps1" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\protection-bootstrap.ps1" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\protection-repair.ps1" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\AntiOS-AmsiProvider.dll" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\AntiOS-Service.exe" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\AntiOS-Filter.sys" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\ClamAV\*.*" antios_legacy_upgrade_blocked
+  Goto antios_legacy_upgrade_safe
+
+antios_legacy_upgrade_blocked:
+  SetErrorLevel 30
+  MessageBox MB_ICONSTOP|MB_OK "AntiOS detected a previous protection engine. Automatic replacement is blocked. Use the original version uninstaller and verify its services are removed before installing this version. No files were changed." /SD IDOK
+  Abort
+
+antios_legacy_upgrade_safe:
+
   ; Extract the complete new payload and generate its uninstaller before
   ; stopping the previous Guard or replacing one installed application file.
   ; A residual staging/backup directory may indicate interrupted recovery:
@@ -366,9 +391,6 @@ Section "Uninstall"
   ; would otherwise redirect deletion into an unrelated directory.
   !insertmacro ANTIOS_UNINSTALL_CHECK_PATHS
   SetOutPath "$TEMP"
-  IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 +3
-    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -Uninstall -Apply'
-    Pop $0
   IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +3
     nsExec::Exec '"$INSTDIR\AntiOS-Guard.exe" stop'
     Pop $0
@@ -377,9 +399,6 @@ Section "Uninstall"
     Pop $0
   IfFileExists "$INSTDIR\dashboard-startup.ps1" 0 +3
     nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\dashboard-startup.ps1" -Uninstall -Apply'
-    Pop $0
-  IfFileExists "$INSTDIR\protection-engine.ps1" 0 +3
-    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-engine.ps1" -Uninstall -Apply'
     Pop $0
 
   Delete "$COMMONDESKTOP\AntiOS.lnk"
