@@ -89,10 +89,12 @@ def _scanner_summary(result: dict) -> tuple[str, bool, bool, bool]:
     engine_ready = bool(
         engine.get("available", True) is not False and
         engine.get("failed_during_scan") is not True and
-        engine.get("database_freshness", "current") == "current"
+        (engine.get("database_freshness", "current") == "current"
+         or (coverage == "antios-local-inspection"
+             and engine.get("database_freshness") == "local"))
     )
     complete = coverage in {"clamav-and-signatures", "provider-and-signatures",
-                            "antios-unified-and-signatures"} and engine_ready
+                            "antios-local-inspection"} and engine_ready
     return verdict, complete, confirmed, review
 
 
