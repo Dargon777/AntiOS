@@ -18,7 +18,6 @@ import uuid
 
 from .antivirus import checked_path, fingerprint, is_link
 from .behavior import BehaviorEngine
-from .clamav import ClamAVScanner
 from .coexistence import companion_protected_roots, defender_protected_roots
 from .incident import IncidentGraph
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
@@ -72,7 +71,7 @@ class GuardPolicy:
             raise ValueError('Invalid guard time limits')
         if not 1 <= self.max_files <= 100000 or not 1 <= self.max_queue <= 4096:
             raise ValueError('Invalid guard capacity limits')
-        if not isinstance(self.scan_engine, str) or self.scan_engine not in {"clamav", "antios"}:
+        if self.scan_engine != "antios":
             raise ValueError("Unknown Guard scan engine")
         if self.engine_service is not None:
             from .windows_clamd_peer import validate_service_name
@@ -131,15 +130,14 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
     return files, issues, limited
 
 
-def probe_engine(service_name=None, *, scan_engine='antios'):
-    if scan_engine == 'antios':
-        from .antivirus import load_signatures
-        from .engine import AntiOSEngine
-        engine = AntiOSEngine(signatures=load_signatures())
-    elif scan_engine == 'clamav':
-        engine = ClamAVScanner(service_name=service_name, require_verified_peer=os.name == 'nt')
-    else:
-        raise ValueError('Unknown Guard scan engine')
+def probe_engine(service_name=None, *, scan_engine="antios"):
+    """Probe our local engine, without connecting to external services."""
+    from .antivirus import load_signatures
+    from .engine import AntiOSEngine
+
+    if scan_engine not in {"antios", "clamav"}:
+        raise ValueError("Unknown Guard scan engine")
+    engine = AntiOSEngine(signatures=load_signatures())
     try:
         return dict(engine.metadata, available=True)
     finally:
@@ -165,8 +163,7 @@ class Guard:
                 raise ValueError('A watched root cannot be inside protected Guard, quarantine or Defender storage')
         if scanner is None:
             self.scanner = lambda path, **kwargs: run_scan_process(
-                path, engine_service=policy.engine_service,
-                require_verified_peer=os.name == 'nt', **kwargs)
+                path, **kwargs)
         else:
             self.scanner = scanner
         self.probe = (lambda: probe_engine(policy.engine_service, scan_engine=policy.scan_engine)) if probe is None else probe
@@ -208,10 +205,8 @@ class Guard:
         if native_probe is not None:
             self.native_probe = native_probe
         elif os.name == 'nt':
-            def _default_native_probe():
-                from .protection import native_pre_execution_active
-                return native_pre_execution_active()
-            self.native_probe = _default_native_probe
+            # Old native service speaks to ClamAV, not AntiOS Engine.
+            self.native_probe = lambda: None
         else:
             self.native_probe = lambda: None
         self._native_checked_at = float('-inf')
@@ -706,7 +701,10 @@ def load_policy(path):
         from .windows_clamd_peer import validate_service_name
         validate_service_name(engine_service)
     scan_engine = data.get('scan_engine', 'antios')
-    if not isinstance(scan_engine, str) or scan_engine not in {'clamav', 'antios'}:
+    if scan_engine == 'clamav':
+        # A policy from an older installation is migrated to our engine.
+        scan_engine = 'antios'
+    if scan_engine != 'antios':
         raise ValueError('Unknown Guard scan engine')
     return GuardPolicy(tuple(Path(p) for p in roots), auto_quarantine=automatic,
                        engine_service=engine_service, scan_engine=scan_engine)
@@ -750,8 +748,8 @@ def main(argv=None):
     run.add_argument('--policy', type=Path)
     run.add_argument('--auto-quarantine', action='store_true', help='Explicitly permit automatic encrypted isolation of confirmed detections.')
     run.add_argument('--engine-service', help='Windows SCM service name owning the trusted ClamD process.')
-    run.add_argument('--engine', choices=('clamav', 'antios'),
-                     help='Native AntiOS detection (default); legacy ClamAV is opt-in only.')
+    run.add_argument('--engine', choices=('antios',),
+                     help='Native AntiOS Engine (default).')
     run.add_argument('--state-dir', type=Path)
     for name in ('status', 'stop', 'history'):
         commands.add_parser(name).add_argument('--state-dir', type=Path)
