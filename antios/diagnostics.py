@@ -18,7 +18,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 _LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 _COMPONENTS = {
-    "Guard", "ClamAV", "Scanner", "Quarantine", "Updater",
+    "Guard", "ClamAV", "AntiOS Engine", "Scanner", "Quarantine", "Updater",
     "Installer", "Protection", "UI", "Defender", "System",
 }
 _MAX_BYTES = 1024 * 1024
@@ -53,11 +53,11 @@ _HELP = {
     },
     "ENGINE_NOT_READY": {
         "ru": ("Движок защиты недоступен",
-               "ClamAV или его базы не готовы. AntiOS не считает такое состояние активной защитой.",
-               "Проверьте состояние ClamAV, затем выполните восстановление защиты с подтверждением UAC."),
+               "Локальный движок AntiOS или его сигнатуры недоступны. Проверку нельзя считать завершённой.",
+               "Проверьте установку AntiOS и локальную базу сигнатур. Не отключайте постоянную защиту."),
         "en": ("Protection engine not ready",
-               "ClamAV or its databases are not ready. AntiOS does not claim protection in this state.",
-               "Check ClamAV status, then run Repair protection with explicit UAC consent."),
+               "The local AntiOS Engine or its signatures are unavailable. The scan cannot be considered complete.",
+               "Check the AntiOS installation and local signature database. Keep primary protection enabled."),
     },
     "ELEVATION_REQUIRED": {
         "ru": ("Требуются права администратора",
@@ -102,10 +102,10 @@ _HELP = {
     "GUARD_UNRESPONSIVE": {
         "ru": ("Guard не отвечает",
                "Нет подтверждения, что фоновый мониторинг работает. Нельзя считать защиту активной.",
-               "Проверьте ClamAV и перезапустите Guard после устранения ошибок движка."),
+               "Проверьте AntiOS Engine и перезапустите Guard после устранения ошибки."),
         "en": ("Guard is unresponsive",
                "Resident monitoring is not confirmed; protection must not be shown as active.",
-               "Check ClamAV and restart Guard after resolving engine errors."),
+               "Check AntiOS Engine and restart Guard after resolving engine errors."),
     },
     "GUARD_POLICY_INVALID": {
         "ru": ("Настройки Guard несовместимы",
