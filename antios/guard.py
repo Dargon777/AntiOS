@@ -63,6 +63,7 @@ class GuardPolicy:
     max_files: int = 50000
     max_queue: int = 256
     engine_service: str | None = None
+    scan_engine: str = "clamav"
 
     def validate(self):
         if not 1 <= len(self.roots) <= 16:
@@ -71,6 +72,8 @@ class GuardPolicy:
             raise ValueError('Invalid guard time limits')
         if not 1 <= self.max_files <= 100000 or not 1 <= self.max_queue <= 4096:
             raise ValueError('Invalid guard capacity limits')
+        if self.scan_engine not in {"clamav", "antios"}:
+            raise ValueError("Unknown Guard scan engine")
         if self.engine_service is not None:
             from .windows_clamd_peer import validate_service_name
             validate_service_name(self.engine_service)
@@ -216,6 +219,7 @@ class Guard:
                        'state': 'starting', 'running': True, 'pid': os.getpid(),
                        'started_at': time.time(), 'heartbeat': time.time(),
                        'roots': [str(root) for root in self.roots],
+                       'scan_engine': self.policy.scan_engine,
                        'mode': 'quarantine' if policy.auto_quarantine else 'notify',
                        'pre_execution_blocking': False, 'coverage': 'selected-directories-after-change',
                        'engine': {}, 'scanned': 0, 'detections': 0, 'quarantined': 0,
@@ -525,7 +529,7 @@ class Guard:
                     store.publish(self.status)
                     self._notify_status()
                     try:
-                        result = self.scanner(path, engine='clamav', timeout=45, cancelled=cancelled)
+                        result = self.scanner(path, engine=self.policy.scan_engine, timeout=45, cancelled=cancelled)
                         if cancelled():
                             break
                         self.transient_retries.pop(path, None)
@@ -667,7 +671,7 @@ def load_policy(path):
     data = json.loads(content)
     if not isinstance(data, dict) or data.get('schema') != 1:
         raise ValueError('Guard policy must use schema 1')
-    unknown = set(data) - {'schema', 'roots', 'auto_quarantine', 'engine_service'}
+    unknown = set(data) - {'schema', 'roots', 'auto_quarantine', 'engine_service', 'scan_engine'}
     if unknown:
         # Show safe *field names* in diagnostics without leaking arbitrary JSON
         # keys. Never ignore unknown policy options or weaken Guard defaults.
@@ -693,8 +697,11 @@ def load_policy(path):
     if engine_service is not None:
         from .windows_clamd_peer import validate_service_name
         validate_service_name(engine_service)
+    scan_engine = data.get('scan_engine', 'clamav')
+    if scan_engine not in {'clamav', 'antios'}:
+        raise ValueError('Unknown Guard scan engine')
     return GuardPolicy(tuple(Path(p) for p in roots), auto_quarantine=automatic,
-                       engine_service=engine_service)
+                       engine_service=engine_service, scan_engine=scan_engine)
 
 
 def _startup_error_file(state_dir=None):
@@ -735,6 +742,8 @@ def main(argv=None):
     run.add_argument('--policy', type=Path)
     run.add_argument('--auto-quarantine', action='store_true', help='Explicitly permit automatic encrypted isolation of confirmed detections.')
     run.add_argument('--engine-service', help='Windows SCM service name owning the trusted ClamD process.')
+    run.add_argument('--engine', choices=('clamav', 'antios'),
+                     help='Use experimental unified scanning (default: clamav).')
     run.add_argument('--state-dir', type=Path)
     for name in ('status', 'stop', 'history'):
         commands.add_parser(name).add_argument('--state-dir', type=Path)
@@ -746,12 +755,13 @@ def main(argv=None):
             print(json.dumps(status, indent=2, ensure_ascii=False))
             return 0
         if args.policy:
-            if args.roots or args.auto_quarantine or args.engine_service:
+            if args.roots or args.auto_quarantine or args.engine_service or args.engine is not None:
                 raise ValueError('Use a policy file or inline roots/options, not both')
             policy = load_policy(args.policy)
         else:
             policy = GuardPolicy(tuple(args.roots), auto_quarantine=args.auto_quarantine,
-                                 engine_service=args.engine_service)
+                                 engine_service=args.engine_service,
+                                 scan_engine=args.engine or 'clamav')
         if policy.auto_quarantine and os.name != 'nt':
             raise ValueError('Automatic encrypted quarantine requires Windows DPAPI')
         print('AntiOS Guard: post-write detection for selected directories; pre-execution blocking is unavailable.', flush=True)
