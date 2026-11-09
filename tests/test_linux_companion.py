@@ -117,16 +117,15 @@ def test_linux_protection_status_is_separate_from_windows_contract(monkeypatch):
 
     class Ready:
         metadata = {
-            "version": "ClamAV test",
-            "database_freshness": "current",
-            "peer_verification_required": False,
+            "version": "AntiOS Engine test",
+            "database_freshness": "local",
         }
         def __init__(self, **kwargs):
             pass
         def close(self):
             pass
 
-    monkeypatch.setattr(protection, "ClamAVScanner", Ready)
+    monkeypatch.setattr(protection, "AntiOSEngine", Ready)
     monkeypatch.setattr(protection, "read_guard_state",
                         lambda: {"running": False, "state": "not-running"})
     monkeypatch.setattr(companion, "_is_linux", lambda: True)
