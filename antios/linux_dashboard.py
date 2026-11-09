@@ -103,12 +103,12 @@ def launch(language: str | None = None, *, background: bool = False, self_test: 
     def scan_target(path: str) -> None:
         def worker() -> None:
             try:
-                result = scan_files(path, engine="clamav")
+                result = scan_files(path, engine="antios")
                 rendered = render_antivirus_scan(result)
             except Exception as exc:
                 rendered = f"Scan failed: {exc}"
             root.after(0, lambda: set_output(rendered))
-        set_output("Scanning with AntiOS ClamAV second-opinion layer…")
+        set_output("Scanning with independent AntiOS Engine…")
         threading.Thread(target=worker, daemon=True).start()
 
     def choose_file() -> None:
