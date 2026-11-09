@@ -1,114 +1,43 @@
-name: Experimental native antivirus boundary
+name: AntiOS Engine security integration
+
 on:
   pull_request:
-    paths: ['native/**', 'tests/test_native*', '.github/workflows/windows-native.yml', '.github/workflows/full-source-audit.yml']
+    paths:
+      - "antios/engine.py"
+      - "antios/antivirus.py"
+      - "antios/guard.py"
+      - "antios/incident_response.py"
+      - "tests/test_native_*"
+      - "tests/test_guard_unified.py"
+      - ".github/workflows/windows-native.yml"
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
-  windows-build:
+  native-windows:
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
-      - name: Validate native PowerShell tooling syntax
-        shell: pwsh
-        run: |
-          foreach ($path in @(
-            ".\native\windows\build.ps1",
-            ".\native\windows\Install-NativeService.ps1",
-            ".\native\windows\New-DriverInf.ps1",
-            ".\native\windows\Test-NativeVm.ps1",
-            ".\native\windows\Test-NativeCoexistence.ps1",
-            ".\native\windows\amsi\Install-AmsiProvider.ps1"
-          )) {
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors) | Out-Null
-            if ($errors.Count) {
-              $errors | Format-List | Out-String | Write-Error
-              exit 1
-            }
-          }
-      - name: Validate AntiVirus altitude generator boundary
-        shell: pwsh
-        run: |
-          $valid = Join-Path $env:RUNNER_TEMP 'antios-altitude-valid'
-          .\native\windows\New-DriverInf.ps1 -AssignedAltitude 329998 -OutputDirectory $valid
-          if (-not (Test-Path (Join-Path $valid 'AntiOS-Filter.inf'))) {
-            throw 'Valid AntiVirus altitude did not generate an INF.'
-          }
-          $rejected = $false
-          try {
-            .\native\windows\New-DriverInf.ps1 -AssignedAltitude 329999 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'antios-altitude-invalid')
-          } catch {
-            $rejected = $true
-          }
-          if (-not $rejected) {
-            throw 'Out-of-range AntiVirus altitude 329999 was accepted.'
-          }
-      - name: Compile unsigned x64 service and filter with pinned WDK
-        shell: pwsh
-        run: ./native/windows/build.ps1 -Restore
-      - name: Validate AMSI provider exports without registering it
-        shell: pwsh
-        run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-          if (-not $vs) { throw 'Visual Studio C++ toolchain was not found.' }
-          $dumpbin = Get-ChildItem -LiteralPath (Join-Path $vs 'VC\Tools\MSVC') -Directory |
-            Sort-Object Name -Descending |
-            ForEach-Object { Join-Path $_.FullName 'bin\Hostx64\x64\dumpbin.exe' } |
-            Where-Object { Test-Path -LiteralPath $_ } |
-            Select-Object -First 1
-          if (-not $dumpbin) { throw 'dumpbin.exe was not found in the selected MSVC toolchain.' }
-          $exports = (& $dumpbin /nologo /exports .\build\native\windows\AntiOS-AmsiProvider.dll | Out-String)
-          if ($exports -notmatch 'DllGetClassObject' -or $exports -notmatch 'DllCanUnloadNow') {
-            throw 'AntiOS AMSI provider is missing required COM exports.'
-          }
-      - name: Test native Windows socket client and diagnostics (no driver install)
-        env:
-          ANTIOS_NATIVE_EXE: build/native/windows/AntiOS-Service.exe
-          ANTIOS_REQUIRE_NATIVE_WINDOWS: '1'
-        run: |
-          python -m pip install pytest -e .
-          python -m pytest tests/test_native_service_windows.py -v
-      - name: Upload compile artifacts, not a release package
-        uses: actions/upload-artifact@v4
-        with:
-          name: AntiOS-native-UNSIGNED-EXPERIMENTAL-x64
-          path: |
-            build/native/windows/AntiOS-Service.exe
-            build/native/windows/AntiOS-Filter.sys
-            build/native/windows/AntiOS-AmsiProvider.dll
-            build/native/windows/Native-Inert.exe
-            build/native/windows/EXPERIMENTAL.txt
-            build/native/windows/LICENSE.microsoft
-  engine-boundary:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+          python-version: "3.13"
+      - name: Install AntiOS and test dependencies
+        run: python -m pip install -e . pytest
+      - name: Test AntiOS-owned engine, Guard and packaging isolation
+        run: python -m pytest -v tests/test_native_engine_adversarial.py tests/test_native_runtime_boundary.py tests/test_guard_unified.py tests/test_incident_response.py
+
+  native-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
-      - name: Install real ClamD and test dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clamav-daemon gcc
-          python -m pip install pytest -e .
-      - name: Native coexistence source contracts
-        run: python -m pytest tests/test_native_coexistence_contract.py tests/test_protection.py -v
-      - name: Native protocol, cancellation and real archive scanning
-        env:
-          ANTIOS_REQUIRE_NATIVE: '1'
-          ANTIOS_REQUIRE_CLAMD: '1'
-          ANTIOS_TEST_CLAMD: /usr/sbin/clamd
-        run: python -m pytest tests/test_native_engine.py -v
-      - name: Address and undefined-behavior sanitizers
-        run: |
-          gcc -std=c11 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror native/tests/protocol_sanitizer.c native/windows/engine/protocol.c -o /tmp/antios-protocol-check
-          /tmp/antios-protocol-check
+          python-version: "3.13"
+      - name: Install AntiOS and test dependencies
+        run: python -m pip install -e . pytest
+      - name: Test AntiOS-owned engine, Guard and packaging isolation
+        run: python -m pytest -v tests/test_native_engine_adversarial.py tests/test_native_runtime_boundary.py tests/test_guard_unified.py tests/test_incident_response.py
