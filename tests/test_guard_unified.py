@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from antios import guard
+from antios import guard, scan_process
 
 
 def test_guard_policy_defaults_to_managed_clamav(tmp_path):
@@ -50,3 +50,16 @@ def test_guard_can_forward_unified_mode_to_isolated_worker(tmp_path, monkeypatch
     )
     instance.scanner(root / "fixture", engine=instance.policy.scan_engine)
     assert arguments[0][1]["engine"] == "antios"
+
+
+def test_unified_child_worker_keeps_streaming_limits(tmp_path, monkeypatch):
+    request, events = tmp_path / "request.json", tmp_path / "events.jsonl"
+    request.write_text(json.dumps({"path": str(tmp_path), "engine": "antios"}))
+    observed = {}
+    monkeypatch.setattr(
+        scan_process, "scan_files",
+        lambda _path, **kwargs: observed.update(kwargs),
+    )
+    assert scan_process.worker_main(str(request), str(events)) == 0
+    assert observed["engine"] == "antios"
+    assert observed["max_bytes"] is None
