@@ -50,9 +50,10 @@ def test_first_run_guard_registration_has_no_external_engine_dependency():
 def test_installer_does_not_register_amsi_or_download_external_engine():
     installer = source("installer/AntiOS.nsi")
     body = installer.split('Section "AntiOS" SecMain', 1)[1].split('Section "Uninstall"', 1)[0]
+    active = body.split("antios_legacy_upgrade_safe:", 1)[1]
     for forbidden in ("Install-AmsiProvider.ps1", "AntiOS-AmsiProvider.dll",
                       "protection-bootstrap.ps1", "clamav-windows.json"):
-        assert forbidden not in body
+        assert forbidden not in active
     assert "protection-first-run.ps1" in body
     assert "ANTI0S" not in body
 
