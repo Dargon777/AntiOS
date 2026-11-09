@@ -4,11 +4,11 @@ import sqlite3
 import pytest
 
 from antios import protection_check as checks
-from antios.clamav import ScanOutcome
+from antios.engine_types import ScanOutcome
 
 
 class Engine:
-    metadata = {"database_freshness": "current", "peer_verified": True}
+    metadata = {"database_freshness": "local"}
     closed = False
     def scan(self, content, name):
         return ScanOutcome("threat", "Win.Test.EICAR") if b"EICAR" in content else ScanOutcome()
@@ -53,12 +53,13 @@ def test_unavailable_engine_does_not_prevent_recovery_check():
 
 def test_stale_signatures_and_unreadable_guard_are_visible():
     class Stale(Engine):
-        metadata = {"database_freshness": "stale", "peer_verified": True}
+        metadata = {"database_freshness": "stale"}
     def denied():
         raise sqlite3.DatabaseError("damaged")
     result = checks.run_checks(scanner_factory=Stale, guard_reader=denied)
-    assert result["status"] == "attention"
+    assert result["status"] == "failed"
     assert {row["id"] for row in result["checks"] if row["state"] == "warning"} == {"database", "guard-status"}
+    assert next(row for row in result["checks"] if row["id"] == "engine")["state"] == "failed"
 
 
 def test_cancellation_closes_engine_without_running_later_steps():
