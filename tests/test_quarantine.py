@@ -9,6 +9,7 @@ import pytest
 from antios.antivirus import scan_files
 from antios.quarantine import DPAPIProtector, Quarantine
 from test_antivirus import Provider
+from antios.engine_types import ScanOutcome
 
 
 class AuthenticatedTestProtector:
@@ -28,7 +29,7 @@ class AuthenticatedTestProtector:
 def fixture(tmp_path):
     source = tmp_path / "sample.txt"
     source.write_bytes(b"benign quarantine fixture; never real malware")
-    finding = scan_files(source, provider_factory=lambda: Provider(32768))["findings"][0]
+    finding = scan_files(source, provider_factory=lambda: Provider(ScanOutcome("threat", "Inert quarantine fixture", "AntiOS Engine")))["findings"][0]
     vault = Quarantine(tmp_path / "vault", protector=AuthenticatedTestProtector())
     return source, finding, vault
 
