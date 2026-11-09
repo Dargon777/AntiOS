@@ -53,7 +53,7 @@ def worker_main(request_path: str, events_path: str) -> int:
             scan_files(request["path"], signature_path=request.get("signatures"),
                        engine=request.get("engine", "clamav"),
                        max_files=None,
-                       max_bytes=None if request.get("engine", "clamav") == "clamav" else DEFAULT_MAX_BYTES,
+                       max_bytes=None if request.get("engine", "clamav") in {"clamav", "antios"} else DEFAULT_MAX_BYTES,
                        engine_service=request.get("engine_service"),
                        require_verified_peer=bool(request.get("require_verified_peer", False)),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint,
