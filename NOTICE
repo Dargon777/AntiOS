@@ -12,14 +12,9 @@ adoption of Apache-2.0 for AntiOS v2 does not retroactively relicense
 third-party historical material for which Dargon777 does not hold the
 necessary rights.
 
-The experimental native/ Windows module is separately licensed under the
-Microsoft Public License (MS-PL), including AntiOS modifications. Its minifilter
-foundation is derived from Microsoft Windows-driver-samples / AvScan,
-Copyright (c) 1989-2011 Microsoft Corporation. The full license, pinned upstream
-revision, attribution and changes are provided in native/windows/LICENSE.microsoft,
-native/windows/UPSTREAM_COMMIT and native/README.md. This exception does not
-relicense the Python AntiOS application.
-
-The optional native Windows components, including AntiOS-Filter.sys,
-AntiOS-Service.exe and AntiOS-AmsiProvider.dll, are distributed under the
-Microsoft Public License (MS-PL) as documented in native/windows/LICENSE.microsoft.
+Historical repository revisions also contained an experimental native Windows
+filter/service and AMSI provider derived in part from Microsoft Windows-driver-
+samples / AvScan under the Microsoft Public License (MS-PL). These legacy
+components are not part of the current AntiOS Engine, distribution or source
+tree; their license notices and provenance remain in the Git history.
+No ClamAV executable, native minifilter driver or AMSI provider is bundled.
