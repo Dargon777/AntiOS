@@ -32,9 +32,8 @@ Var StageDir
 Var BackupDir
 Var RollbackFailed
 
-; Application payload only: DO NOT put managed ClamAV or ProgramData in this
-; transaction. ClamAV\clamd.exe can be a live SCM service, and its files must
-; never be moved with GUI/CLI application binaries.
+; Application payload contains only our own AntiOS Engine, GUI, Guard and
+; support scripts. Third-party AV services and their databases are untouched.
 !macro ANTIOS_EACH_APP_ITEM OP
   !insertmacro ${OP} "AntiOS.exe"
   !insertmacro ${OP} "AntiOS-GUI.exe"
@@ -43,21 +42,12 @@ Var RollbackFailed
   !insertmacro ${OP} "_cli"
   !insertmacro ${OP} "_gui"
   !insertmacro ${OP} "_guard"
-  !insertmacro ${OP} "AntiOS-AmsiProvider.dll"
   !insertmacro ${OP} "guard-startup.ps1"
+  !insertmacro ${OP} "guard-trust.ps1"
   !insertmacro ${OP} "guard-state-access.cs"
   !insertmacro ${OP} "dashboard-startup.ps1"
-  !insertmacro ${OP} "protection-engine.ps1"
-  !insertmacro ${OP} "clamav-trust.ps1"
-  !insertmacro ${OP} "clamav-repair-validation.ps1"
-  !insertmacro ${OP} "protection-bootstrap.ps1"
-  !insertmacro ${OP} "protection-repair.ps1"
   !insertmacro ${OP} "protection-first-run.ps1"
-  !insertmacro ${OP} "Install-AmsiProvider.ps1"
-  !insertmacro ${OP} "LICENSE.microsoft"
   !insertmacro ${OP} "COEXISTENCE.md"
-  !insertmacro ${OP} "clamav-windows.json"
-  !insertmacro ${OP} "clamav-config"
   !insertmacro ${OP} "README.md"
   !insertmacro ${OP} "README.ru.md"
   !insertmacro ${OP} "README.es.md"
@@ -340,48 +330,25 @@ antios_payload_copy_ok:
 control_center_done:
   ${EndIf}
 
+  ; AntiOS Engine is bundled in the application. Never download ClamAV or
+  ; register an AMSI provider as part of installing this build.
   ${If} $SkipEngine != "1"
-    DetailPrint "Checking current-user Guard database access..."
+    DetailPrint "Verifying current-user Guard state access..."
     nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -RepairStateAccess -Apply'
     Pop $2
     ${If} $2 == "error"
       StrCpy $2 9001
     ${EndIf}
     WriteRegDWORD HKLM "${INSTALL_KEY}" "GuardAccessRepairExitCode" $2
-    DetailPrint "Bootstrapping AntiOS protection engine..."
-    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-bootstrap.ps1" -ManifestPath "$INSTDIR\clamav-windows.json" -Apply'
-    Pop $0
-    ${If} $0 == "error"
-      StrCpy $0 9001
+    DetailPrint "Configuring AntiOS Engine resident Guard..."
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply'
+    Pop $2
+    ${If} $2 == "error"
+      StrCpy $2 9001
     ${EndIf}
-    WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapExitCode" $0
-    ${If} $0 == 0
-      nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply'
-      Pop $2
-      ${If} $2 == "error"
-        StrCpy $2 9001
-      ${EndIf}
-      WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionFirstRunExitCode" $2
-      ; AMSI coexistence is optional and secondary. Registration succeeds only
-      ; for a valid Authenticode-signed provider and never changes Defender/WSC.
-      IfFileExists "$INSTDIR\AntiOS-AmsiProvider.dll" 0 amsi_done
-      IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 amsi_done
-      DetailPrint "Configuring AntiOS AMSI coexistence provider..."
-      nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -ProviderDll "$INSTDIR\AntiOS-AmsiProvider.dll" -Apply'
-      Pop $3
-      ${If} $3 == "error"
-        StrCpy $3 9001
-      ${EndIf}
-      WriteRegDWORD HKLM "${INSTALL_KEY}" "AmsiProviderExitCode" $3
-      ${If} $3 != 0
-        DetailPrint "AntiOS AMSI provider was not registered; Defender and Windows security policy remain unchanged."
-      ${EndIf}
-amsi_done:
-    ${Else}
-      IfSilent bootstrap_done bootstrap_notice
-bootstrap_notice:
-      MessageBox MB_ICONEXCLAMATION|MB_OK "AntiOS was installed, but the protection engine could not be initialized. Open AntiOS and run Protection Repair after checking your Internet connection."
-bootstrap_done:
+    WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionFirstRunExitCode" $2
+    ${If} $2 != 0
+      DetailPrint "Guard startup needs user attention. Manual scanning remains available."
     ${EndIf}
   ${Else}
     WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapSkipped" 1
