@@ -166,7 +166,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
 
     legacy = _legacy_registration_status()
     blockers = []
-    if legacy.get("markers"):
+    if legacy.get("state") in {"attention", "incomplete"}:
         blockers.append("legacy-engine-registration-requires-migration")
     if not engine_ready:
         blockers.append("antios-native-engine")
