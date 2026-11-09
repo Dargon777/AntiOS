@@ -26,7 +26,7 @@ Unicode true
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\AntiOS"
 !define APP_PATH_KEY "Software\Microsoft\Windows\CurrentVersion\App Paths\AntiOS-GUI.exe"
 
-Var SkipEngine
+Var SkipGuard
 Var ExistingVersion
 Var StageDir
 Var BackupDir
@@ -161,11 +161,19 @@ Function .onInit
   ${EndIf}
 
   ${GetParameters} $R0
-  ${GetOptions} "$R0" "/NOENGINE=" $R1
+  ; NOENGINE previously skipped a third-party service. It no longer has
+  ; that meaning. Do not silently convert it into disabling Guard.
+  ${GetOptions} "$R0" "/NOENGINE=" $R2
+  ${If} $R2 != ""
+    SetErrorLevel 31
+    MessageBox MB_ICONSTOP|MB_OK "The /NOENGINE option is obsolete. AntiOS Engine is bundled and cannot be disabled in setup. Use /NOGUARD=1 only to skip resident Guard configuration." /SD IDOK
+    Abort
+  ${EndIf}
+  ${GetOptions} "$R0" "/NOGUARD=" $R1
   ${If} $R1 == "1"
-    StrCpy $SkipEngine "1"
+    StrCpy $SkipGuard "1"
   ${Else}
-    StrCpy $SkipEngine "0"
+    StrCpy $SkipGuard "0"
   ${EndIf}
 
   SetRegView 64
@@ -375,7 +383,7 @@ control_center_done:
 
   ; AntiOS Engine is bundled in the application. Never download ClamAV or
   ; register an AMSI provider as part of installing this build.
-  ${If} $SkipEngine != "1"
+  ${If} $SkipGuard != "1"
     DetailPrint "Verifying current-user Guard state access..."
     nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -RepairStateAccess -Apply'
     Pop $2
@@ -394,7 +402,7 @@ control_center_done:
       DetailPrint "Guard startup needs user attention. Manual scanning remains available."
     ${EndIf}
   ${Else}
-    WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapSkipped" 1
+    WriteRegDWORD HKLM "${INSTALL_KEY}" "ResidentGuardSetupSkipped" 1
   ${EndIf}
 
   ; A successful install retires only its own app-file rollback area. A crash
