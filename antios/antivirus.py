@@ -214,7 +214,7 @@ def scan_files(
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
                    "max_entries": max_files * 2 if max_files is not None else None, "workers": workers},
         "engine": {"provider": {"amsi": "Windows AMSI", "clamav": "ClamAV",
-                                "antios": "AntiOS native"}[engine], "available": False,
+                                "antios": "AntiOS Engine"}[engine], "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or "")},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
                     "bytes_scanned": 0, "cache_hits": 0, "threats": 0, "reviews": 0, "skipped": 0,
