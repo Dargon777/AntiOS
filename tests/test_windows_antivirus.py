@@ -7,9 +7,9 @@ from antios import windows_defender
 
 
 def test_defender_only_runs_allowlisted_operations(monkeypatch):
-    monkeypatch.setattr(windows_antivirus, "_is_windows", lambda: True)
+    monkeypatch.setattr(windows_defender, "_is_windows", lambda: True)
     monkeypatch.setattr(
-        windows_antivirus,
+        windows_defender,
         "_powershell_executable",
         lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
     )
@@ -27,9 +27,9 @@ def test_defender_only_runs_allowlisted_operations(monkeypatch):
 
 
 def test_defender_failures_are_not_reported_as_completed(monkeypatch):
-    monkeypatch.setattr(windows_antivirus, "_is_windows", lambda: True)
+    monkeypatch.setattr(windows_defender, "_is_windows", lambda: True)
     monkeypatch.setattr(
-        windows_antivirus,
+        windows_defender,
         "_powershell_executable",
         lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
     )
@@ -47,9 +47,9 @@ def test_antios_native_detection_does_not_require_windows_amsi():
 
 
 def test_defender_status_builds_layered_coexistence_profile(monkeypatch):
-    monkeypatch.setattr(windows_antivirus, "_is_windows", lambda: True)
+    monkeypatch.setattr(windows_defender, "_is_windows", lambda: True)
     monkeypatch.setattr(
-        windows_antivirus,
+        windows_defender,
         "_powershell_executable",
         lambda: r"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
     )
@@ -79,8 +79,8 @@ def test_defender_status_builds_layered_coexistence_profile(monkeypatch):
 
 
 def test_defender_status_failure_is_non_destructive(monkeypatch):
-    monkeypatch.setattr(windows_antivirus, "_is_windows", lambda: True)
-    monkeypatch.setattr(windows_antivirus, "_powershell_executable", lambda: "powershell.exe")
+    monkeypatch.setattr(windows_defender, "_is_windows", lambda: True)
+    monkeypatch.setattr(windows_defender, "_powershell_executable", lambda: "powershell.exe")
     def runner(args, **kwargs):
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="cmdlet unavailable")
     status = windows_defender.defender_status(runner=runner)
