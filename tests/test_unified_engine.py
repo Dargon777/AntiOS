@@ -23,8 +23,9 @@ def test_native_mode_scans_without_clamav_or_amsi(tmp_path, monkeypatch):
     def external_provider_forbidden(*_args, **_kwargs):
         raise AssertionError("Native engine must not call third-party providers")
 
-    from antios import windows_defender, clamav
-    monkeypatch.setattr(clamav, "ClamAVScanner", external_provider_forbidden)
+    import socket
+    from antios import windows_defender
+    monkeypatch.setattr(socket, "create_connection", external_provider_forbidden)
     monkeypatch.setattr(windows_defender, "defender_action", external_provider_forbidden)
     target = tmp_path / "benign"
     target.write_bytes(b"ordinary inert data")
