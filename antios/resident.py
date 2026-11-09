@@ -123,8 +123,6 @@ def configure_resident_guard(*, roots: tuple[Path, ...] | None = None) -> dict:
         json.dumps([str(path) for path in selected], ensure_ascii=False),
         "-Mode",
         "notify",
-        "-EngineServiceName",
-        "clamd",
         "-AllowManagedUnsigned",
         "-Apply",
     ]
