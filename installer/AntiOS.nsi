@@ -217,6 +217,18 @@ antios_path_preflight_done:
   ${If} $0 != ""
     Goto antios_legacy_upgrade_blocked
   ${EndIf}
+  ; The retired provider registered this fixed CLSID. Its presence is a
+  ; migration warning, not authorization to remove or execute it.
+  ClearErrors
+  ReadRegStr $0 HKLM "SOFTWARE\Microsoft\AMSI\Providers\{8E8A9D7D-814F-4A83-A127-8C4894E41121}" ""
+  ${If} $0 != ""
+    Goto antios_legacy_upgrade_blocked
+  ${EndIf}
+  ClearErrors
+  ReadRegStr $0 HKLM "SOFTWARE\Classes\CLSID\{8E8A9D7D-814F-4A83-A127-8C4894E41121}\InprocServer32" ""
+  ${If} $0 != ""
+    Goto antios_legacy_upgrade_blocked
+  ${EndIf}
   IfFileExists "$INSTDIR\protection-engine.ps1" antios_legacy_upgrade_blocked
   IfFileExists "$INSTDIR\protection-bootstrap.ps1" antios_legacy_upgrade_blocked
   IfFileExists "$INSTDIR\protection-repair.ps1" antios_legacy_upgrade_blocked
