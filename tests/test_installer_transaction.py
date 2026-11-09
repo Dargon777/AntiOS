@@ -68,3 +68,35 @@ def test_stage_generates_exact_file_uninstall_manifest_without_recursive_delete(
     nsis = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
     assert '!include "${SOURCE_DIR}\\uninstall-manifest.nsh"' in nsis
     assert '!insertmacro ${OP} "uninstall-manifest.nsh"' in nsis
+
+def test_nsis_blocks_legacy_antivirus_upgrade_before_staging_or_guard_shutdown():
+    source = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
+    install = source.split('Section "AntiOS" SecMain', 1)[1].split('Section "Uninstall"', 1)[0]
+    preflight = install.split("antios_legacy_upgrade_safe:", 1)[0]
+    markers = (
+        "protection-engine.ps1", "protection-bootstrap.ps1",
+        "protection-repair.ps1", "Install-AmsiProvider.ps1",
+        "AntiOS-AmsiProvider.dll", "AntiOS-Service.exe",
+        "AntiOS-Filter.sys", "ClamAV",
+    )
+    assert all('IfFileExists "$INSTDIR\\' + name in preflight for name in markers)
+    assert 'ReadRegStr $0 HKLM "${INSTALL_KEY}" "EngineServiceName"' in preflight
+    assert "antios_legacy_upgrade_blocked:" in preflight
+    assert "SetErrorLevel 30" in preflight
+    assert "Abort" in preflight
+    assert "nsExec::Exec" not in preflight
+    assert "CreateDirectory" not in preflight
+    stage = install.index('CreateDirectory "$StageDir"')
+    legacy = install.index("antios_legacy_upgrade_blocked:")
+    guard_stop = install.index("  ; Stop the previous persistent Guard task")
+    assert legacy < stage < guard_stop
+
+
+def test_current_uninstaller_never_executes_retired_engine_scripts():
+    source = Path("installer/AntiOS.nsi").read_text(encoding="utf-8")
+    uninstall = source.split('Section "Uninstall"', 1)[1]
+    assert 'Install-AmsiProvider.ps1' not in uninstall
+    assert 'protection-engine.ps1' not in uninstall
+    assert "ANTI0S" not in uninstall
+    assert '!insertmacro ANTIOS_UNINSTALL_CHECK_PATHS' in uninstall
+    assert '!insertmacro ANTIOS_UNINSTALL_OWNED_PAYLOAD' in uninstall
