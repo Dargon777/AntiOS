@@ -207,7 +207,9 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     # independent layers.
     guard = _guard_status()
     managed = _managed_runtime_status()
-    native = _native_status()
+    # The previous native service is ClamAV-backed; it cannot enforce the
+    # new AntiOS Engine's verdicts. Do not probe/credit it as native protection.
+    native = {"available": False, "reason": "legacy-service-not-an-antios-engine-backend"}
     defender = defender_status()
     coexistence = coexistence_profile(defender)
     amsi = {"registered": False, "module_exists": False, "active": False}
@@ -244,9 +246,9 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     )
     service = native.get("service", {})
     driver = native.get("driver", {})
-    native_running = service.get("service_state") == 4 and service.get("exit_code") == 0
+    native_running = False
     native_health = _native_coexistence_health(native_running, driver)
-    native_coexistence = native_health["configured"]
+    native_coexistence = False
     # Legacy native service still depends on ClamAV; not our enforcement.
     pre_execution = False
     antios_resident = bool(engine_ready and (guard_operational or pre_execution))
@@ -431,7 +433,7 @@ def render_protection_status(status: dict) -> str:
         f"nodes={latest_incident.get('node_count', 0)}, "
         f"edges={latest_incident.get('edge_count', 0)})",
         f"Managed runtime: {'not fully inspected (access unavailable)' if managed.get('inspection_complete') is False else 'healthy' if managed.get('healthy') else 'needs review'}",
-        f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
+        "External engine updater task: not required",
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
         f"Native coexistence: {native_health.get('state', 'inactive/not-validated')}",
         f"Native max wait: {native.get('driver', {}).get('max_wait_ms', 'unknown')} ms",
