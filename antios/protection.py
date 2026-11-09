@@ -1,22 +1,13 @@
 """Truthful aggregate status for AntiOS antivirus protection layers."""
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
-from pathlib import Path
-import subprocess
 
 from .engine import AntiOSEngine
 from .antivirus import load_signatures
 from .guard_state import read_guard_state
-from .private_core import (
-    INTERFACE_VERSION as PRIVATE_CORE_INTERFACE_VERSION,
-    PrivateCoreError,
-    invoke_private_core,
-)
 from .windows_antivirus import coexistence_profile, defender_status
-from .windows_process import hidden_process_kwargs, system_executable
 
 
 def _managed_runtime_status() -> dict:
@@ -33,151 +24,15 @@ def _managed_runtime_status() -> dict:
 
 
 
-def _native_status() -> dict:
-    if os.name != "nt":
-        return {"available": False, "reason": "windows-only"}
-    program_files = os.environ.get("ProgramFiles")
-    if not program_files:
-        return {"available": False, "reason": "ProgramFiles unavailable"}
-    executable = Path(program_files) / "AntiOSNative" / "AntiOS-Service.exe"
-    if not executable.is_file():
-        return {"available": False, "reason": "not-installed"}
-    result = {"available": True, "path": str(executable)}
-    for key, flag in (("service", "--status"), ("driver", "--driver-status")):
-        try:
-            process = subprocess.run(
-                [str(executable), flag],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=5,
-                **hidden_process_kwargs(),
-            )
-            payload = json.loads(process.stdout) if process.stdout.strip() else {}
-            payload["exit_code"] = process.returncode
-            if process.stderr.strip():
-                payload["stderr"] = process.stderr.strip()[:500]
-            result[key] = payload
-        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            result[key] = {"error": str(exc)[:500]}
-    return result
-
-
 def native_pre_execution_active(native: dict | None = None) -> bool | None:
-    """Return truthful native pre-exec state, or None when it cannot be determined."""
-    state = _native_status() if native is None else native
-    if not isinstance(state, dict) or state.get("available") is False:
-        return None
-    service = state.get("service") if isinstance(state.get("service"), dict) else {}
-    driver = state.get("driver") if isinstance(state.get("driver"), dict) else {}
-    if "error" in service or "error" in driver:
-        return None
-    return bool(
-        service.get("service_state") == 4 and
-        service.get("exit_code") == 0 and
-        driver.get("driver_available") is True and
-        driver.get("exit_code") == 0 and
-        driver.get("enforcement") == 1
-    )
+    """No AntiOS Engine pre-execution backend is implemented."""
+    return None
 
 
 def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
-    configured = bool(
-        native_running and
-        driver.get("driver_available") is True and
-        driver.get("exit_code") == 0 and
-        isinstance(driver.get("protocol"), int) and
-        driver.get("protocol") >= 4 and
-        driver.get("coexistence_mode") == 1 and
-        driver.get("fail_open_on_incomplete") is True and
-        isinstance(driver.get("max_pending"), int) and
-        1 <= driver.get("max_pending") <= 4 and
-        isinstance(driver.get("pending"), int) and
-        0 <= driver.get("pending") <= driver.get("max_pending") and
-        isinstance(driver.get("clean_cache_ttl_ms"), int) and
-        0 <= driver.get("clean_cache_ttl_ms") <= 300000 and
-        isinstance(driver.get("database_generation"), int) and
-        driver.get("database_generation") > 0
-    )
-    if not configured:
-        return {
-            "configured": False,
-            "observed": False,
-            "state": "inactive/not-validated",
-            "attention_reasons": [],
-        }
-
-    counters = {}
-    for key in (
-        "attempts", "incomplete", "busy_bypass", "section_conflicts",
-        "delivery_timeouts", "completion_timeouts", "cancelled_opens", "max_wait_ms",
-        "cache_hits", "cache_expired", "cache_invalidations",
-        "database_generation", "database_generation_changes",
-    ):
-        value = driver.get(key)
-        counters[key] = value if isinstance(value, int) and value >= 0 else None
-
-    attempts = counters["attempts"]
-    reasons = []
-    if counters["delivery_timeouts"]:
-        reasons.append("delivery-timeouts")
-    if counters["completion_timeouts"]:
-        reasons.append("completion-timeouts")
-    if counters["max_wait_ms"] is not None and counters["max_wait_ms"] > 15000:
-        reasons.append("latency-ceiling-exceeded")
-
-    if attempts is None:
-        state = "configured-unmeasured"
-        observed = False
-    elif attempts == 0:
-        state = "configured-unexercised"
-        observed = False
-    elif reasons:
-        state = "attention"
-        observed = True
-    elif any(counters[key] for key in ("incomplete", "busy_bypass", "section_conflicts")):
-        state = "operational-with-gaps"
-        observed = True
-    else:
-        state = "operational"
-        observed = True
-
-    return {
-        "configured": True,
-        "observed": observed,
-        "state": state,
-        "attention_reasons": reasons,
-        "telemetry": counters,
-    }
-
-
-def _private_core_protection_status(engine_service: str | None = None) -> dict | None:
-    """Prefer the private core when its narrow public contract is available.
-
-    The open implementation remains a migration fallback until the sensitive
-    components have actually moved to the private repository.
-    """
-    payload = {}
-    if engine_service is not None:
-        payload["engine_service"] = engine_service
-    try:
-        result = invoke_private_core("protection.status", payload, timeout_seconds=10)
-    except PrivateCoreError:
-        return None
-
-    if (
-        result.get("schema") != 1
-        or result.get("kind") != "antios-protection-status"
-        or not isinstance(result.get("capabilities"), dict)
-    ):
-        return None
-    status = dict(result)
-    status["private_core"] = {
-        "active": True,
-        "interface": PRIVATE_CORE_INTERFACE_VERSION,
-    }
-    return status
+    """Legacy ClamAV driver cannot enforce AntiOS Engine verdicts."""
+    return {"configured": False, "observed": False, "state": "inactive/not-implemented",
+            "attention_reasons": [], "telemetry": {}}
 
 
 def _guard_status() -> dict:
@@ -190,7 +45,7 @@ def _guard_status() -> dict:
 
 
 def collect_protection_status(engine_service: str | None = None) -> dict:
-    # Never use a ClamAV/private-core status in place of native inspection.
+    # Use the installed AntiOS Engine, not a legacy external service.
     engine: dict
     try:
         scanner = AntiOSEngine(signatures=load_signatures())
