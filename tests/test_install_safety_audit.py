@@ -58,4 +58,4 @@ def test_logon_guard_and_dashboard_do_not_touch_foreign_scheduler_tasks():
 def test_windows_behavioral_gate_registered():
     workflow = read(".github/workflows/full-source-audit.yml")
     assert "tests/install-boundary-audit-smoke.ps1" in workflow
-    assert "shell: powershell" in workflow
+    assert "shell: pwsh" in workflow
