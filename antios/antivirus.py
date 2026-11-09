@@ -177,7 +177,7 @@ def scan_files(
     use_cache: bool = True,
 ) -> dict[str, Any]:
     if engine != "antios":
-        raise ValueError("Only the independent AntiOS Engine is supported")
+        raise ValueError("Unsupported scan engine: only independent AntiOS Engine is supported")
     if provider_factory is None:
         provider_factory = lambda: AntiOSEngine(signatures=signatures)
     if any(v is not None and (type(v) is not int or v <= 0) for v in (max_files, max_bytes)):
