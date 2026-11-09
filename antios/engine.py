@@ -23,6 +23,7 @@ MAX_INLINE_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 48 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 256
+MAX_ARCHIVE_DIRECTORY_BYTES = 256 * 1024
 MAX_ARCHIVE_DEPTH = 2
 STREAM_PREVIEW_BYTES = 1024 * 1024
 _SCRIPT_EXTENSIONS = frozenset({".ps1", ".psm1", ".bat", ".cmd", ".vbs", ".vbe", ".js", ".jse", ".hta"})
@@ -57,7 +58,10 @@ def _zip_entry_count(data: bytes) -> int | None:
     if marker < 0 or len(tail) - marker < 22:
         return None
     comment_size = struct.unpack_from("<H", tail, marker + 20)[0]
+    directory_size = struct.unpack_from("<I", tail, marker + 12)[0]
     if marker + 22 + comment_size != len(tail):
+        return None
+    if directory_size > MAX_ARCHIVE_DIRECTORY_BYTES:
         return None
     return struct.unpack_from("<H", tail, marker + 10)[0]
 
