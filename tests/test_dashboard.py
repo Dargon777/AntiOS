@@ -195,80 +195,52 @@ def test_dashboard_entry_no_longer_relaunches_every_window_with_uac():
     assert "return launch(args.lang, background=args.background)" in source
 
 
-def test_background_protection_repair_never_triggers_uac(monkeypatch):
+def test_native_engine_verification_never_requests_uac(monkeypatch):
     from antios.dashboard import Dashboard
     from antios import elevation, protection
 
     dashboard = Dashboard.__new__(Dashboard)
-    monkeypatch.setattr(
-        protection, "collect_protection_status",
-        lambda: {"capabilities": {"standalone_detection_engine": False},
-                 "managed_runtime": {"files": {"clamd": True}}},
-    )
-    monkeypatch.setattr(elevation, "is_administrator", lambda: False)
+    monkeypatch.setattr(protection, "collect_protection_status",
+                        lambda: {"capabilities": {"standalone_detection_engine": True}})
     monkeypatch.setattr(
         elevation, "request_protection_elevation",
-        lambda operation: (_ for _ in ()).throw(AssertionError("No background UAC")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("No UAC")),
     )
-    assert dashboard._heal_managed_engine()["action"] == "requires-elevation"
+    assert dashboard._heal_managed_engine()["action"] == "verified-native-engine"
 
 
-def test_manual_protection_repair_requests_only_allowlisted_elevation(monkeypatch):
+def test_native_engine_repair_only_restarts_guard_when_ready(monkeypatch):
     from antios.dashboard import Dashboard
     from antios import elevation, protection, resident
 
     dashboard = Dashboard.__new__(Dashboard)
-    observed = []
-    statuses = iter([
-        {"capabilities": {"standalone_detection_engine": False},
-         "managed_runtime": {"files": {"clamd": True}}},
-        {"capabilities": {"standalone_detection_engine": True},
-         "engine": {"available": True, "database_freshness": "current"}},
-    ])
-    monkeypatch.setattr(
-        protection, "collect_protection_status", lambda: next(statuses)
-    )
+    calls = []
+    monkeypatch.setattr(protection, "collect_protection_status",
+                        lambda: {"capabilities": {"standalone_detection_engine": True}})
     monkeypatch.setattr(elevation, "is_administrator", lambda: False)
-    actions = []
-    monkeypatch.setattr(
-        elevation, "request_protection_elevation",
-        lambda action: actions.append(action) or {"completed": True, "exit_code": 0},
-    )
-    monkeypatch.setattr(
-        resident, "ensure_resident_guard",
-        lambda: observed.append("guard-started") or {"state": "monitoring", "running": True},
-    )
+    monkeypatch.setattr(resident, "ensure_resident_guard",
+                        lambda: calls.append("guard") or {"running": True, "state": "monitoring"})
     result = dashboard.repair_protection()
-    assert actions == ["repair"]
-    assert observed == ["guard-started"]
-    assert result["engine"]["action"] == "repaired"
+    assert calls == ["guard"]
+    assert result["engine"]["action"] == "verified-native-engine"
     assert result["engine"]["verified"] is True
-    assert result["engine"]["completion"]["exit_code"] == 0
     assert result["guard"]["state"] == "monitoring"
 
 
-def test_manual_missing_engine_requests_bootstrap_not_silent_repair(monkeypatch):
+def test_missing_native_engine_requires_reinstall_not_external_bootstrap(monkeypatch):
+    import pytest
     from antios.dashboard import Dashboard
     from antios import elevation, protection
 
     dashboard = Dashboard.__new__(Dashboard)
-    statuses = iter([
-        {"capabilities": {"standalone_detection_engine": False},
-         "managed_runtime": {"files": {}}},
-        {"capabilities": {"standalone_detection_engine": True}},
-    ])
-    monkeypatch.setattr(protection, "collect_protection_status", lambda: next(statuses))
-    monkeypatch.setattr(elevation, "is_administrator", lambda: False)
-    actions = []
+    monkeypatch.setattr(protection, "collect_protection_status",
+                        lambda: {"capabilities": {"standalone_detection_engine": False}})
     monkeypatch.setattr(
         elevation, "request_protection_elevation",
-        lambda action: actions.append(action) or {"completed": True, "exit_code": 0},
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("No UAC")),
     )
-    result = dashboard._heal_managed_engine(interactive=True)
-    assert actions == ["bootstrap"]
-    assert result["action"] == "bootstrapped"
-    assert result["verified"] is True
-
+    with pytest.raises(RuntimeError, match="unavailable"):
+        dashboard._heal_managed_engine(interactive=True)
 
 
 def test_guard_preference_rolls_back_when_uac_is_denied(monkeypatch):
@@ -293,37 +265,28 @@ def test_guard_preference_rolls_back_when_uac_is_denied(monkeypatch):
 
 
 
-def test_maintenance_success_without_ready_clamav_never_starts_guard(monkeypatch):
+def test_native_engine_unavailable_never_starts_guard(monkeypatch):
     import pytest
     from antios.dashboard import Dashboard
     from antios import elevation, protection, resident
 
     dashboard = Dashboard.__new__(Dashboard)
-    observations = []
-    monkeypatch.setattr(
-        protection, "collect_protection_status",
-        lambda: {"capabilities": {"standalone_detection_engine": False},
-                 "managed_runtime": {"files": {"clamd": True}}},
-    )
+    calls = []
+    monkeypatch.setattr(protection, "collect_protection_status",
+                        lambda: {"capabilities": {"standalone_detection_engine": False}})
     monkeypatch.setattr(elevation, "is_administrator", lambda: False)
-    monkeypatch.setattr(
-        elevation, "request_protection_elevation",
-        lambda _action: {"completed": True, "exit_code": 0},
-    )
-    monkeypatch.setattr(
-        resident, "ensure_resident_guard",
-        lambda: observations.append("started") or {},
-    )
-    with pytest.raises(RuntimeError, match="not ready"):
+    monkeypatch.setattr(resident, "ensure_resident_guard",
+                        lambda: calls.append("guard") or {"state": "monitoring"})
+    with pytest.raises(RuntimeError, match="unavailable"):
         dashboard.repair_protection()
-    assert observations == []
+    assert calls == []
 
 
-def test_failed_elevated_maintenance_keeps_resident_setting_unchanged(monkeypatch):
+def test_missing_native_engine_keeps_resident_preference_disabled(monkeypatch):
     import pytest
     from antios.config import AppConfig, ProtectionConfig
     from antios.dashboard import Dashboard
-    from antios import elevation, protection
+    from antios import protection
 
     dashboard = Dashboard.__new__(Dashboard)
     dashboard.config = AppConfig(protection=ProtectionConfig(resident_enabled=False))
@@ -331,20 +294,14 @@ def test_failed_elevated_maintenance_keeps_resident_setting_unchanged(monkeypatc
     dashboard._persist_config = lambda: saves.append(
         dashboard.config.protection.resident_enabled
     )
-    monkeypatch.setattr(
-        protection, "collect_protection_status",
-        lambda: {"capabilities": {"standalone_detection_engine": False},
-                 "managed_runtime": {"files": {"clamd": True}}},
-    )
-    monkeypatch.setattr(elevation, "is_administrator", lambda: False)
-    monkeypatch.setattr(
-        elevation, "request_protection_elevation",
-        lambda *_args: (_ for _ in ()).throw(RuntimeError("exit code 2")),
-    )
-    with pytest.raises(RuntimeError, match="exit code 2"):
+    monkeypatch.setattr(protection, "collect_protection_status",
+                        lambda: {"capabilities": {"standalone_detection_engine": False}})
+    with pytest.raises(RuntimeError, match="unavailable"):
         Dashboard.set_resident_protection_enabled(dashboard, True)
     assert dashboard.config.protection.resident_enabled is False
     assert saves == [True, False]
+
+
 def test_refresh_callback_preserves_the_collection_error(monkeypatch):
     from types import SimpleNamespace
     import antios.dashboard as dashboard
