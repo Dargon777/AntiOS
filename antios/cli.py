@@ -101,30 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show independent engine, resident Guard and native enforcement status.",
     )
     protection_cmd.add_argument("--json", action="store_true")
-    protection_cmd.add_argument("--engine-service", help="Explicit trusted Windows ClamD SCM service name.")
 
     coexist_cmd = sub.add_parser(
         "coexistence-status",
         help="Show read-only coexistence state (Defender on Windows; Kaspersky/Dr.Web on Linux).",
     )
     coexist_cmd.add_argument("--json", action="store_true")
-
-    repair_cmd = sub.add_parser(
-        "protection-repair",
-        help="Preview or repair the managed ClamAV service, ACLs and updater task.",
-    )
-    repair_cmd.add_argument("--yes", action="store_true",
-                            help="Apply repairs. Without --yes, only diagnose and preview.")
-    repair_cmd.add_argument("--update-signatures", action="store_true",
-                            help="Run FreshClam while applying the repair.")
-    repair_cmd.add_argument("--json", action="store_true")
-
-    bootstrap_cmd = sub.add_parser(
-        "protection-bootstrap",
-        help="Install/refresh the official pinned ClamAV engine (administrator only).",
-    )
-    bootstrap_cmd.add_argument("--yes", action="store_true", help="Confirm system installation.")
-    bootstrap_cmd.add_argument("--json", action="store_true")
 
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
     version_cmd.add_argument("--json", action="store_true")
@@ -220,13 +202,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     av = sub.add_parser("virus-scan", help="Read-only, on-demand antivirus scan of a file or folder.")
     av.add_argument("path")
-    av.add_argument("--engine", choices=("clamav", "amsi", "antios"), default="clamav",
-                    help="Managed ClamAV (default), Windows AMSI, or experimental independent AntiOS engine.")
+    av.add_argument("--engine", choices=("antios",), default="antios",
+                    help="Independent AntiOS Engine (the only supported detection engine).")
     av.add_argument("--signatures", help="Optional local schema-1 SHA-256 signature database.")
-    av.add_argument("--max-mb", type=int, help="Optional per-file limit in MiB. ClamAV streams large files by default.")
+    av.add_argument("--max-mb", type=int, help="Optional per-file limit in MiB; larger files use bounded streaming.")
     av.add_argument("--max-files", type=int, help="Optional maximum number of files. Default: scan the entire selection.")
     av.add_argument("--workers", type=int, default=4,
-                    help="ClamD scan concurrency, 1..8 (default: 4). AMSI remains sequential.")
+                    help="Maximum concurrent AntiOS Engine scans, 1..8 (default: 4).")
     av.add_argument("--no-cache", action="store_true",
                     help="Do not reuse clean results for unchanged files.")
     av.add_argument("--json", action="store_true")
@@ -239,7 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     quarantine_verify.add_argument("--json", action="store_true")
     quarantine_add = quarantine_sub.add_parser("add", help="Rescan a file, then preview or isolate a confirmed detection.")
     quarantine_add.add_argument("path")
-    quarantine_add.add_argument("--engine", choices=("clamav", "amsi", "antios"), default="clamav")
+    quarantine_add.add_argument("--engine", choices=("antios",), default="antios")
     quarantine_add.add_argument("--signatures")
     quarantine_add.add_argument("--yes", action="store_true")
     quarantine_add.add_argument("--json", action="store_true")
@@ -399,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
             status = (
                 collect_linux_protection_status()
                 if sys.platform.startswith("linux")
-                else collect_protection_status(args.engine_service)
+                else collect_protection_status()
             )
             if args.json:
                 _print_json(status)
@@ -414,39 +396,6 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(status)
             else:
                 print(render_coexistence_status(status))
-            return 0
-
-        if args.command == "protection-bootstrap":
-            _require_windows()
-            if not args.yes:
-                raise ValueError("Protection bootstrap changes machine settings; pass --yes to confirm")
-            if not _is_admin():
-                raise PermissionError("Administrator privileges are required for protection bootstrap")
-            from .protection_repair import run_protection_bootstrap
-            payload = run_protection_bootstrap()
-            if args.json:
-                _print_json(payload)
-            else:
-                print("AntiOS protection bootstrap: " + str(payload.get("kind")))
-            return 0
-
-        if args.command == "protection-repair":
-            _require_windows()
-            from .protection_repair import run_protection_repair
-            payload = run_protection_repair(
-                apply=args.yes,
-                update_signatures=args.update_signatures,
-            )
-            if args.json:
-                _print_json(payload)
-            else:
-                print("AntiOS protection repair")
-                print(f"Mode: {'applied' if args.yes else 'preview'}")
-                print(f"Healthy before: {payload.get('healthy_before')}")
-                issues = payload.get("issues") or []
-                actions = payload.get("actions") or []
-                print("Issues: " + (", ".join(issues) if issues else "none"))
-                print("Actions: " + (", ".join(actions) if actions else "none"))
             return 0
 
         if args.command == "config":
@@ -547,9 +496,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "virus-scan":
             result = scan_files(args.path, signature_path=args.signatures,
                                 engine=args.engine,
-                                require_verified_peer=(args.engine in {"clamav", "antios"} and os.name == "nt"),
+                                require_verified_peer=False,
                                 max_bytes=(args.max_mb * 1024 * 1024 if args.max_mb is not None
-                                           else DEFAULT_MAX_BYTES if args.engine == "amsi" else None),
+                                           else None),
                                 max_files=args.max_files,
                                 workers=args.workers,
                                 cache_path=default_scan_cache_path(),
@@ -580,7 +529,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 result = scan_files(args.path, signature_path=args.signatures,
                                     engine=args.engine,
-                                    require_verified_peer=(args.engine in {"clamav", "antios"} and os.name == "nt"),
+                                    require_verified_peer=False,
                                     excluded_paths=(default_quarantine_path(),))
                 if not Path(args.path).is_file():
                     raise ValueError("Quarantine add requires one file")
@@ -765,7 +714,7 @@ def main(argv: list[str] | None = None) -> int:
         from .diagnostics import classify_error, record_event
         operation = str(getattr(args, "command", "cli") or "cli")
         component = (
-            "ClamAV" if operation.startswith("protection") else
+            "AntiOS Engine" if operation.startswith("protection") else
             "Scanner" if operation == "virus-scan" else
             "Updater" if operation == "update" else "System"
         )
