@@ -63,3 +63,13 @@ def test_unified_child_worker_keeps_streaming_limits(tmp_path, monkeypatch):
     assert scan_process.worker_main(str(request), str(events)) == 0
     assert observed["engine"] == "antios"
     assert observed["max_bytes"] is None
+
+
+def test_native_guard_engine_probe_does_not_contact_clamav(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Native guard unexpectedly used ClamAV")
+    monkeypatch.setattr(guard, "ClamAVScanner", forbidden)
+    metadata = guard.probe_engine(scan_engine="antios")
+    assert metadata["available"] is True
+    assert metadata["database_freshness"] == "local"
+    assert metadata["version"].startswith("AntiOS Engine/")
