@@ -635,24 +635,50 @@ jobs:
           tag="$(tr -d '\r\n' < release/TAG)"
           # Signed master artifacts may be attached only to the existing draft.
           # A human must complete acceptance and explicitly publish the release.
-          draft="$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
-          if [[ "$draft" != "true" ]]; then
-            echo "Release $tag is not an existing draft; refusing publication."
-            exit 1
-          fi
+          # Draft releases do not necessarily have an actual git tag yet.
+          # The releases-by-tag endpoint can return 404 for a valid draft.
+          # Resolve its immutable API ID from the authenticated release listing.
+          release_id="$(
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+              jq -er --arg tag "$tag" '
+                [.[][] | select(.tag_name == $tag)] |
+                if length == 1 and .[0].draft == true and (.[0].assets | length) == 0
+                then .[0].id
+                else error("Expected exactly one empty draft for the requested tag")
+                end
+              '
+          )"
+          echo "Signed release target: draft ID $release_id"
           mapfile -t assets < <(find release-artifacts -type f -print | sort)
           test "${#assets[@]}" -ge 8
-
-          # Keep public release metadata product-focused; do not publish a draft.
-          # Pin the draft's eventual tag target to the signed master commit.
           test -s release/RELEASE_NOTES.md
-          gh release edit "$tag" \
-            --target "$GITHUB_SHA" \
-            --title "AntiOS $tag" \
-            --notes-file release/RELEASE_NOTES.md \
-            --prerelease \
-            --draft
-          # Reject any unexpected state change before adding assets.
-          test "$(gh release view "$tag" --json isDraft --jq '.isDraft')" = "true"
 
-          gh release upload "$tag" "${assets[@]}"
+          # Do not publish; only update the existing draft by its API ID.
+          jq -n --arg title "AntiOS $tag" \
+                --arg body "$(cat release/RELEASE_NOTES.md)" \
+                --arg target "$GITHUB_SHA" \
+                '{name:$title,body:$body,target_commitish:$target,draft:true,prerelease:true}' |
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" --input - >/dev/null
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.draft')" = "true"
+
+          # Upload by ID through GitHub's release-assets API; tag-based CLI
+          # lookup is unreliable for an untagged draft.
+          for file in "${assets[@]}"; do
+            name="$(basename "$file")"
+            if [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "Unsafe release asset name: $name" >&2
+              exit 1
+            fi
+            digest="sha256:$(sha256sum "$file" | cut -d ' ' -f 1)"
+            curl --fail-with-body --silent --show-error --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Content-Type: application/octet-stream" \
+              --data-binary "@$file" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" \
+              > "$RUNNER_TEMP/antios-upload-result.json"
+            jq -e --arg name "$name" --arg digest "$digest" \
+              '.name == $name and .digest == $digest and .state == "uploaded"' \
+              "$RUNNER_TEMP/antios-upload-result.json" >/dev/null
+          done
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.draft')" = "true"
