@@ -12,7 +12,7 @@ def test_release_version_matches_package_version():
 
 def test_release_tag_matches_package_version():
     tag = Path("release/TAG").read_text(encoding="utf-8").strip()
-    match = re.fullmatch(r"(\\d+)\\.(\\d+)\\.(\\d+)a(\\d+)", __version__)
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)a(\d+)", __version__)
     assert match is not None
     major, minor, patch, alpha = map(int, match.groups())
     expected = f"V.{major}.{minor}.{patch:02d}-Alpha"
@@ -49,7 +49,7 @@ def test_license_and_notice_are_present():
 
 
 def test_windows_and_store_versions_track_package_alpha():
-    match = re.fullmatch(r"(\\d+)\\.(\\d+)\\.(\\d+)a(\\d+)", __version__)
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)a(\d+)", __version__)
     assert match is not None
     major, minor, patch, _alpha = map(int, match.groups())
     expected_numeric = f"{major}.{minor}.{patch}.0"
