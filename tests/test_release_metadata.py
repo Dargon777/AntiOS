@@ -84,4 +84,15 @@ def test_windows_and_store_versions_track_package_alpha():
     assert "Refuse unconfigured signed release" in release_workflow
     assert 'cat release/RELEASE_NOTES.md' in release_workflow
     assert "draft:true,prerelease:true" in release_workflow
+    # Upload preflight must verify both artifact types and every checksum
+    # before changing or uploading assets to the release draft.
+    assert "Only the eight reviewed deliverables" in release_workflow
+    assert "Expected one wheel and one source distribution." in release_workflow
+    assert "Unexpected additional release payload files" in release_workflow
+    assert "sha256sum --check AntiOS-Setup.exe.sha256" in release_workflow
+    assert "sha256sum --check AntiOS-windows-x64.zip.sha256" in release_workflow
+    assert "sha256sum --check AntiOS-linux-x64.tar.gz.sha256" in release_workflow
+    assert release_workflow.index("sha256sum --check AntiOS-Setup.exe.sha256") < release_workflow.index(
+        'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"'
+    )
 
