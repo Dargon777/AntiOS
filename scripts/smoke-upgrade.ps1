@@ -9,15 +9,22 @@ $ErrorActionPreference = "Stop"
 if (-not $ExpectedCurrentVersion) {
     $ExpectedCurrentVersion = (Get-Content ".\release\VERSION" -Raw).Trim()
 }
-# The pinned legacy fixture intentionally stays on alpha.36 across the v3 jump.
-# Never derive the privileged test installer from the current product version.
-if (-not $ExpectedPreviousVersion) { $ExpectedPreviousVersion = "2.0.0a36" }
-if (-not $PreviousTag) { $PreviousTag = "v2.0.0-alpha.36" }
+if ($ExpectedCurrentVersion -notmatch '^\d+\.\d+\.\d+a\d+$') {
+    throw "Unexpected current alpha version: $ExpectedCurrentVersion"
+}
+if (-not $PreviousTag) { $PreviousTag = "v2.0.0-alpha.37" }
+if (-not $ExpectedPreviousVersion) {
+    if ($PreviousTag -notmatch '^v(\d+\.\d+\.\d+)-alpha\.(\d+)$') {
+        throw "Unexpected previous alpha tag: $PreviousTag"
+    }
+    $ExpectedPreviousVersion = "$($Matches[1])a$($Matches[2])"
+}
 
 # Previous alpha installers are not Authenticode-signed. Never execute a
 # mutable release asset as administrator without independently pinned bytes.
 $trustedPreviousInstallers = @{
     "v2.0.0-alpha.36" = "4b8781d630cb10d5418c8ffe335e27d61183266e536f69e6f88faf4fc5cdabe4"
+    "v2.0.0-alpha.37" = "b9cff406e68dd1f4831ab7de292f2f5582aff5970d23eef916015f334b4fe05f"
 }
 if (-not $trustedPreviousInstallers.ContainsKey($PreviousTag)) {
     throw "Unpinned legacy installer $PreviousTag; review and pin the release asset SHA-256 first."
