@@ -642,7 +642,7 @@ jobs:
           test -s release/RELEASE_NOTES.md
           gh release edit "$tag" \
             --target "$GITHUB_SHA" \
-            --title "AntiOS 3.0.01 Alpha" \
+            --title "AntiOS $tag" \
             --notes-file release/RELEASE_NOTES.md \
             --prerelease \
             --draft
