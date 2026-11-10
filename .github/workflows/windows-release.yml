@@ -1,4 +1,4 @@
-name: AntiOS v2 release
+name: AntiOS release
 
 on:
   workflow_dispatch:
@@ -226,9 +226,13 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content ./release/VERSION -Raw).Trim()
-          $parts = $version -replace '^2\.0\.0a', ''
-          if ($parts -notmatch '^\d+$') { throw "Unexpected release version: $version" }
-          $numericVersion = "2.0.$parts.0"
+          $parsed = [regex]::Match($version, '^(\d+)\.(\d+)\.(\d+)a(\d+)$')
+          if (-not $parsed.Success) { throw "Unexpected release version: $version" }
+          $numericVersion = "$($parsed.Groups[1].Value).$($parsed.Groups[2].Value).$($parsed.Groups[3].Value).0"
+          $expectedNumeric = ([regex]::Match((Get-Content ./installer/AntiOS.nsi -Raw), '!define NUMERIC_VERSION "(\d+\.\d+\.\d+\.0)"')).Groups[1].Value
+          if ($numericVersion -ne $expectedNumeric) {
+            throw "Installer numeric version mismatch: computed=$numericVersion default=$expectedNumeric"
+          }
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
           $sourceDir = (Resolve-Path "./installer-stage").Path
           $iconFile = (Resolve-Path "./build/icons/app_main.ico").Path
@@ -623,8 +627,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="$(tr -d '\r\n' < release/TAG)"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists; refusing to replace published downloads."
+          # Signed master artifacts may be attached only to the existing draft.
+          # A human must complete acceptance and explicitly publish the release.
+          draft="$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [[ "$draft" != "true" ]]; then
+            echo "Release $tag is not an existing draft; refusing publication."
             exit 1
           fi
           mapfile -t assets < <(find release-artifacts -type f -print | sort)
@@ -643,11 +650,7 @@ jobs:
 
           For supported usage, current limitations, privacy information and responsible vulnerability reporting, see README.md, PRIVACY.md and SECURITY.md.
 
-          AntiOS v2 remains prerelease software.
+          AntiOS 3 remains prerelease software.
           EOF
 
-          gh release create "$tag" "${assets[@]}" \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --title "AntiOS $tag" \
-            --notes-file "$notes_file"
+          gh release upload "$tag" "${assets[@]}"

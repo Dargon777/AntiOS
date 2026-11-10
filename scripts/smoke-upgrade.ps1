@@ -9,13 +9,10 @@ $ErrorActionPreference = "Stop"
 if (-not $ExpectedCurrentVersion) {
     $ExpectedCurrentVersion = (Get-Content ".\release\VERSION" -Raw).Trim()
 }
-if ($ExpectedCurrentVersion -notmatch '^2\.0\.0a(\d+)$') {
-    throw "Unexpected current alpha version: $ExpectedCurrentVersion"
-}
-$previousAlpha = [int]$Matches[1] - 1
-if ($previousAlpha -lt 1) { throw "Previous alpha release required." }
-if (-not $ExpectedPreviousVersion) { $ExpectedPreviousVersion = "2.0.0a$previousAlpha" }
-if (-not $PreviousTag) { $PreviousTag = "v2.0.0-alpha.$previousAlpha" }
+# The pinned legacy fixture intentionally stays on alpha.36 across the v3 jump.
+# Never derive the privileged test installer from the current product version.
+if (-not $ExpectedPreviousVersion) { $ExpectedPreviousVersion = "2.0.0a36" }
+if (-not $PreviousTag) { $PreviousTag = "v2.0.0-alpha.36" }
 
 # Previous alpha installers are not Authenticode-signed. Never execute a
 # mutable release asset as administrator without independently pinned bytes.

@@ -10,33 +10,46 @@ OTHER_CERT = "B" * 40
 
 
 def test_latest_alpha_selects_highest_non_draft(monkeypatch):
-    current_alpha = int(__version__.split("a", 1)[1])
-    next_alpha = current_alpha + 1
     monkeypatch.setattr(updater, "_request_json", lambda _url: [
-        {"tag_name": "v2.0.0-alpha.14", "draft": False, "assets": []},
-        {"tag_name": f"v2.0.0-alpha.{next_alpha + 100}", "draft": True, "assets": []},
+        {"tag_name": "v2.0.0-alpha.37", "draft": False, "assets": []},
+        {"tag_name": "V.3.0.99-Alpha", "draft": True, "assets": []},
         {
-            "tag_name": f"v2.0.0-alpha.{next_alpha}",
+            "tag_name": "V.3.0.02-Alpha",
             "draft": False,
-            "published_at": "2026-10-04T00:00:00Z",
+            "published_at": "2026-11-10T00:00:00Z",
             "html_url": "https://example.invalid/release",
-            "assets": [
-                {
-                    "name": "AntiOS-Setup.exe",
-                    "browser_download_url": (
-                        "https://github.com/Dargon777/AntiOS/releases/download/"
-                        f"v2.0.0-alpha.{next_alpha}/AntiOS-Setup.exe"
-                    ),
-                    "size": 5,
-                    "digest": None,
-                },
-            ],
+            "assets": [{
+                "name": "AntiOS-Setup.exe",
+                "browser_download_url": (
+                    "https://github.com/Dargon777/AntiOS/releases/download/"
+                    "V.3.0.02-Alpha/AntiOS-Setup.exe"
+                ),
+                "size": 5,
+                "digest": None,
+            }],
         },
     ])
     result = updater.latest_alpha()
-    assert result["latest_alpha"] == next_alpha
-    assert result["latest_version"] == f"2.0.0a{next_alpha}"
+    assert result["latest_alpha"] == 1
+    assert result["latest_version"] == "3.0.2a1"
     assert result["update_available"] is True
+    assert result["tag"] == "V.3.0.02-Alpha"
+
+
+def test_current_v3_not_downgraded_to_legacy_v2(monkeypatch):
+    monkeypatch.setattr(updater, "_request_json", lambda _url: [
+        {"tag_name": "v2.0.0-alpha.37", "draft": False, "assets": []},
+    ])
+    result = updater.latest_alpha()
+    assert result["latest_version"] == "2.0.0a37"
+    assert result["update_available"] is False
+
+
+def test_tag_parser_normalizes_v3_leading_zero_and_legacy():
+    assert updater._tag_key("V.3.0.01-Alpha") == (3, 0, 1, 1)
+    assert updater._tag_key("v2.0.0-alpha.37") == (2, 0, 0, 37)
+    assert updater._tag_key("V.3.0.01-Alpha.2") == (3, 0, 1, 2)
+    assert updater._tag_key("unexpected-tag") is None
 
 
 def test_download_update_verifies_hash_and_signature(tmp_path, monkeypatch):
