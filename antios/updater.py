@@ -22,7 +22,7 @@ MAX_CHECKSUM_BYTES = 4096
 
 def _version_key(version: str) -> tuple[int, int, int, int]:
     """Return comparable major/minor/patch/alpha components."""
-    match = re.fullmatch(r"(\\d+)\\.(\\d+)\\.(\\d+)a(\\d+)", version)
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)a(\d+)", version)
     if not match:
         raise ValueError(f"Unsupported AntiOS version format: {version}")
     return tuple(map(int, match.groups()))
@@ -31,7 +31,7 @@ def _version_key(version: str) -> tuple[int, int, int, int]:
 def _tag_key(tag: str) -> tuple[int, int, int, int] | None:
     """Support legacy v2 tags and the V.3.0.01-Alpha release naming."""
     match = re.fullmatch(
-        r"v\\.?(\\d+)\\.(\\d+)\\.(\\d+)-alpha(?:\\.(\\d+))?",
+        r"v\.?(\d+)\.(\d+)\.(\d+)-alpha(?:\.(\d+))?",
         tag, flags=re.IGNORECASE,
     )
     if not match:
