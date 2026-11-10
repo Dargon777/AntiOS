@@ -188,28 +188,39 @@ for _locale, _texts in {
 for _locale, _texts in {
     "en": ("AntiOS Engine", "Local detection without an external antivirus service.",
            "Read-only AntiOS scanning: local SHA-256 signatures, bounded ZIP/GZIP/TAR inspection, and advisory PE/script checks. Unknown malware may be missed. Keep your primary real-time protection enabled.",
-           "Local signature set includes an EICAR test hash; load additional trusted SHA-256 rules."),
+           "Use the signed AntiOS catalog or choose a local SHA-256 rules file."),
     "ru": ("AntiOS Engine", "Собственный движок без сторонней антивирусной службы.",
            "Проверка AntiOS: локальные сигнатуры SHA-256, ограниченная проверка ZIP/GZIP/TAR и анализ PE и скриптов. Неизвестные угрозы могут быть пропущены. Не отключайте постоянную защиту.",
-           "Есть тестовая сигнатура EICAR; можно загрузить собственные проверенные SHA-256 правила."),
+           "Используется подписанная база AntiOS. Можно выбрать локальный файл правил SHA-256."),
     "es": ("AntiOS Engine", "Detección local sin servicios antivirus externos.",
            "Análisis de solo lectura: SHA-256 local, inspección limitada de ZIP/GZIP/TAR y revisión orientativa de PE y scripts. Puede omitir amenazas desconocidas. Mantén activa la protección principal.",
-           "Firmas locales con prueba EICAR; permite añadir reglas SHA-256 de confianza."),
+           "Base firmada de AntiOS o archivo local SHA-256."),
     "zh-CN": ("AntiOS Engine", "无需外部防病毒服务的本地检测。",
               "只读检测：本地 SHA-256 特征、有限的 ZIP/GZIP/TAR 检查及 PE/脚本的提示性分析。可能漏检未知威胁。请保持主要实时防护开启。",
-              "内置 EICAR 测试哈希；可导入可信的 SHA-256 规则。"),
+              "使用 AntiOS 签名库或选择本地 SHA-256 规则。"),
     "fi": ("AntiOS Engine", "Paikallinen tunnistus ilman ulkoista virustorjuntapalvelua.",
            "Vain luku -tarkistus: paikalliset SHA-256-tunnisteet, rajattu ZIP/GZIP/TAR-tarkistus ja PE-/skriptihavainnot. Tuntemattomia uhkia voi jäädä löytymättä. Pidä pääasiallinen reaaliaikainen suojaus käytössä.",
-           "Mukana EICAR-testitiiviste; lisää tarvittaessa luotettuja SHA-256-sääntöjä."),
+           "Allekirjoitettu AntiOS-kanta tai paikalliset SHA-256-säännöt."),
     "pl": ("AntiOS Engine", "Lokalne wykrywanie bez zewnętrznej usługi antywirusowej.",
            "Skanowanie tylko do odczytu: lokalne SHA-256, ograniczona analiza ZIP/GZIP/TAR i wskazówki dotyczące PE/skryptów. Nieznane zagrożenia mogą zostać pominięte. Zachowaj aktywną ochronę główną.",
-           "Dostępny skrót testowy EICAR; można importować zaufane reguły SHA-256."),
+           "Podpisana baza AntiOS lub lokalne reguły SHA-256."),
     "mn": ("AntiOS Engine", "Гаднын вирусийн эсрэг үйлчилгээ шаардахгүй локал хөдөлгүүр.",
            "Локал SHA-256, хязгаартай ZIP/GZIP/TAR шалгалт, PE болон скриптийн сэрэмжлүүлгийн шинжилгээ. Танигдаагүй хортой кодыг алдаж болно. Үндсэн хамгаалалтаа асаалттай байлга.",
-           "EICAR туршилтын хэштэй; итгэмжлэгдсэн SHA-256 дүрэм нэмж болно."),
+           "Баталгаажсан AntiOS сан эсвэл локал SHA-256 дүрэм."),
 }.items():
     MESSAGES[_locale].update(engine=_texts[0], engine_hint=_texts[1],
                              note=_texts[2], signatures_builtin=_texts[3])
+
+for _locale, (_catalog, _fallback) in {
+    "en": ("Catalog v{version}", "Using a fallback catalog"),
+    "ru": ("База v{version}", "Используется резервная база"),
+    "es": ("Base v{version}", "Se usa la base de respaldo"),
+    "zh-CN": ("签名库 v{version}", "正在使用备用签名库"),
+    "fi": ("Tunnistekanta v{version}", "Varatunnistekanta käytössä"),
+    "pl": ("Baza v{version}", "Używana jest baza zapasowa"),
+    "mn": ("Сан v{version}", "Нөөц сан ашиглаж байна"),
+}.items():
+    MESSAGES[_locale].update(catalog_version=_catalog, catalog_fallback=_fallback)
 
 for _locale, _texts in {
     "en": ("Database date: current", "Database is older than 7 days; run FreshClam", "Database date is unknown", "Database date is in the future; check the clock"),

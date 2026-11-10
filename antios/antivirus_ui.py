@@ -886,6 +886,12 @@ class AntivirusPanel:
             freshness = metadata.get("database_freshness")
             if freshness:
                 engine_text += " · " + self.t("db_" + freshness)
+            if metadata.get("signature_catalog_version") is not None:
+                engine_text += " · " + self.t("catalog_version").format(
+                    version=metadata["signature_catalog_version"],
+                )
+            if metadata.get("signature_catalog_warning"):
+                engine_text += " · " + self.t("catalog_fallback")
             if metadata.get("detail"):
                 engine_text += " · " + metadata["detail"]
             self.provider_status.configure(text=engine_text)

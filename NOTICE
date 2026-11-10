@@ -18,3 +18,7 @@ samples / AvScan under the Microsoft Public License (MS-PL). These legacy
 components are not part of the current AntiOS Engine, distribution or source
 tree; their license notices and provenance remain in the Git history.
 No ClamAV executable, native minifilter driver or AMSI provider is bundled.
+
+The signed starter catalog contains public sector information from the UK
+National Cyber Security Centre, licensed under the Open Government Licence v3.0.
+https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/

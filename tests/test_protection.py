@@ -53,7 +53,7 @@ def test_engine_failure_never_reports_full_protection(monkeypatch):
     def missing_signatures():
         raise ValueError("corrupt signature database")
 
-    monkeypatch.setattr(protection, "load_signatures", missing_signatures)
+    monkeypatch.setattr(protection, "load_managed_signatures", missing_signatures)
     monkeypatch.setattr(protection, "read_guard_state", lambda: _guard())
     monkeypatch.setattr(protection, "defender_status", _active_defender)
     result = protection.collect_protection_status()

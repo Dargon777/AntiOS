@@ -5,20 +5,31 @@ import os
 import sqlite3
 
 from .engine import AntiOSEngine
-from .antivirus import load_signatures
+from .antivirus import load_managed_signatures
 from .guard_state import read_guard_state
 from .windows_defender import coexistence_profile, defender_status
 
 
-def _managed_runtime_status() -> dict:
-    """AntiOS Engine is bundled with the app, not a machine-wide AV service."""
+def _engine_status() -> dict:
     try:
-        scanner = AntiOSEngine(signatures=load_signatures())
-        scanner.close()
+        rules, catalog = load_managed_signatures()
+        scanner = AntiOSEngine(signatures=rules)
+        try:
+            return dict(scanner.metadata, available=True, **catalog)
+        finally:
+            scanner.close()
     except (OSError, RuntimeError, ValueError) as exc:
-        return {"available": False, "healthy": False, "inspection_complete": True,
-                "detail": str(exc)[:500], "files": {}, "updater_task": {"available": False}}
-    return {"available": True, "healthy": True, "inspection_complete": True,
+        return {"available": False, "detail": str(exc)[:500]}
+
+
+def _managed_runtime_status(engine: dict | None = None) -> dict:
+    """Report the health of the bundled engine and its selected catalog."""
+    engine = _engine_status() if engine is None else engine
+    if not engine["available"]:
+        return dict(engine, healthy=False, inspection_complete=True, files={},
+                    updater_task={"available": False})
+    return {"available": True, "healthy": engine.get("signature_catalog_status") != "fallback",
+            "inspection_complete": True,
             "kind": "bundled-antios-engine", "files": {},
             "updater_task": {"available": False, "not_required": True}}
 
@@ -82,22 +93,14 @@ def _guard_status() -> dict:
 
 def collect_protection_status(engine_service: str | None = None) -> dict:
     # Use the installed AntiOS Engine, not a legacy external service.
-    engine: dict
-    try:
-        scanner = AntiOSEngine(signatures=load_signatures())
-        try:
-            engine = dict(scanner.metadata, available=True)
-        finally:
-            scanner.close()
-    except (OSError, RuntimeError, ValueError) as exc:
-        engine = {"available": False, "detail": str(exc)[:500]}
+    engine = _engine_status()
 
     # A denied/corrupt Guard state database must not make the entire protection
     # probe fail and be incorrectly reported as a ClamAV engine failure. Keep
     # the Guard explicitly unavailable (fail closed) while inspecting the other
     # independent layers.
     guard = _guard_status()
-    managed = _managed_runtime_status()
+    managed = _managed_runtime_status(engine)
     # The previous native service is ClamAV-backed; it cannot enforce the
     # new AntiOS Engine's verdicts. Do not probe/credit it as native protection.
     native = {"available": False, "reason": "legacy-service-not-an-antios-engine-backend"}
@@ -220,15 +223,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
 
 def collect_linux_protection_status() -> dict:
     """Linux-specific companion protection view without changing Windows contracts."""
-    engine: dict
-    try:
-        scanner = AntiOSEngine(signatures=load_signatures())
-        try:
-            engine = dict(scanner.metadata, available=True)
-        finally:
-            scanner.close()
-    except (OSError, RuntimeError, ValueError) as exc:
-        engine = {"available": False, "detail": str(exc)[:500]}
+    engine = _engine_status()
 
     guard = _guard_status()
     from .linux_companion import collect_linux_companion_status
@@ -263,9 +258,16 @@ def collect_linux_protection_status() -> dict:
 
 
 def render_protection_status(status: dict) -> str:
+    engine = status["engine"]
+    catalog_warning = engine.get("signature_catalog_warning")
+    catalog_lines = []
+    if engine.get("signature_catalog_version") is not None:
+        catalog_lines.append(f"Signature catalog: v{engine['signature_catalog_version']}"
+                             f" ({engine['signature_catalog_status']})")
+    if catalog_warning:
+        catalog_lines.append(catalog_warning)
     if status.get("kind") == "antios-linux-protection-status":
         caps = status["capabilities"]
-        engine = status["engine"]
         guard = status["guard"]
         companion = status["companion"]["coexistence"]
         products = status["companion"]["products"]
@@ -276,6 +278,7 @@ def render_protection_status(status: dict) -> str:
             f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
             f" ({engine.get('version', engine.get('detail', 'unavailable'))})",
             f"Database: {engine.get('database_freshness', 'unknown')}",
+            *catalog_lines,
             f"Vendor AV detected: {', '.join(detected) if detected else 'none'}",
             f"Vendor realtime confirmed: {', '.join(realtime) if realtime else 'none'}",
             f"Companion mode: {companion['mode']}",
@@ -285,7 +288,6 @@ def render_protection_status(status: dict) -> str:
             "Remaining gates: " + (", ".join(status["remaining_gates"]) or "none"),
         ])
     caps = status["capabilities"]
-    engine = status["engine"]
     guard = status["guard"]
     managed = status.get("managed_runtime", {})
     native = status["native"]
@@ -307,6 +309,7 @@ def render_protection_status(status: dict) -> str:
         f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
         f" ({engine.get('version', engine.get('detail', 'unavailable'))})",
         f"Database: {engine.get('database_freshness', 'unknown')}",
+        *catalog_lines,
         f"Engine identity: {engine.get('peer_identity', 'unknown')}",
         f"Resident Guard: {guard.get('state', 'not-running')}",
         "Behavior monitor: "

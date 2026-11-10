@@ -204,7 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
     av.add_argument("path")
     av.add_argument("--engine", choices=("antios",), default="antios",
                     help="Independent AntiOS Engine (the only supported detection engine).")
-    av.add_argument("--signatures", help="Optional local schema-1 SHA-256 signature database.")
+    av.add_argument("--signatures", help="Override the signed catalog with a local schema-1 SHA-256 database.")
     av.add_argument("--max-mb", type=int, help="Optional per-file limit in MiB; larger files use bounded streaming.")
     av.add_argument("--max-files", type=int, help="Optional maximum number of files. Default: scan the entire selection.")
     av.add_argument("--workers", type=int, default=4,
@@ -212,6 +212,14 @@ def build_parser() -> argparse.ArgumentParser:
     av.add_argument("--no-cache", action="store_true",
                     help="Do not reuse clean results for unchanged files.")
     av.add_argument("--json", action="store_true")
+
+    catalog = sub.add_parser("signatures", help="Inspect or install a signed AntiOS signature catalog.")
+    catalog_sub = catalog.add_subparsers(dest="signatures_command", required=True)
+    catalog_status = catalog_sub.add_parser("status")
+    catalog_status.add_argument("--json", action="store_true")
+    catalog_install = catalog_sub.add_parser("install")
+    catalog_install.add_argument("package", type=Path)
+    catalog_install.add_argument("--json", action="store_true")
 
     quarantine_cmd = sub.add_parser("quarantine", help="Inspect, isolate or restore encrypted threats.")
     quarantine_sub = quarantine_cmd.add_subparsers(dest="quarantine_command", required=True)
@@ -493,6 +501,19 @@ def main(argv: list[str] | None = None) -> int:
                       ' cleanup candidates without a verified independent copy in this scan')
             return 0
 
+        if args.command == "signatures":
+            from .signature_catalog import install_catalog, load_active_catalog
+            catalog = (install_catalog(args.package) if args.signatures_command == "install"
+                       else load_active_catalog())
+            if args.json:
+                _print_json(catalog.metadata())
+            else:
+                print(f"AntiOS signature catalog v{catalog.version} ({catalog.published}) · "
+                      f"{len(catalog.rules)} hashes · {catalog.source}")
+                if catalog.warning:
+                    print(catalog.warning)
+            return 3 if catalog.warning else 0
+
         if args.command == "virus-scan":
             result = scan_files(args.path, signature_path=args.signatures,
                                 engine=args.engine,
@@ -714,7 +735,7 @@ def main(argv: list[str] | None = None) -> int:
         from .diagnostics import classify_error, record_event
         operation = str(getattr(args, "command", "cli") or "cli")
         component = (
-            "AntiOS Engine" if operation.startswith("protection") else
+            "AntiOS Engine" if operation.startswith("protection") or operation == "signatures" else
             "Scanner" if operation == "virus-scan" else
             "Updater" if operation == "update" else "System"
         )

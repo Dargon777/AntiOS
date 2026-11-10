@@ -131,14 +131,15 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
 
 def probe_engine(service_name=None, *, scan_engine="antios"):
     """Probe our local engine, without connecting to external services."""
-    from .antivirus import load_signatures
+    from .antivirus import load_managed_signatures
     from .engine import AntiOSEngine
 
     if scan_engine != "antios":
         raise ValueError("Unknown Guard scan engine")
-    engine = AntiOSEngine(signatures=load_signatures())
+    rules, catalog = load_managed_signatures()
+    engine = AntiOSEngine(signatures=rules)
     try:
-        return dict(engine.metadata, available=True)
+        return dict(engine.metadata, available=True, **catalog)
     finally:
         engine.close()
 
@@ -470,9 +471,11 @@ class Guard:
                     last_probe = now
                     try:
                         metadata = self.probe()
-                        if metadata.get('version') != version:
-                            version = metadata.get('version')
+                        probed_version = (metadata.get('version'), metadata.get('signature_catalog_version'))
+                        if probed_version != version:
+                            version = probed_version
                             self.known.clear()
+                            self.queue_cursor = None
                             changed = True
                         if metadata != self.status['engine']:
                             store.event('engine', metadata)
@@ -612,6 +615,7 @@ class Guard:
                     raise RuntimeError('Guard incident capacity exceeded; review history and reduce watched scope')
                 degraded = (notification_error or self.failures or self.status['inventory_issues'] or
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
+                            self.status['engine'].get('signature_catalog_status') == 'fallback' or
                             self.status['engine'].get('database_freshness') != (
                                 'local' if self.policy.scan_engine == 'antios' else 'current') or
                             (self._process_visibility_required and self.process_sampler is None) or

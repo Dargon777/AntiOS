@@ -16,6 +16,7 @@ from typing import Any, Callable
 from .engine import AntiOSEngine
 from .engine_types import ScanOutcome
 from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
+from .signature_catalog import load_active_catalog
 
 DEFAULT_MAX_BYTES = 32 * 1024 * 1024
 DEFAULT_MAX_FILES = 100_000
@@ -74,10 +75,17 @@ def read_regular(path: Path, max_bytes: int) -> tuple[bytes, os.stat_result]:
     return content, after
 
 
+def load_managed_signatures() -> tuple[dict[str, str], dict]:
+    catalog = load_active_catalog()
+    rules = dict(catalog.rules)
+    rules[EICAR_SHA256] = "EICAR test file (not live malware)"
+    return rules, catalog.metadata()
+
+
 def load_signatures(path: str | Path | None = None) -> dict[str, str]:
-    signatures = {EICAR_SHA256: "EICAR test file (not live malware)"}
     if path is None:
-        return signatures
+        return load_managed_signatures()[0]
+    signatures = {EICAR_SHA256: "EICAR test file (not live malware)"}
     content, _info = read_regular(Path(path), 8 * 1024 * 1024)
     def unique_object(pairs):
         result = {}
@@ -210,7 +218,8 @@ def scan_files(
     target = checked_path(path)
     if not target.is_file() and not target.is_dir():
         raise ValueError("Select a regular file or directory")
-    signatures = load_signatures(signature_path)
+    signatures, catalog = (load_managed_signatures() if signature_path is None
+                           else (load_signatures(signature_path), {}))
     result: dict[str, Any] = {
         "schema": 1, "kind": "antivirus-scan", "path": str(target),
         "started_at": utc_now(), "finished_at": None,
@@ -218,7 +227,8 @@ def scan_files(
                    "max_entries": max_files * 2 if max_files is not None else None, "workers": workers},
         "engine": {"provider": "AntiOS Engine", "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or ""),
-                   "signature_source": "local-file" if signature_path else "built-in-test"},
+                   "signature_source": "local-file" if signature_path is not None else "signed-catalog",
+                   **catalog},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
                     "bytes_scanned": 0, "cache_hits": 0, "threats": 0, "reviews": 0, "skipped": 0,
                     "errors": 0, "cancelled": False, "limit_reached": False},
@@ -541,7 +551,8 @@ def render_antivirus_scan(result: dict) -> str:
              f"Verdict: {result['verdict']}; coverage: {result['coverage']}",
              f"Scanned: {summary['files_scanned']}; threats: {summary['threats']}; "
              f"review: {summary['reviews']}; skipped: {summary['skipped']}; errors: {summary['errors']}"]
-    for key in ("version", "database_freshness", "signature_source", "detail"):
+    for key in ("version", "database_freshness", "signature_source", "signature_catalog_version",
+                "signature_catalog_status", "signature_catalog_warning", "detail"):
         if key in result["engine"]:
             lines.append(f"{key}: {result['engine'][key]}")
     lines.extend(f"{f['kind']}: {f['name']} | {f['path']}" for f in result["findings"])

@@ -32,7 +32,8 @@ def test_native_mode_scans_without_clamav_or_amsi(tmp_path, monkeypatch):
     result = antivirus.scan_files(target, engine="antios")
     assert result["engine"]["provider"] == "AntiOS Engine"
     assert result["engine"]["database_freshness"] == "local"
-    assert result["engine"]["signature_source"] == "built-in-test"
+    assert result["engine"]["signature_source"] == "signed-catalog"
+    assert result["engine"]["signature_catalog_version"] >= 1
     assert result["coverage"] == "antios-local-inspection"
     assert result["verdict"] == "no-threats-found"
 
