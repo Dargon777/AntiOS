@@ -49,17 +49,20 @@ def test_release_publication_requires_enabled_authenticode_signing():
     assert "github.ref != 'refs/heads/master'" in workflow
     publish = workflow.split("  publish-release:", 1)[1]
     assert "vars.ENABLE_ARTIFACT_SIGNING == 'true'" in publish
-    assert "gh release upload" in publish
-    assert 'gh release view "$tag" --json isDraft' in publish
-    assert '"$draft" != "true"' in publish
+    assert "inputs.signed_release == true" in publish
+    assert "gh api --paginate --slurp" in publish
+    assert "select(.tag_name == $tag)" in publish
+    assert ".[0].draft == true" in publish
+    assert "(.[0].assets | length) == 0" in publish
+    assert 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"' in publish
+    assert "draft:true,prerelease:true" in publish
+    assert "--data-binary \"@$file\"" in publish
+    assert "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" in publish
+    assert ".digest == $digest" in publish
     assert "gh release create" not in publish
-    assert 'gh release edit "$tag"' in publish
-    assert '--notes-file release/RELEASE_NOTES.md' in publish
-    assert '--target "$GITHUB_SHA"' in publish
-    assert "          --draft" in publish
-    assert 'test "$(gh release view "$tag" --json isDraft' in publish
-    assert publish.index('gh release edit "$tag"') < publish.index('gh release upload "$tag"')
-    assert "gh release edit \"$tag\" --draft=false" not in publish
+    assert "gh release upload" not in publish
+    assert "gh release edit" not in publish
+    assert "--draft=false" not in publish
 
 
 def test_current_install_scripts_never_bootstrap_clamav():
