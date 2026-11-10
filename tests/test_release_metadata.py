@@ -74,7 +74,7 @@ def test_windows_and_store_versions_track_package_alpha():
     assert expected_numeric in store_workflow
 
     release_workflow = Path(".github/workflows/windows-release.yml").read_text(encoding="utf-8")
-    assert "refusing publication" in release_workflow
+    assert "Expected exactly one empty draft for the requested tag" in release_workflow
     assert "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" in release_workflow
     assert 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"' in release_workflow
     assert "gh release create" not in release_workflow
