@@ -649,8 +649,42 @@ jobs:
               '
           )"
           echo "Signed release target: draft ID $release_id"
-          mapfile -t assets < <(find release-artifacts -type f -print | sort)
-          test "${#assets[@]}" -ge 8
+          # Only the eight reviewed deliverables can enter the release draft.
+          # Refuse missing, duplicate, or unexpected files before editing the draft.
+          shopt -s nullglob
+          wheels=(release-artifacts/windows/python-dist/*.whl)
+          sdists=(release-artifacts/windows/python-dist/*.tar.gz)
+          if [[ "${#wheels[@]}" -ne 1 || "${#sdists[@]}" -ne 1 ]]; then
+            echo "Expected one wheel and one source distribution." >&2
+            exit 1
+          fi
+          assets=(
+            release-artifacts/windows/AntiOS-Setup.exe
+            release-artifacts/windows/AntiOS-Setup.exe.sha256
+            release-artifacts/windows/AntiOS-windows-x64.zip
+            release-artifacts/windows/AntiOS-windows-x64.zip.sha256
+            "${wheels[0]}"
+            "${sdists[0]}"
+            release-artifacts/linux/AntiOS-linux-x64.tar.gz
+            release-artifacts/linux/AntiOS-linux-x64.tar.gz.sha256
+          )
+          for file in "${assets[@]}"; do
+            if [[ ! -f "$file" || ! -s "$file" || -L "$file" ]]; then
+              echo "Missing, empty or unsafe release asset: $file" >&2
+              exit 1
+            fi
+          done
+          actual_count="$(find release-artifacts -type f | wc -l | tr -d '[:space:]')"
+          if [[ "$actual_count" != "${#assets[@]}" ]]; then
+            echo "Unexpected additional release payload files; refusing upload." >&2
+            exit 1
+          fi
+
+          (cd release-artifacts/windows &&
+             sha256sum --check AntiOS-Setup.exe.sha256 &&
+             sha256sum --check AntiOS-windows-x64.zip.sha256)
+          (cd release-artifacts/linux &&
+             sha256sum --check AntiOS-linux-x64.tar.gz.sha256)
           test -s release/RELEASE_NOTES.md
 
           # An existing tag takes precedence over target_commitish on release.
