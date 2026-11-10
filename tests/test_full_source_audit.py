@@ -44,7 +44,11 @@ def test_release_publication_requires_enabled_authenticode_signing():
     assert "vars.ENABLE_ARTIFACT_SIGNING != 'true'" in workflow
     publish = workflow.split("  publish-release:", 1)[1]
     assert "vars.ENABLE_ARTIFACT_SIGNING == 'true'" in publish
-    assert "gh release create" in publish
+    assert "gh release upload" in publish
+    assert 'gh release view "$tag" --json isDraft' in publish
+    assert '"$draft" != "true"' in publish
+    assert "gh release create" not in publish
+    assert "gh release edit" not in publish
 
 
 def test_current_install_scripts_never_bootstrap_clamav():
