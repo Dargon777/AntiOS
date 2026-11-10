@@ -2,7 +2,9 @@
 
 [English](README.md) · [Русский](README.ru.md) · [Español](README.es.md) · [简体中文](README.zh-CN.md) · **Suomi** · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
-**AntiOS — Windowsin kunto, yksityisyys ja diagnostiikka.**
+**AntiOS — Windowsin päätelaitesuojaus- ja järjestelmän ylläpitotyökalu, jossa on täydentävä Linux-tuki.**
+
+> **Nykyinen kehityspuu:** `3.0.1a1`
 
 Lataa uusin `AntiOS-windows-x64.zip` Releases-sivulta, pura tiedosto ja käynnistä **`AntiOS-GUI.exe`**:
 
@@ -21,7 +23,7 @@ https://github.com/Dargon777/AntiOS/releases
 
 Suomenkielinen Windows valitaan automaattisesti, ja kielen voi vaihtaa myös käsin: **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**.
 
-Alpha 11 lisää tiedostojen tarkistuksen, salatun karanteenin ja Microsoft Defenderin toiminnot. Asennettu virustorjunta tarjoaa reaaliaikaisen suojauksen. Tarkistus ei muuta tiedostoja; karanteeni ja palautus vaativat vahvistuksen. Automaattista telemetriaa ei ole. Virustorjuntapalvelu voi käyttää pilveä omien asetustensa mukaisesti.
+Nykyinen kehityspuu sisältää itsenäisen tiedostojen tarkistuksen, valinnaisen taustasuojauksen, karanteenin ja palautuksen, tietoturva- ja järjestelmädiagnostiikan sekä tallennustyökalut. AntiOS käsittelee tiedot oletuksena paikallisesti eikä ota automaattista telemetriaa käyttöön. Katso ajantasainen täydellinen kuvaus ominaisuuksista ja rajoituksista tiedostosta [README.md](README.md).
 
 Virustorjunta ja rajoitukset: [docs/ANTIVIRUS.md](docs/ANTIVIRUS.md).
 
