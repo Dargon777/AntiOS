@@ -90,14 +90,23 @@ def test_eicar_whitespace_matching_uses_hash_without_writing_eicar(tmp_path, mon
     assert not antivirus.scan_files(target, provider_factory=unavailable)["findings"]
 
 
-@pytest.mark.parametrize("data", [[], {"schema": 2}, {"schema": 1, "sha256": []},
+@pytest.mark.parametrize("data", [[], {"schema": 2}, {"schema": True, "sha256": {}},
+    {"schema": 1, "sha256": []},
     {"schema": 1, "sha256": {"not-a-hash": "name"}},
     {"schema": 1, "sha256": {"a" * 64: ""}},
-    {"schema": 1, "sha256": {"a" * 64: 123}}])
+    {"schema": 1, "sha256": {"a" * 64: 123}}, {"schema": 1, "sha256": {"a" * 64: "\ud800"}},
+    {"schema": 1, "sha256": {"a" * 64: "First", "A" * 64: "Second"}}])
 def test_signature_input_is_validated(tmp_path, data):
     database = tmp_path / "bad.json"
     database.write_text(json.dumps(data))
     with pytest.raises(ValueError):
+        antivirus.load_signatures(database)
+
+
+def test_signature_database_rejects_duplicate_json_keys(tmp_path):
+    database = tmp_path / "bad.json"
+    database.write_text('{"schema": 1, "schema": 1, "sha256": {}}')
+    with pytest.raises(ValueError, match="Duplicate"):
         antivirus.load_signatures(database)
 
 

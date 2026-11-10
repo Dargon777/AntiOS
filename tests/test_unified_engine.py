@@ -32,6 +32,7 @@ def test_native_mode_scans_without_clamav_or_amsi(tmp_path, monkeypatch):
     result = antivirus.scan_files(target, engine="antios")
     assert result["engine"]["provider"] == "AntiOS Engine"
     assert result["engine"]["database_freshness"] == "local"
+    assert result["engine"]["signature_source"] == "built-in-test"
     assert result["coverage"] == "antios-local-inspection"
     assert result["verdict"] == "no-threats-found"
 
@@ -46,6 +47,7 @@ def test_known_local_signature_is_confirmed_without_external_providers(tmp_path)
     }))
     result = antivirus.scan_files(target, engine="antios", signature_path=database)
     assert result["verdict"] == "threats-found"
+    assert result["engine"]["signature_source"] == "local-file"
     assert result["summary"]["threats"] == 1
     assert result["findings"][0]["name"] == "Inert test signature"
     assert result["findings"][0]["sha256"] == digest
@@ -122,6 +124,20 @@ def test_large_stream_inspection_does_not_pretend_full_coverage(tmp_path):
     assert result["summary"]["files_scanned"] == 1
     assert result["coverage"] == "limited"
     assert result["verdict"] == "incomplete"
+    assert "preview" in result["issues"][0]["reason"]
+    assert result["summary"]["errors"] == result["summary"]["skipped"] == 0
+
+
+def test_truncated_script_inspection_is_not_cached(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "_SCRIPT_PREVIEW_BYTES", 8)
+    target = tmp_path / "script.ps1"
+    target.write_bytes(b"# inert script\n")
+    cache = tmp_path / "scan-cache.sqlite"
+    for _ in range(2):
+        result = antivirus.scan_files(target, cache_path=cache)
+        assert result["verdict"] == "incomplete"
+        assert result["summary"]["cache_hits"] == 0
+        assert "script preview" in result["issues"][0]["reason"]
 
 
 def test_small_file_read_is_bounded_by_actual_size(tmp_path):

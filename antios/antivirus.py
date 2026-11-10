@@ -79,18 +79,34 @@ def load_signatures(path: str | Path | None = None) -> dict[str, str]:
     if path is None:
         return signatures
     content, _info = read_regular(Path(path), 8 * 1024 * 1024)
-    data = json.loads(content)
-    if not isinstance(data, dict) or data.get("schema") != 1:
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate signature database key")
+            result[key] = value
+        return result
+
+    try:
+        data = json.loads(content, object_pairs_hook=unique_object)
+    except RecursionError as exc:
+        raise ValueError("Signature database is nested too deeply") from exc
+    if not isinstance(data, dict) or type(data.get("schema")) is not int or data["schema"] != 1:
         raise ValueError("Signature database requires schema 1")
     entries = data.get("sha256")
     if not isinstance(entries, dict) or len(entries) > 100_000:
         raise ValueError("Signature database must contain at most 100000 SHA-256 entries")
+    normalized = {}
     for digest, label in entries.items():
         if not re.fullmatch(r"[a-fA-F0-9]{64}", digest):
             raise ValueError("Invalid SHA-256 signature")
-        if not isinstance(label, str) or not label.strip() or len(label) > 200:
+        if not isinstance(label, str) or not label.strip() or len(label) > 200 or not label.isprintable():
             raise ValueError("Invalid signature label")
-        signatures[digest.lower()] = label
+        digest = digest.lower()
+        if digest in normalized:
+            raise ValueError("Duplicate SHA-256 signature")
+        normalized[digest] = label
+    signatures.update(normalized)
     return signatures
 
 
@@ -155,6 +171,7 @@ def _scan_large_file(item, provider, signatures, stopped, max_bytes):
     return {"item": item, "info": after, "size": after.st_size, "sha256": sha,
             "finding": finding, "provider_scanned": outcome is not None,
             "file_engine_error": error,
+            "coverage_detail": (outcome.detail or outcome.name) if outcome and not outcome.complete else "",
             "limited_result": bool(error or (outcome and (outcome.kind == "review" or not outcome.complete)))}
 
 
@@ -197,7 +214,8 @@ def scan_files(
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
                    "max_entries": max_files * 2 if max_files is not None else None, "workers": workers},
         "engine": {"provider": "AntiOS Engine", "available": False,
-                   "signatures": len(signatures), "signature_path": str(signature_path or "")},
+                   "signatures": len(signatures), "signature_path": str(signature_path or ""),
+                   "signature_source": "local-file" if signature_path else "built-in-test"},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
                     "bytes_scanned": 0, "cache_hits": 0, "threats": 0, "reviews": 0, "skipped": 0,
                     "errors": 0, "cancelled": False, "limit_reached": False},
@@ -276,13 +294,14 @@ def scan_files(
     provider_failed = threading.Event()
     cache = None
     cache_engine = ""
-    cache_signatures = make_signature_key(signatures)
+    cache_signatures = ""
     cache_allowed = bool(
         use_cache and cache_path and provider is not None
         and result["engine"].get("database_freshness") == "local"
     )
     if cache_allowed:
         try:
+            cache_signatures = make_signature_key(signatures)
             cache = ScanCache(cache_path)
             cache_engine = make_engine_key(result["engine"])
             result["engine"]["cache"] = "enabled"
@@ -311,6 +330,7 @@ def scan_files(
             result["engine"]["failed_during_scan"] = True
         if outcome.get("limited_result"):
             result["engine"]["limited_results"] += 1
+        coverage_detail = outcome.get("coverage_detail")
         if outcome.get("file_engine_error"):
             issue(item, "Scan engine could not finish this file: " + outcome["file_engine_error"], error=True)
         finding = outcome.get("finding")
@@ -321,8 +341,12 @@ def scan_files(
                 size=outcome["size"],
                 fingerprint=list(fingerprint(outcome["info"])),
             )
+            if coverage_detail:
+                finding["detail"] = coverage_detail
             summary["threats" if finding["kind"] == "threat" else "reviews"] += 1
             result["findings"].append(finding)
+        elif coverage_detail and len(result["issues"]) < MAX_DETAILS:
+            result["issues"].append({"path": str(item), "reason": coverage_detail, "error": False})
         elif (cache is not None and outcome.get("provider_scanned")
               and not outcome.get("limited_result") and not outcome.get("provider_error")
               and outcome["size"] <= DEFAULT_MAX_BYTES):
@@ -354,14 +378,17 @@ def scan_files(
             provider_scanned = False
             provider_error = None
             limited_result = False
+            coverage_detail = ""
             if provider is not None and not provider_failed.is_set():
                 try:
                     value = (provider.scan_with_digest(content, str(item), digest)
                              if hasattr(provider, "scan_with_digest")
                              else provider.scan(content, str(item)))
-                    provider_scanned = True
                     if isinstance(value, ScanOutcome):
+                        provider_scanned = True
                         limited_result = value.kind == "review" or not value.complete
+                        if not value.complete:
+                            coverage_detail = value.detail or value.name
                         # Incomplete inspection of a particular file is not a
                         # global provider crash. Preserve its limited verdict.
                         if value.kind and finding is None:
@@ -379,6 +406,7 @@ def scan_files(
                 "finding": finding,
                 "provider_scanned": provider_scanned,
                 "provider_error": provider_error,
+                "coverage_detail": coverage_detail,
                 "limited_result": limited_result,
             }
         except (OSError, ValueError) as exc:
@@ -510,8 +538,9 @@ def render_antivirus_scan(result: dict) -> str:
              f"Verdict: {result['verdict']}; coverage: {result['coverage']}",
              f"Scanned: {summary['files_scanned']}; threats: {summary['threats']}; "
              f"review: {summary['reviews']}; skipped: {summary['skipped']}; errors: {summary['errors']}"]
-    for key in ("version", "database_freshness", "detail"):
+    for key in ("version", "database_freshness", "signature_source", "detail"):
         if key in result["engine"]:
             lines.append(f"{key}: {result['engine'][key]}")
     lines.extend(f"{f['kind']}: {f['name']} | {f['path']}" for f in result["findings"])
+    lines.extend(f"issue: {item['reason']} | {item['path']}" for item in result["issues"])
     return "\n".join(lines)
