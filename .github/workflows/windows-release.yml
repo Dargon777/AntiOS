@@ -653,6 +653,18 @@ jobs:
           test "${#assets[@]}" -ge 8
           test -s release/RELEASE_NOTES.md
 
+          # An existing tag takes precedence over target_commitish on release.
+          # Refuse any tag whose peeled commit differs from this signed build.
+          tag_refs="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")"
+          tag_commit="$(printf '%s\n' "$tag_refs" | awk -v ref="refs/tags/$tag^{}" '$2 == ref {print $1}')"
+          if [[ -z "$tag_commit" ]]; then
+            tag_commit="$(printf '%s\n' "$tag_refs" | awk -v ref="refs/tags/$tag" '$2 == ref {print $1}')"
+          fi
+          if [[ -n "$tag_commit" && "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Existing release tag does not match signed build commit; refusing upload." >&2
+            exit 1
+          fi
+
           # Do not publish; only update the existing draft by its API ID.
           jq -n --arg title "AntiOS $tag" \
                 --arg body "$(cat release/RELEASE_NOTES.md)" \
