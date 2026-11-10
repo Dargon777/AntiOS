@@ -48,7 +48,13 @@ def test_release_publication_requires_enabled_authenticode_signing():
     assert 'gh release view "$tag" --json isDraft' in publish
     assert '"$draft" != "true"' in publish
     assert "gh release create" not in publish
-    assert "gh release edit" not in publish
+    assert 'gh release edit "$tag"' in publish
+    assert '--notes-file release/RELEASE_NOTES.md' in publish
+    assert '--target "$GITHUB_SHA"' in publish
+    assert "          --draft" in publish
+    assert 'test "$(gh release view "$tag" --json isDraft' in publish
+    assert publish.index('gh release edit "$tag"') < publish.index('gh release upload "$tag"')
+    assert "gh release edit \"$tag\" --draft=false" not in publish
 
 
 def test_current_install_scripts_never_bootstrap_clamav():
