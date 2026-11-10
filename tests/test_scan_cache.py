@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 
@@ -86,6 +87,28 @@ def test_engine_identity_change_invalidates_cache(tmp_path):
     )
     assert updated.calls == 1
     assert result["summary"]["cache_hits"] == 0
+
+
+def test_parallel_cache_rechecks_bytes_with_same_metadata(tmp_path):
+    folder = tmp_path / "files"
+    folder.mkdir()
+    target = folder / "sample.bin"
+    target.write_bytes(b"old")
+    (folder / "unchanged.bin").write_bytes(b"unchanged")
+    cache = tmp_path / "cache.sqlite3"
+    antivirus.scan_files(folder, cache_path=cache, provider_factory=ReadyNativeProvider)
+    prior = target.stat()
+    target.write_bytes(b"new")
+    os.utime(target, ns=(prior.st_atime_ns, prior.st_mtime_ns))
+
+    class UpdatedContentProvider(ReadyNativeProvider):
+        def scan(self, content, name):
+            return ScanOutcome("review", "Changed fixture") if content == b"new" else ScanOutcome()
+
+    result = antivirus.scan_files(folder, cache_path=cache, provider_factory=UpdatedContentProvider)
+    assert result["summary"]["cache_hits"] == 1
+    assert result["summary"]["reviews"] == 1
+    assert result["findings"][0]["name"] == "Changed fixture"
 
 
 def test_native_workers_are_bounded_and_concurrent(tmp_path):

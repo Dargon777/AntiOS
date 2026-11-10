@@ -18,7 +18,7 @@ from .windows_process import hidden_process_kwargs
 import time
 from typing import Callable
 
-from .antivirus import scan_files, utc_now
+from .antivirus import DEFAULT_SCAN_WORKERS, scan_files, utc_now
 from .quarantine import default_quarantine_path
 from .scan_cache import default_scan_cache_path
 
@@ -57,7 +57,7 @@ def worker_main(request_path: str, events_path: str) -> int:
                        engine_service=request.get("engine_service"),
                        require_verified_peer=bool(request.get("require_verified_peer", False)),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint,
-                       workers=int(request.get("workers", 4)),
+                       workers=int(request.get("workers", DEFAULT_SCAN_WORKERS)),
                        cache_path=default_scan_cache_path(),
                        use_cache=bool(request.get("use_cache", True)))
             emit("done", None)
@@ -88,7 +88,7 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
                      engine: str = "antios",
                      engine_service: str | None = None,
                      require_verified_peer: bool = False,
-                     workers: int = 4,
+                     workers: int = DEFAULT_SCAN_WORKERS,
                      use_cache: bool = True,
                      timeout: float | None = None,
                      cancelled: Callable[[], bool] = lambda: False,

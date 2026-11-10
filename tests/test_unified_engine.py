@@ -120,13 +120,27 @@ def test_archive_decompression_budget_is_bounded(tmp_path, monkeypatch):
 def test_large_stream_inspection_does_not_pretend_full_coverage(tmp_path):
     target = tmp_path / "large.bin"
     with target.open("wb") as stream:
-        stream.truncate(33 * 1024 * 1024)
+        stream.truncate(antivirus.DEFAULT_MAX_BYTES + 1)
     result = antivirus.scan_files(target, engine="antios")
     assert result["summary"]["files_scanned"] == 1
     assert result["coverage"] == "limited"
     assert result["verdict"] == "incomplete"
     assert "preview" in result["issues"][0]["reason"]
     assert result["summary"]["errors"] == result["summary"]["skipped"] == 0
+
+
+def test_archive_above_previous_inline_limit_checks_its_member(tmp_path):
+    payload = b"\x01" * (32 * 1024 * 1024 + 1)
+    target = tmp_path / "large.zip"
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("inert.bin", payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    database = tmp_path / "signatures.json"
+    database.write_text(json.dumps({"schema": 1, "sha256": {digest: "Inert large member"}}))
+    result = antivirus.scan_files(target, signature_path=database,
+                                  max_bytes=antivirus.MAX_EXPLICIT_SCAN_BYTES)
+    assert result["verdict"] == "threats-found"
+    assert result["findings"][0]["name"] == "Inert large member"
 
 
 def test_native_large_file_hash_is_shared_with_scan_report(tmp_path, monkeypatch):

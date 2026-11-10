@@ -8,9 +8,10 @@ AntiOS provides on-demand scanning, findings, quarantine/restore and optional re
 - Results distinguish detections, skipped items, errors and incomplete coverage.
 - Quarantine and restore are explicit operations.
 - AntiOS can coexist with supported primary antivirus products without disabling them.
-- **AntiOS Engine is the default file detection engine.** It checks local SHA-256 signatures, advisory executable and script indicators, and supported ZIP, GZIP and TAR contents. The engine runs offline.
+- **AntiOS Engine is the default file detection engine.** It checks local SHA-256 signatures, advisory PE, ELF and script indicators, and supported ZIP, GZIP, TAR, BZIP2 and XZ contents. Supported OpenXML VBA projects are reported for review. The engine runs offline.
 - CLI, dashboard and Guard use a shared signed SHA-256 catalog for the current user. The bundled starter set is curated from public malware reports and includes a separate EICAR self-test rule. The existing local SHA-256 file option overrides the shared catalog for an individual on-demand scan. Findings based on structural indicators are for manual review.
 - Large files can still match a full-file hash. Limits, damaged entries and recognized unsupported archives are surfaced as incomplete coverage.
+- An explicit on-demand file limit can be set up to 2 GiB. Full content inspection has a smaller memory budget, and larger files use streaming SHA-256 with bounded structural inspection.
 - Protection status surfaces degraded or incomplete states instead of silently reporting success.
 - Experimental native protection is not treated as production-certified primary antivirus protection.
 

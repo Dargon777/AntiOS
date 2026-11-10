@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .build_info import render_version, version_info
-from .antivirus import DEFAULT_MAX_BYTES, render_antivirus_scan, scan_files
+from .antivirus import DEFAULT_MAX_BYTES, DEFAULT_SCAN_WORKERS, render_antivirus_scan, scan_files
 from .config import default_config_path, load_config, write_default_config
 from .consumer import evaluate_health, render_quick_check
 from .core import (
@@ -207,8 +207,8 @@ def build_parser() -> argparse.ArgumentParser:
     av.add_argument("--signatures", help="Override the signed catalog with a local schema-1 SHA-256 database.")
     av.add_argument("--max-mb", type=int, help="Optional per-file limit in MiB; larger files use bounded streaming.")
     av.add_argument("--max-files", type=int, help="Optional maximum number of files. Default: scan the entire selection.")
-    av.add_argument("--workers", type=int, default=4,
-                    help="Maximum concurrent AntiOS Engine scans, 1..8 (default: 4).")
+    av.add_argument("--workers", type=int, default=DEFAULT_SCAN_WORKERS,
+                    help=f"Maximum concurrent AntiOS Engine scans, 1..8 (default: {DEFAULT_SCAN_WORKERS}).")
     av.add_argument("--no-cache", action="store_true",
                     help="Do not reuse clean results for unchanged files.")
     av.add_argument("--json", action="store_true")

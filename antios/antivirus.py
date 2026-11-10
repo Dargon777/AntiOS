@@ -1,6 +1,7 @@
 """Bounded on-demand file scanner. Findings never mutate scanned files."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -13,12 +14,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .engine import AntiOSEngine
+from .engine import MAX_INLINE_BYTES, AntiOSEngine
 from .engine_types import ScanOutcome
 from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
 from .signature_catalog import load_active_catalog
 
-DEFAULT_MAX_BYTES = 32 * 1024 * 1024
+DEFAULT_MAX_BYTES = MAX_INLINE_BYTES
+MAX_EXPLICIT_SCAN_BYTES = 2 * 1024 * 1024 * 1024
+DEFAULT_SCAN_WORKERS = 8
 DEFAULT_MAX_FILES = 100_000
 MAX_DETAILS = 1000
 # Hash only: do not embed the EICAR test payload in packaged executables.
@@ -39,21 +42,30 @@ def is_link(info: os.stat_result) -> bool:
     )
 
 
-def checked_path(path: str | Path) -> Path:
-    """Reject symlinks/junctions and Windows alternate streams, including parents."""
+def _checked_path_info(path: str | Path) -> tuple[Path, os.stat_result]:
     target = Path(os.path.abspath(Path(path).expanduser()))
     if os.name == "nt" and any(":" in part for part in target.parts[1:]):
         raise ValueError("Alternate data streams are not supported")
-    for component in (*reversed(target.parents), target):
-        info = component.lstat()
-        if is_link(info):
+    for component in reversed(target.parents):
+        if is_link(component.lstat()):
             raise ValueError("Symbolic links and reparse points are not supported")
-    return target
+    info = target.lstat()
+    if is_link(info):
+        raise ValueError("Symbolic links and reparse points are not supported")
+    return target, info
+
+
+def checked_path(path: str | Path) -> Path:
+    """Reject symlinks/junctions and Windows alternate streams, including parents."""
+    return _checked_path_info(path)[0]
 
 
 def read_regular(path: Path, max_bytes: int) -> tuple[bytes, os.stat_result]:
-    target = checked_path(path)
-    before = target.lstat()
+    target, before = _checked_path_info(path)
+    return _read_checked_file(target, before, max_bytes)
+
+
+def _read_checked_file(target, before, max_bytes) -> tuple[bytes, os.stat_result]:
     if not stat.S_ISREG(before.st_mode):
         raise ValueError("Not a regular file")
     if before.st_size > max_bytes:
@@ -118,14 +130,8 @@ def load_signatures(path: str | Path | None = None) -> dict[str, str]:
     return signatures
 
 
-def _scan_large_file(item, provider, signatures, stopped, max_bytes):
+def _scan_large_file(item, target, before, provider, signatures, stopped):
     """Hash one stable snapshot while sending identical bytes to AntiOS Engine."""
-    target = checked_path(item)
-    before = target.lstat()
-    if is_link(before) or not stat.S_ISREG(before.st_mode):
-        raise ValueError("Not a regular file")
-    if max_bytes is not None and before.st_size > max_bytes:
-        raise ValueError("File exceeds the scan size limit")
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(target, flags), "rb") as stream:
@@ -134,6 +140,7 @@ def _scan_large_file(item, provider, signatures, stopped, max_bytes):
             raise ValueError("File changed while opening")
         digest = hashlib.sha256()
         complete = False
+        block_size = 256 * 1024 if type(provider) is AntiOSEngine else 64 * 1024
 
         def blocks():
             nonlocal complete
@@ -141,7 +148,7 @@ def _scan_large_file(item, provider, signatures, stopped, max_bytes):
             while remaining:
                 if stopped():
                     raise InterruptedError("Scan cancelled")
-                block = stream.read(min(65536, remaining))
+                block = stream.read(min(block_size, remaining))
                 if not block:
                     raise ValueError("File changed while reading")
                 digest.update(block)
@@ -171,7 +178,7 @@ def _scan_large_file(item, provider, signatures, stopped, max_bytes):
             pass
         after = os.fstat(stream.fileno())
         if (not complete or fingerprint(opened) != fingerprint(after)
-                or fingerprint(after) != fingerprint(checked_path(item).lstat())):
+                or fingerprint(after) != fingerprint(_checked_path_info(item)[1])):
             raise ValueError("File changed or could not be read completely")
     sha = digest.hexdigest()
     finding = None
@@ -200,7 +207,7 @@ def scan_files(
     require_verified_peer: bool = False,
     excluded_paths: tuple[Path, ...] = (),
     checkpoint: Callable[[dict], None] | None = None,
-    workers: int = 4,
+    workers: int = DEFAULT_SCAN_WORKERS,
     cache_path: str | Path | None = None,
     use_cache: bool = True,
 ) -> dict[str, Any]:
@@ -210,13 +217,14 @@ def scan_files(
         provider_factory = lambda: AntiOSEngine(signatures=signatures)
     if any(v is not None and (type(v) is not int or v <= 0) for v in (max_files, max_bytes)):
         raise ValueError("Explicit scan limits must be positive integers")
-    if max_bytes is not None and max_bytes > 256 * 1024 * 1024:
-        raise ValueError("Explicit scan size limit cannot exceed 256 MiB")
+    if max_bytes is not None and max_bytes > MAX_EXPLICIT_SCAN_BYTES:
+        raise ValueError("Explicit scan size limit cannot exceed 2 GiB")
     buffer_limit = min(max_bytes or DEFAULT_MAX_BYTES, DEFAULT_MAX_BYTES)
     if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
         raise ValueError("Scan workers must be between 1 and 8")
-    target = checked_path(path)
-    if not target.is_file() and not target.is_dir():
+    target, target_info = _checked_path_info(path)
+    target_is_file = stat.S_ISREG(target_info.st_mode)
+    if not target_is_file and not stat.S_ISDIR(target_info.st_mode):
         raise ValueError("Select a regular file or directory")
     signatures, catalog = (load_managed_signatures() if signature_path is None
                            else (load_signatures(signature_path), {}))
@@ -258,7 +266,7 @@ def scan_files(
         return any(item == root or root in item.parents for root in exclusions)
 
     def candidates():
-        if target.is_file():
+        if target_is_file:
             yield target
             return
         # Keep one iterator per active ancestor. A drive with many sibling
@@ -305,6 +313,8 @@ def scan_files(
                 entries.close()
 
     provider_failed = threading.Event()
+    provider_probed = threading.Event()
+    initial_probe = threading.Lock()
     cache = None
     cache_engine = ""
     cache_signatures = ""
@@ -325,6 +335,11 @@ def scan_files(
         result["engine"]["cache"] = "disabled"
 
     effective_workers = min(workers, 2) if provider is not None else 1
+    if type(provider) is AntiOSEngine:
+        effective_workers = min(workers, os.cpu_count() or 1)
+    if target_is_file:
+        effective_workers = 1
+    large_slots = threading.BoundedSemaphore(2)
     result["limits"]["effective_workers"] = effective_workers
     result["engine"]["limited_results"] = 0
 
@@ -337,6 +352,9 @@ def scan_files(
         summary["bytes_scanned"] += outcome["size"]
         if outcome.get("provider_scanned"):
             summary["provider_scanned"] += 1
+        if outcome.get("cached"):
+            summary["cache_hits"] += 1
+            return
         if outcome.get("provider_error"):
             issue(item, outcome["provider_error"], error=True)
             result["engine"]["detail"] = outcome["provider_error"]
@@ -370,92 +388,84 @@ def scan_files(
             except (OSError, sqlite3.Error):
                 pass
 
-    def scan_one(item: Path) -> dict:
+    def scan_one(candidate: tuple[Path, str | None]) -> dict:
+        item, cached_digest = candidate
         try:
             if stopped():
                 return {"item": item, "issue": "cancelled"}
-            info = item.lstat()
-            if not stat.S_ISREG(info.st_mode) or is_link(info):
+            checked, info = _checked_path_info(item)
+            if not stat.S_ISREG(info.st_mode):
                 return {"item": item, "issue": "not-a-regular-file"}
             if max_bytes is not None and info.st_size > max_bytes:
                 return {"item": item, "issue": "file-size-limit"}
-            if info.st_size > DEFAULT_MAX_BYTES:
-                return _scan_large_file(item, provider, signatures, stopped, max_bytes)
-            content, info = read_regular(item, buffer_limit)
-            digest = hashlib.sha256(content).hexdigest()
-            label = signatures.get(digest)
-            if label is None and 68 <= len(content) <= 128:
-                if hashlib.sha256(content.rstrip(b" \t\r\n\x1a")).hexdigest() == EICAR_SHA256:
-                    label = signatures[EICAR_SHA256]
-            finding = {"kind": "threat", "engine": "SHA-256", "name": label} if label else None
-            provider_scanned = False
-            provider_error = None
-            limited_result = False
-            coverage_detail = ""
-            if provider is not None and not provider_failed.is_set():
-                try:
-                    value = (provider.scan_with_digest(content, str(item), digest)
-                             if hasattr(provider, "scan_with_digest")
-                             else provider.scan(content, str(item)))
-                    if isinstance(value, ScanOutcome):
+            with (large_slots if info.st_size > 16 * 1024 * 1024 else nullcontext()):
+                if stopped():
+                    return {"item": item, "issue": "cancelled"}
+                if info.st_size > DEFAULT_MAX_BYTES:
+                    return _scan_large_file(item, checked, info, provider, signatures, stopped)
+                return scan_buffered(item, checked, info, cached_digest)
+        except (OSError, ValueError) as exc:
+            return {"item": item, "issue": str(exc), "error": True}
+
+    def scan_buffered(item, checked, info, cached_digest) -> dict:
+        content, info = _read_checked_file(checked, info, buffer_limit)
+        digest = hashlib.sha256(content).hexdigest()
+        # A cache hint only applies to the exact bytes of this verified snapshot.
+        if digest == cached_digest:
+            return {"item": item, "size": len(content), "provider_scanned": True, "cached": True}
+        label = signatures.get(digest)
+        if label is None and 68 <= len(content) <= 128:
+            if hashlib.sha256(content.rstrip(b" \t\r\n\x1a")).hexdigest() == EICAR_SHA256:
+                label = signatures[EICAR_SHA256]
+        finding = {"kind": "threat", "engine": "SHA-256", "name": label} if label else None
+        provider_scanned = False
+        provider_error = None
+        limited_result = False
+        coverage_detail = ""
+        if provider is not None:
+            # Only the first real inspection is serialized. Cache validation can
+            # proceed in parallel even when every file has a cache hint.
+            with (nullcontext() if provider_probed.is_set() else initial_probe):
+                if not provider_failed.is_set():
+                    try:
+                        value = (provider.scan_with_digest(content, str(item), digest)
+                                 if hasattr(provider, "scan_with_digest")
+                                 else provider.scan(content, str(item)))
+                        if not isinstance(value, ScanOutcome):
+                            raise OSError("AntiOS Engine returned an invalid result")
                         provider_scanned = True
                         limited_result = value.kind == "review" or not value.complete
                         if not value.complete:
                             coverage_detail = value.detail or value.name
-                        # Incomplete inspection of a particular file is not a
-                        # global provider crash. Preserve its limited verdict.
                         if value.kind and finding is None:
                             finding = {"kind": value.kind, "engine": value.engine, "name": value.name}
-                    else:
-                        raise OSError("AntiOS Engine returned an invalid result")
-                except (OSError, RuntimeError) as exc:
-                    provider_failed.set()
-                    provider_error = str(exc)
-            return {
-                "item": item,
-                "info": info,
-                "size": len(content),
-                "sha256": digest,
-                "finding": finding,
-                "provider_scanned": provider_scanned,
-                "provider_error": provider_error,
-                "coverage_detail": coverage_detail,
-                "limited_result": limited_result,
-            }
-        except (OSError, ValueError) as exc:
-            return {"item": item, "issue": str(exc), "error": True}
+                    except (OSError, RuntimeError) as exc:
+                        provider_failed.set()
+                        provider_error = str(exc)
+                    if not provider_probed.is_set():
+                        provider_probed.set()
+        return {
+            "item": item,
+            "info": info,
+            "size": len(content),
+            "sha256": digest,
+            "finding": finding,
+            "provider_scanned": provider_scanned,
+            "provider_error": provider_error,
+            "coverage_detail": coverage_detail,
+            "limited_result": limited_result,
+        }
 
-    def account_cached(item: Path, info: os.stat_result, digest: str) -> None:
-        summary["files_scanned"] += 1
-        summary["provider_scanned"] += 1
-        summary["bytes_scanned"] += int(info.st_size)
-        summary["cache_hits"] += 1
-
-    def prepare(item: Path) -> tuple[bool, os.stat_result | None]:
+    def cache_hint(item: Path) -> str | None:
+        if cache is None:
+            return None
         try:
             info = item.lstat()
-            if not stat.S_ISREG(info.st_mode) or is_link(info):
-                issue(item, "not-a-regular-file")
-                return False, None
-            if max_bytes is not None and info.st_size > max_bytes:
-                issue(item, "file-size-limit")
-                return False, None
-            if cache is not None and info.st_size <= DEFAULT_MAX_BYTES:
-                try:
-                    digest = cache.get(item, info, cache_engine, cache_signatures)
-                except (OSError, sqlite3.Error):
-                    digest = None
-                if digest:
-                    # Metadata is only a lookup hint. Re-read and hash the file
-                    # through the same stable-snapshot path before trusting a hit.
-                    content, verified_info = read_regular(item, buffer_limit)
-                    if hashlib.sha256(content).hexdigest() == digest:
-                        account_cached(item, verified_info, digest)
-                        return False, verified_info
-            return True, info
-        except (OSError, ValueError) as exc:
-            issue(item, str(exc), error=True)
-            return False, None
+            if info.st_size <= buffer_limit and stat.S_ISREG(info.st_mode) and not is_link(info):
+                return cache.get(item, info, cache_engine, cache_signatures)
+        except (OSError, sqlite3.Error):
+            pass
+        return None
 
     def after_item() -> None:
         if checkpoint:
@@ -463,24 +473,11 @@ def scan_files(
         if progress and (summary["files_seen"] == 1 or summary["files_seen"] % 25 == 0):
             progress(dict(summary))
 
-    pending: list[Path] = []
+    pending: list[tuple[Path, str | None]] = []
     executor = ThreadPoolExecutor(max_workers=effective_workers) if effective_workers > 1 else None
-    provider_probe_done = effective_workers <= 1
     try:
         def flush_pending() -> None:
-            nonlocal pending, provider_probe_done
-            if not pending:
-                return
-
-            # Preserve the failure circuit breaker: prove that the provider is
-            # responsive with one request before fanning work out concurrently.
-            # An unhealthy scanner cannot fan out unbounded failures.
-            if executor is not None and not provider_probe_done and pending:
-                first = pending.pop(0)
-                apply_outcome(scan_one(first))
-                after_item()
-                provider_probe_done = True
-
+            nonlocal pending
             if not pending:
                 return
             if executor is None or provider_failed.is_set():
@@ -503,11 +500,7 @@ def scan_files(
                 issue(item, "quarantine-excluded")
                 after_item()
                 continue
-            should_scan, _info = prepare(item)
-            if not should_scan:
-                after_item()
-                continue
-            pending.append(item)
+            pending.append((item, cache_hint(item)))
             if len(pending) >= effective_workers * 4:
                 flush_pending()
         flush_pending()

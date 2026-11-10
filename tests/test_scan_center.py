@@ -32,7 +32,7 @@ def full_scan(path, provider=StreamEngine, **options):
 def test_gui_profile_scans_above_previous_size_limit_and_keeps_hash(tmp_path):
     path = tmp_path / "large.bin"
     with path.open("wb") as stream:
-        stream.truncate(33 * 1024 * 1024)
+        stream.truncate(antivirus.DEFAULT_MAX_BYTES + 1)
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     signatures = tmp_path / "fixture.json"

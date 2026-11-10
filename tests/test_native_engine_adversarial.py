@@ -2,9 +2,12 @@
 
 All payloads are inert test bytes; no malware or external services required.
 """
+import bz2
 import gzip
 import hashlib
 import io
+import lzma
+import struct
 import tarfile
 import zipfile
 
@@ -15,9 +18,9 @@ from antios.engine import AntiOSEngine
 from antios.engine_types import ScanOutcome
 
 
-def zipped(entries):
+def zipped(entries, *, compression=zipfile.ZIP_DEFLATED):
     out = io.BytesIO()
-    with zipfile.ZipFile(out, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(out, mode="w", compression=compression) as archive:
         for name, data in entries.items():
             archive.writestr(name, data)
     return out.getvalue()
@@ -129,7 +132,7 @@ def test_tar_requires_a_complete_header_and_payload():
 
 def test_unsupported_archive_and_zip_method_are_reported_incomplete():
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_BZIP2) as archive:
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_LZMA) as archive:
         archive.writestr("benign.txt", b"inert")
     for sample, name in ((b"inert", "example.rar"), (buffer.getvalue(), "example.zip")):
         result = AntiOSEngine().scan(sample, name)
@@ -152,11 +155,51 @@ def test_zip_decompression_ratio_limit_is_incomplete():
     assert not result.complete
 
 
-def test_nested_zip_depth_budget_is_conservative():
+def test_nested_zip_depth_budget_is_conservative(monkeypatch):
+    monkeypatch.setattr(engine, "MAX_ARCHIVE_DEPTH", 2)
     data = zipped({"nested.zip": zipped({"deep.zip": zipped({"x": b"plain"})})})
     result = AntiOSEngine().scan(data, "outer.zip")
     assert result.kind == "review"
     assert not result.complete
+
+
+def test_nested_zip_uses_expanded_default_budget():
+    payload = b"inert nested fixture"
+    scanner = AntiOSEngine(signatures={hashlib.sha256(payload).hexdigest(): "Inert rule"})
+    data = zipped({"level2.zip": zipped({"level3.zip": zipped({"inner.bin": payload})})})
+    assert scanner.scan(data, "test.zip").kind == "threat"
+
+
+@pytest.mark.parametrize("compress,extension", [(bz2.compress, ".bz2"), (lzma.compress, ".xz")])
+def test_standalone_bzip2_and_xz_check_members(compress, extension):
+    payload = b"inert compressed fixture"
+    scanner = AntiOSEngine(signatures={hashlib.sha256(payload).hexdigest(): "Inert rule"})
+    compressed = compress(payload)
+    assert scanner.scan(compressed, "test" + extension).kind == "threat"
+    assert not scanner.scan(compressed[:-3], "test" + extension).complete
+
+
+def test_zip_bzip2_inspects_crc_valid_member():
+    payload = b"inert bzip2 zip fixture"
+    scanner = AntiOSEngine(signatures={hashlib.sha256(payload).hexdigest(): "Inert rule"})
+    data = zipped({"inner.bin": payload}, compression=zipfile.ZIP_BZIP2)
+    assert scanner.scan(data, "test.zip") == ScanOutcome("threat", "Inert rule")
+
+
+def test_macro_member_is_advisory():
+    data = zipped({"word/vbaProject.bin": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"inert"})
+    result = AntiOSEngine().scan(data, "test.docm")
+    assert result.kind == "review"
+    assert "VBA" in result.name
+
+
+def test_elf_identification_and_header_size():
+    content = bytearray(64)
+    content[:7] = b"\x7fELF\x02\x01\x01"
+    struct.pack_into("<H", content, 52, len(content))
+    assert AntiOSEngine().scan(bytes(content), "inert.elf") == ScanOutcome()
+    result = AntiOSEngine().scan(bytes(content[:-1]), "inert.elf")
+    assert result.kind == "review" and not result.complete
 
 
 @pytest.mark.parametrize("sample,filename", [
