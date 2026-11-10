@@ -226,9 +226,8 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content ./release/VERSION -Raw).Trim()
-          $parts = $version -replace '^2\.0\.0a', ''
-          if ($parts -notmatch '^\d+$') { throw "Unexpected release version: $version" }
-          $numericVersion = "2.0.$parts.0"
+          if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)a(\d+)$') { throw "Unexpected release version: $version" }
+          $numericVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$($Matches[4])"
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
           $sourceDir = (Resolve-Path "./installer-stage").Path
           $iconFile = (Resolve-Path "./build/icons/app_main.ico").Path
@@ -623,6 +622,8 @@ jobs:
         run: |
           set -euo pipefail
           tag="$(tr -d '\r\n' < release/TAG)"
+          title="$(sed -n '1s/^# //p' release/RELEASE_NOTES.md | tr -d '\r')"
+          test -n "$title"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release $tag already exists; refusing to replace published downloads."
             exit 1
@@ -630,24 +631,8 @@ jobs:
           mapfile -t assets < <(find release-artifacts -type f -print | sort)
           test "${#assets[@]}" -ge 8
 
-          # Public GitHub release metadata is deliberately fixed and minimal.
-          # Detailed implementation notes belong in private engineering records,
-          # not in a public release body.
-          notes_file="$RUNNER_TEMP/antios-public-release-notes.md"
-          cat > "$notes_file" <<'EOF'
-          # AntiOS public prerelease
-
-          This prerelease contains user-facing improvements, reliability fixes and compatibility updates.
-
-          Public release metadata intentionally omits internal security implementation details that could make reconnaissance, reverse engineering or bypass development easier.
-
-          For supported usage, current limitations, privacy information and responsible vulnerability reporting, see README.md, PRIVACY.md and SECURITY.md.
-
-          AntiOS v2 remains prerelease software.
-          EOF
-
           gh release create "$tag" "${assets[@]}" \
             --target "$GITHUB_SHA" \
             --prerelease \
-            --title "AntiOS $tag" \
-            --notes-file "$notes_file"
+            --title "$title" \
+            --notes-file release/RELEASE_NOTES.md

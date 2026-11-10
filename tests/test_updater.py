@@ -10,13 +10,14 @@ OTHER_CERT = "B" * 40
 
 
 def test_latest_alpha_selects_highest_non_draft(monkeypatch):
-    current_alpha = int(__version__.split("a", 1)[1])
+    version, alpha = __version__.split("a", 1)
+    current_alpha = int(alpha)
     next_alpha = current_alpha + 1
     monkeypatch.setattr(updater, "_request_json", lambda _url: [
         {"tag_name": "v2.0.0-alpha.14", "draft": False, "assets": []},
-        {"tag_name": f"v2.0.0-alpha.{next_alpha + 100}", "draft": True, "assets": []},
+        {"tag_name": f"v{version}-alpha.{next_alpha + 100}", "draft": True, "assets": []},
         {
-            "tag_name": f"v2.0.0-alpha.{next_alpha}",
+            "tag_name": f"v{version}-alpha.{next_alpha}",
             "draft": False,
             "published_at": "2026-10-04T00:00:00Z",
             "html_url": "https://example.invalid/release",
@@ -25,7 +26,7 @@ def test_latest_alpha_selects_highest_non_draft(monkeypatch):
                     "name": "AntiOS-Setup.exe",
                     "browser_download_url": (
                         "https://github.com/Dargon777/AntiOS/releases/download/"
-                        f"v2.0.0-alpha.{next_alpha}/AntiOS-Setup.exe"
+                        f"v{version}-alpha.{next_alpha}/AntiOS-Setup.exe"
                     ),
                     "size": 5,
                     "digest": None,
@@ -35,8 +36,21 @@ def test_latest_alpha_selects_highest_non_draft(monkeypatch):
     ])
     result = updater.latest_alpha()
     assert result["latest_alpha"] == next_alpha
-    assert result["latest_version"] == f"2.0.0a{next_alpha}"
+    assert result["latest_version"] == f"{version}a{next_alpha}"
     assert result["update_available"] is True
+
+
+@pytest.mark.parametrize(("current", "available"), [("2.0.0a37", True), ("3.0.1a1", False)])
+def test_latest_alpha_compares_release_series_before_alpha_number(monkeypatch, current, available):
+    monkeypatch.setattr(updater, "__version__", current)
+    monkeypatch.setattr(updater, "_request_json", lambda _url: [
+        {"tag_name": "v2.0.0-alpha.37", "draft": False, "assets": []},
+        {"tag_name": "v3.0.1-alpha.1", "draft": False, "assets": []},
+        {"tag_name": "v3.0.2-alpha.1", "draft": True, "assets": []},
+    ])
+    report = updater.latest_alpha()
+    assert report["latest_version"] == "3.0.1a1"
+    assert report["update_available"] is available
 
 
 def test_download_update_verifies_hash_and_signature(tmp_path, monkeypatch):

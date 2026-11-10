@@ -2,11 +2,11 @@
 
 ## Supported versions
 
-AntiOS v2 is pre-release software. Security fixes are made on the latest v2 release line.
+AntiOS is pre-release software. Security fixes are made on the latest published alpha release line.
 
 | Version | Supported |
 | --- | --- |
-| 2.0.0 alpha | Yes |
+| Latest published alpha | Yes |
 | Legacy v1 | No |
 
 ## Reporting a vulnerability

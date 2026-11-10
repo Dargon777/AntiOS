@@ -43,9 +43,10 @@ def test_license_and_notice_are_present():
 
 
 def test_windows_and_store_versions_track_package_alpha():
-    _base, alpha = __version__.split("a")
-    expected_numeric = f"2.0.{int(alpha)}.0"
-    expected_tuple = f"(2, 0, {int(alpha)}, 0)"
+    base, alpha = __version__.split("a")
+    expected_numeric = f"{base}.{alpha}"
+    expected_tuple = str(tuple(map(int, expected_numeric.split("."))))
+    expected_store_version = f"{base}.0"
 
     for path in (
         "release/windows-cli-version.txt",
@@ -62,5 +63,5 @@ def test_windows_and_store_versions_track_package_alpha():
 
     store_script = Path("scripts/build-store-msix.ps1").read_text(encoding="utf-8")
     store_workflow = Path(".github/workflows/store-msix.yml").read_text(encoding="utf-8")
-    assert expected_numeric in store_script
-    assert expected_numeric in store_workflow
+    assert expected_store_version in store_script
+    assert expected_store_version in store_workflow

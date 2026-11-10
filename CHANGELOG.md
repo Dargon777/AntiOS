@@ -4,6 +4,13 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 3.0.01 Alpha (3.0.1a1) - 2026-11-10
+
+- Bundles the offline AntiOS Engine for manual scans and resident Guard.
+- Shares a signed catalog of 47 curated SHA-256 indicators across the scanning surfaces.
+- Speeds up repeated scans and expands archive and large-file inspection.
+- Reports incomplete coverage and explains when an older Windows installation needs to be removed before setup can continue.
+
 ## 2.0.0a37 - 2026-11-05
 
 - adds a protection assistant with harmless engine checks, a temporary backup recovery test and actionable results;
