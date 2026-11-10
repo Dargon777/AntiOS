@@ -2,7 +2,9 @@
 
 [English](README.md) · [Русский](README.ru.md) · [Español](README.es.md) · **简体中文** · [Suomi](README.fi.md) · [Polski](README.pl.md) · [Монгол](README.mn.md)
 
-**AntiOS — Windows 健康、隐私与诊断工具。**
+**AntiOS — 面向 Windows 的端点安全与系统维护工具，并提供补充性的 Linux 支持。**
+
+> **当前开发版本：** `3.0.1a1`
 
 从 Releases 页面下载最新的 `AntiOS-windows-x64.zip`，解压后运行 **`AntiOS-GUI.exe`**：
 
@@ -21,7 +23,7 @@ https://github.com/Dargon777/AntiOS/releases
 
 简体中文 Windows 会自动使用中文界面，也可以手动切换 **English / Русский / Español / 简体中文 / Suomi / Polski / Монгол**。
 
-Alpha 11 新增按需文件扫描、加密隔离区和 Microsoft Defender 控制。实时保护由已安装的防病毒软件提供。扫描不修改文件；隔离和恢复需要确认。不包含自动遥测。防病毒提供程序可能根据自身设置使用云服务。
+当前开发版本提供独立的按需文件扫描、可选的驻留保护、隔离与恢复、安全和系统诊断以及存储工具。AntiOS 默认在本地处理数据，不启用自动遥测。完整的当前功能与限制请参阅 [README.md](README.md)。
 
 防病毒功能及限制：[docs/ANTIVIRUS.md](docs/ANTIVIRUS.md)。
 
