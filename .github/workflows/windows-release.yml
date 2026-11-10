@@ -2,6 +2,12 @@ name: AntiOS release
 
 on:
   workflow_dispatch:
+    inputs:
+      signed_release:
+        description: "Attach signed builds to the existing release draft (master only)"
+        type: boolean
+        required: true
+        default: false
   pull_request:
     paths:
       - "antios/**"
@@ -39,10 +45,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Refuse unsigned master publication
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING != 'true'
+      - name: Refuse unconfigured signed release
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && (github.ref != 'refs/heads/master' || vars.ENABLE_ARTIFACT_SIGNING != 'true')
         shell: pwsh
-        run: throw 'Refusing to publish unsigned AntiOS executables'
+        run: throw 'Signed release requires master and configured Artifact Signing'
 
       - uses: actions/setup-python@v5
         with:
@@ -181,7 +187,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Azure login for Artifact Signing
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -189,7 +195,7 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign Windows executables
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
         with:
           endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
@@ -205,7 +211,7 @@ jobs:
           description-url: https://github.com/Dargon777/AntiOS
 
       - name: Verify application Authenticode signatures
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
           foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe")) {
@@ -245,7 +251,7 @@ jobs:
           }
 
       - name: Sign AntiOS Setup
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
         with:
           endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
@@ -261,7 +267,7 @@ jobs:
           description-url: https://github.com/Dargon777/AntiOS
 
       - name: Verify Setup Authenticode signature
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
           $signature = Get-AuthenticodeSignature ./installer-output/AntiOS-Setup.exe
@@ -500,7 +506,7 @@ jobs:
           "$setupHash  AntiOS-Setup.exe" | Set-Content -NoNewline ./AntiOS-Setup.exe.sha256
 
       - name: Attest Windows archive provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: |
@@ -508,7 +514,7 @@ jobs:
             AntiOS-Setup.exe
 
       - name: Attest Python distribution provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: python-dist/*
@@ -588,7 +594,7 @@ jobs:
           xvfb-run -a "$smoke_root/AntiOS-GUI/AntiOS-GUI" --ui-self-test
 
       - name: Attest Linux archive provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: AntiOS-linux-x64.tar.gz
@@ -602,7 +608,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
     needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
