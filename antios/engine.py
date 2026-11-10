@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 import re
 import struct
 import tarfile
+from typing import Callable, Iterable
 import zipfile
 import zlib
 
@@ -349,19 +350,29 @@ class AntiOSEngine:
     def scan(self, content: bytes, name: str) -> ScanOutcome:
         return self.scan_with_digest(content, name, hashlib.sha256(content).hexdigest())
 
-    def scan_stream(self, chunks) -> ScanOutcome:
+    def scan_stream(self, chunks: Iterable[bytes]) -> ScanOutcome:
         return self.scan_stream_named(chunks, "")
 
-    def scan_stream_named(self, chunks, name: str) -> ScanOutcome:
+    def scan_stream_named(self, chunks: Iterable[bytes], name: str) -> ScanOutcome:
         digest = hashlib.sha256()
+
+        def hashed_chunks():
+            for chunk in chunks:
+                digest.update(chunk)
+                yield chunk
+
+        return self.scan_hashed_stream(hashed_chunks(), name, digest.hexdigest)
+
+    def scan_hashed_stream(self, chunks: Iterable[bytes], name: str,
+                           get_digest: Callable[[], str]) -> ScanOutcome:
+        """Inspect a stream whose producer hashes the exact bytes it yields."""
         prefix = bytearray()
         size = 0
         for chunk in chunks:
-            digest.update(chunk)
             size += len(chunk)
             if len(prefix) < STREAM_PREVIEW_BYTES:
                 prefix.extend(chunk[:STREAM_PREVIEW_BYTES - len(prefix)])
-        sha = digest.hexdigest()
+        sha = get_digest()
         if sha in self._signatures:
             return ScanOutcome("threat", self._signatures[sha], self.name)
         content = bytes(prefix)

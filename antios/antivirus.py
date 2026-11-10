@@ -145,11 +145,14 @@ def _scan_large_file(item, provider, signatures, stopped, max_bytes):
         outcome, error = None, None
         if provider is not None:
             try:
-                if not hasattr(provider, "scan_stream"):
+                if hasattr(provider, "scan_hashed_stream"):
+                    outcome = provider.scan_hashed_stream(chunks, str(item), digest.hexdigest)
+                elif hasattr(provider, "scan_stream_named"):
+                    outcome = provider.scan_stream_named(chunks, str(item))
+                elif hasattr(provider, "scan_stream"):
+                    outcome = provider.scan_stream(chunks)
+                else:
                     raise OSError("Engine does not support large-file streaming")
-                outcome = (provider.scan_stream_named(chunks, str(item))
-                           if hasattr(provider, "scan_stream_named")
-                           else provider.scan_stream(chunks))
                 if not complete or not isinstance(outcome, ScanOutcome):
                     raise OSError("Engine did not confirm the complete stream")
             except (OSError, RuntimeError) as exc:

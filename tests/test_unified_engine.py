@@ -128,6 +128,31 @@ def test_large_stream_inspection_does_not_pretend_full_coverage(tmp_path):
     assert result["summary"]["errors"] == result["summary"]["skipped"] == 0
 
 
+def test_native_large_file_hash_is_shared_with_scan_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(antivirus, "DEFAULT_MAX_BYTES", 8)
+    monkeypatch.setattr(engine, "STREAM_PREVIEW_BYTES", 4)
+    target = tmp_path / "large.bin"
+    content = b"known inert fixture beyond preview"
+    target.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    database = tmp_path / "signatures.json"
+    database.write_text(json.dumps({"schema": 1, "sha256": {digest: "Inert stream fixture"}}))
+
+    hash_factory = hashlib.sha256
+    calls = []
+
+    def count_hashes(*args, **kwargs):
+        calls.append(None)
+        return hash_factory(*args, **kwargs)
+
+    monkeypatch.setattr(antivirus.hashlib, "sha256", count_hashes)
+    result = antivirus.scan_files(target, signature_path=database)
+    assert result["verdict"] == "threats-found"
+    assert result["coverage"] == "antios-local-inspection"
+    assert result["findings"][0]["sha256"] == digest
+    assert len(calls) == 1
+
+
 def test_truncated_script_inspection_is_not_cached(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "_SCRIPT_PREVIEW_BYTES", 8)
     target = tmp_path / "script.ps1"
