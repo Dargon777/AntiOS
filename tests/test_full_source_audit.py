@@ -59,6 +59,8 @@ def test_release_publication_requires_enabled_authenticode_signing():
     assert "--data-binary \"@$file\"" in publish
     assert "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" in publish
     assert ".digest == $digest" in publish
+    assert 'git ls-remote origin "refs/tags/$tag"' in publish
+    assert '"$tag_commit" != "$GITHUB_SHA"' in publish
     assert "gh release create" not in publish
     assert "gh release upload" not in publish
     assert "gh release edit" not in publish
