@@ -40,8 +40,13 @@ def test_per_user_installer_manifest_lists_only_source_files():
 
 def test_release_publication_requires_enabled_authenticode_signing():
     workflow = (ROOT / ".github/workflows/windows-release.yml").read_text("utf-8")
-    assert "Refuse unsigned master publication" in workflow
+    assert "Refuse unconfigured signed release" in workflow
     assert "vars.ENABLE_ARTIFACT_SIGNING != 'true'" in workflow
+    assert "signed_release:" in workflow
+    assert "type: boolean" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "inputs.signed_release == true" in workflow
+    assert "github.ref != 'refs/heads/master'" in workflow
     publish = workflow.split("  publish-release:", 1)[1]
     assert "vars.ENABLE_ARTIFACT_SIGNING == 'true'" in publish
     assert "gh release upload" in publish
