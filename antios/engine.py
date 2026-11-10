@@ -208,7 +208,8 @@ class AntiOSEngine:
         return _preferred(outcome, self._inspect_zip(data, depth, budget))
 
     def _inspect_gzip(self, data: bytes, name: str, depth: int, budget: _Budget) -> ScanOutcome:
-        limit = min(MAX_ARCHIVE_MEMBER_BYTES, budget.bytes_left, len(data) * 200)
+        # Ordinary TAR padding can compress to a very small GZIP payload.
+        limit = min(MAX_ARCHIVE_MEMBER_BYTES, budget.bytes_left, max(65536, len(data) * 200))
         if budget.members <= 0 or limit <= 0:
             return ScanOutcome("review", "Archive inspection budget exceeded", complete=False)
         budget.members -= 1
@@ -257,6 +258,8 @@ class AntiOSEngine:
             if member.size < 0 or offset > len(data):
                 break
             name = member.name.replace("\\", "/")
+            if member.type == tarfile.DIRTYPE and not member.size and name == ".":
+                continue
             outcome = _preferred(outcome, _archive_path_signal(name))
             if member.type == tarfile.DIRTYPE and not member.size:
                 continue

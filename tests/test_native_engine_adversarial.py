@@ -95,6 +95,9 @@ def test_tar_and_tar_gzip_find_an_inert_member_without_extracting(tmp_path, monk
     scanner = AntiOSEngine(signatures={hashlib.sha256(payload).hexdigest(): "Inert rule"})
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        archive.addfile(root)
         member = tarfile.TarInfo("member.bin")
         member.size = len(payload)
         archive.addfile(member, io.BytesIO(payload))
@@ -103,6 +106,14 @@ def test_tar_and_tar_gzip_find_an_inert_member_without_extracting(tmp_path, monk
     assert scanner.scan(gzip.compress(content, mtime=0), "download.tgz").kind == "threat"
     assert AntiOSEngine().scan(content, "download") == ScanOutcome()
     assert not list(tmp_path.iterdir())
+
+
+def test_empty_tar_gzip_with_standard_padding_is_clean():
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w"):
+        pass
+    content = gzip.compress(buffer.getvalue(), mtime=0)
+    assert AntiOSEngine().scan(content, "empty.tar.gz") == ScanOutcome()
 
 
 def test_tar_requires_a_complete_header_and_payload():
