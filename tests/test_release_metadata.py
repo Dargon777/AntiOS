@@ -77,3 +77,9 @@ def test_windows_and_store_versions_track_package_alpha():
     assert "refusing publication" in release_workflow
     assert 'gh release upload "$tag"' in release_workflow
     assert 'gh release create "$tag"' not in release_workflow
+    assert "signed_release:" in release_workflow
+    assert "inputs.signed_release == true" in release_workflow
+    assert "Refuse unconfigured signed release" in release_workflow
+    assert '--notes-file release/RELEASE_NOTES.md' in release_workflow
+    assert '--draft' in release_workflow
+
