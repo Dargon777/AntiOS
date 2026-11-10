@@ -75,11 +75,13 @@ def test_windows_and_store_versions_track_package_alpha():
 
     release_workflow = Path(".github/workflows/windows-release.yml").read_text(encoding="utf-8")
     assert "refusing publication" in release_workflow
-    assert 'gh release upload "$tag"' in release_workflow
-    assert 'gh release create "$tag"' not in release_workflow
+    assert "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" in release_workflow
+    assert 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"' in release_workflow
+    assert "gh release create" not in release_workflow
+    assert "gh release upload" not in release_workflow
     assert "signed_release:" in release_workflow
     assert "inputs.signed_release == true" in release_workflow
     assert "Refuse unconfigured signed release" in release_workflow
-    assert '--notes-file release/RELEASE_NOTES.md' in release_workflow
-    assert '--draft' in release_workflow
+    assert 'cat release/RELEASE_NOTES.md' in release_workflow
+    assert "draft:true,prerelease:true" in release_workflow
 
