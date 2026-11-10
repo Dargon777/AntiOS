@@ -1,14 +1,14 @@
-# AntiOS public prerelease — v2.0.0-alpha.37
+# AntiOS 3.0.01 Alpha — preview
 
-This release adds a local protection assistant to the Windows antivirus center.
+AntiOS 3 introduces an independent, locally running antivirus scan engine and updated application packaging.
 
-- Self-check uses harmless test data to verify the scanning engine and a temporary backup recovery round trip, with clear next steps when a check needs attention.
-- Snapshot comparison shows added, changed and removed files. Earlier changed copies can be recovered into a new folder.
-- Activity explanations describe recorded evidence in plain language and distinguish confirmed detections, incomplete scans and behavior that needs review.
-- Standard Windows sessions keep engine status visible even when protected installation settings cannot be inspected.
+- On-demand scans, the desktop application and optional resident monitoring now use the AntiOS engine.
+- Previous external antivirus-engine runtime requirements have been retired.
+- Existing Windows Defender coexistence remains read-only; AntiOS does not disable third-party protection.
+- Archive and file inspection is bounded. Unverified or partially inspected files are not claimed to be safe.
 
-Open Antivirus → Assistant to use the new workspace. The command line also supports antios self-check --json.
+**Important upgrade notice:** Some existing 2.x installations cannot be upgraded in place. The installer will refuse an unsafe mixed installation rather than silently remove older services or settings. Follow verified migration instructions before upgrading.
 
-All explanations are generated locally. Self-check results describe the moment of testing; they do not guarantee detection of every threat. Snapshot features remain file-level backup tools.
+**Limitations:** This is an early alpha with a small local signature database. Detection coverage is not comparable to mature commercial antivirus products. Do not rely on it as your only endpoint protection.
 
-AntiOS v2 remains prerelease companion software.
+The pre-release remains unverified for broad production rollout. Public Windows distributions require valid code signing and release acceptance.

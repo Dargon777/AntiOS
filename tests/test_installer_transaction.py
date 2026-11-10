@@ -107,6 +107,7 @@ def test_current_uninstaller_never_executes_retired_engine_scripts():
 def test_upgrade_smoke_pins_old_unsigned_installer_and_exercises_real_migration():
     script = Path("scripts/smoke-upgrade.ps1").read_text(encoding="utf-8")
     assert '"v2.0.0-alpha.36" = "4b8781d630cb10d5418c8ffe335e27d61183266e536f69e6f88faf4fc5cdabe4"' in script
+    assert '"v2.0.0-alpha.37" = "b9cff406e68dd1f4831ab7de292f2f5582aff5970d23eef916015f334b4fe05f"' in script
     assert "Unpinned legacy installer" in script
     download = script.index("Invoke-WebRequest -Uri $downloadUrl")
     digest = script.index("(Get-FileHash -LiteralPath $previousSetup -Algorithm SHA256)")

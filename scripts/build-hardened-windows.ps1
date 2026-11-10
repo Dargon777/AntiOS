@@ -8,11 +8,11 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
 $version = (Get-Content ".\release\VERSION" -Raw).Trim()
-if ($version -notmatch '^2\.0\.0a(\d+)$') {
+$parsed = [regex]::Match($version, '^(\d+)\.(\d+)\.(\d+)a(\d+)$')
+if (-not $parsed.Success) {
     throw "Unexpected AntiOS version: $version"
 }
-$alpha = [int]$Matches[1]
-$numericVersion = "2.0.$alpha.0"
+$numericVersion = "$($parsed.Groups[1].Value).$($parsed.Groups[2].Value).$($parsed.Groups[3].Value).0"
 
 # Restrict recursive cleanup to the dedicated build output folder.
 $outputName = $OutputDirectory -replace '^[.][\\/]', ''

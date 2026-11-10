@@ -40,11 +40,31 @@ def test_per_user_installer_manifest_lists_only_source_files():
 
 def test_release_publication_requires_enabled_authenticode_signing():
     workflow = (ROOT / ".github/workflows/windows-release.yml").read_text("utf-8")
-    assert "Refuse unsigned master publication" in workflow
+    assert "Refuse unconfigured signed release" in workflow
     assert "vars.ENABLE_ARTIFACT_SIGNING != 'true'" in workflow
+    assert "signed_release:" in workflow
+    assert "type: boolean" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "inputs.signed_release == true" in workflow
+    assert "github.ref != 'refs/heads/master'" in workflow
     publish = workflow.split("  publish-release:", 1)[1]
     assert "vars.ENABLE_ARTIFACT_SIGNING == 'true'" in publish
-    assert "gh release create" in publish
+    assert "inputs.signed_release == true" in publish
+    assert "gh api --paginate --slurp" in publish
+    assert "select(.tag_name == $tag)" in publish
+    assert ".[0].draft == true" in publish
+    assert "(.[0].assets | length) == 0" in publish
+    assert 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"' in publish
+    assert "draft:true,prerelease:true" in publish
+    assert "--data-binary \"@$file\"" in publish
+    assert "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" in publish
+    assert ".digest == $digest" in publish
+    assert 'git ls-remote origin "refs/tags/$tag"' in publish
+    assert '"$tag_commit" != "$GITHUB_SHA"' in publish
+    assert "gh release create" not in publish
+    assert "gh release upload" not in publish
+    assert "gh release edit" not in publish
+    assert "--draft=false" not in publish
 
 
 def test_current_install_scripts_never_bootstrap_clamav():

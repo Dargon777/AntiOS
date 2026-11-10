@@ -4,6 +4,16 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 3.0.1a1 - 2026-11-10 (release candidate)
+
+- introduces AntiOS's independent local scan engine across the app, CLI and optional resident monitor;
+- removes external antivirus-engine runtime requirements from new packages;
+- retains read-only coexistence with existing protection;
+- blocks potentially unsafe upgrades from legacy installations rather than silently deleting components;
+- updates release packaging and version metadata.
+
+This early alpha does not match the detection breadth of mature antivirus products. Broad release acceptance, Windows upgrade validation and code signing remain outstanding.
+
 ## 2.0.0a37 - 2026-11-05
 
 - adds a protection assistant with harmless engine checks, a temporary backup recovery test and actionable results;

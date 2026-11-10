@@ -1,7 +1,13 @@
-name: AntiOS v2 release
+name: AntiOS release
 
 on:
   workflow_dispatch:
+    inputs:
+      signed_release:
+        description: "Attach signed builds to the existing release draft (master only)"
+        type: boolean
+        required: true
+        default: false
   pull_request:
     paths:
       - "antios/**"
@@ -39,10 +45,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Refuse unsigned master publication
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING != 'true'
+      - name: Refuse unconfigured signed release
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && (github.ref != 'refs/heads/master' || vars.ENABLE_ARTIFACT_SIGNING != 'true')
         shell: pwsh
-        run: throw 'Refusing to publish unsigned AntiOS executables'
+        run: throw 'Signed release requires master and configured Artifact Signing'
 
       - uses: actions/setup-python@v5
         with:
@@ -181,7 +187,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Azure login for Artifact Signing
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -189,7 +195,7 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign Windows executables
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
         with:
           endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
@@ -205,7 +211,7 @@ jobs:
           description-url: https://github.com/Dargon777/AntiOS
 
       - name: Verify application Authenticode signatures
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
           foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe")) {
@@ -226,9 +232,13 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content ./release/VERSION -Raw).Trim()
-          $parts = $version -replace '^2\.0\.0a', ''
-          if ($parts -notmatch '^\d+$') { throw "Unexpected release version: $version" }
-          $numericVersion = "2.0.$parts.0"
+          $parsed = [regex]::Match($version, '^(\d+)\.(\d+)\.(\d+)a(\d+)$')
+          if (-not $parsed.Success) { throw "Unexpected release version: $version" }
+          $numericVersion = "$($parsed.Groups[1].Value).$($parsed.Groups[2].Value).$($parsed.Groups[3].Value).0"
+          $expectedNumeric = ([regex]::Match((Get-Content ./installer/AntiOS.nsi -Raw), '!define NUMERIC_VERSION "(\d+\.\d+\.\d+\.0)"')).Groups[1].Value
+          if ($numericVersion -ne $expectedNumeric) {
+            throw "Installer numeric version mismatch: computed=$numericVersion default=$expectedNumeric"
+          }
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
           $sourceDir = (Resolve-Path "./installer-stage").Path
           $iconFile = (Resolve-Path "./build/icons/app_main.ico").Path
@@ -241,7 +251,7 @@ jobs:
           }
 
       - name: Sign AntiOS Setup
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
         with:
           endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
@@ -257,7 +267,7 @@ jobs:
           description-url: https://github.com/Dargon777/AntiOS
 
       - name: Verify Setup Authenticode signature
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
           $signature = Get-AuthenticodeSignature ./installer-output/AntiOS-Setup.exe
@@ -496,7 +506,7 @@ jobs:
           "$setupHash  AntiOS-Setup.exe" | Set-Content -NoNewline ./AntiOS-Setup.exe.sha256
 
       - name: Attest Windows archive provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: |
@@ -504,7 +514,7 @@ jobs:
             AntiOS-Setup.exe
 
       - name: Attest Python distribution provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: python-dist/*
@@ -584,7 +594,7 @@ jobs:
           xvfb-run -a "$smoke_root/AntiOS-GUI/AntiOS-GUI" --ui-self-test
 
       - name: Attest Linux archive provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: AntiOS-linux-x64.tar.gz
@@ -598,7 +608,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
     needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
@@ -623,31 +633,98 @@ jobs:
         run: |
           set -euo pipefail
           tag="$(tr -d '\r\n' < release/TAG)"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists; refusing to replace published downloads."
+          # Signed master artifacts may be attached only to the existing draft.
+          # A human must complete acceptance and explicitly publish the release.
+          # Draft releases do not necessarily have an actual git tag yet.
+          # The releases-by-tag endpoint can return 404 for a valid draft.
+          # Resolve its immutable API ID from the authenticated release listing.
+          release_id="$(
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+              jq -er --arg tag "$tag" '
+                [.[][] | select(.tag_name == $tag)] |
+                if length == 1 and .[0].draft == true and (.[0].assets | length) == 0
+                then .[0].id
+                else error("Expected exactly one empty draft for the requested tag")
+                end
+              '
+          )"
+          echo "Signed release target: draft ID $release_id"
+          # Only the eight reviewed deliverables can enter the release draft.
+          # Refuse missing, duplicate, or unexpected files before editing the draft.
+          shopt -s nullglob
+          wheels=(release-artifacts/windows/python-dist/*.whl)
+          sdists=(release-artifacts/windows/python-dist/*.tar.gz)
+          if [[ "${#wheels[@]}" -ne 1 || "${#sdists[@]}" -ne 1 ]]; then
+            echo "Expected one wheel and one source distribution." >&2
             exit 1
           fi
-          mapfile -t assets < <(find release-artifacts -type f -print | sort)
-          test "${#assets[@]}" -ge 8
+          assets=(
+            release-artifacts/windows/AntiOS-Setup.exe
+            release-artifacts/windows/AntiOS-Setup.exe.sha256
+            release-artifacts/windows/AntiOS-windows-x64.zip
+            release-artifacts/windows/AntiOS-windows-x64.zip.sha256
+            "${wheels[0]}"
+            "${sdists[0]}"
+            release-artifacts/linux/AntiOS-linux-x64.tar.gz
+            release-artifacts/linux/AntiOS-linux-x64.tar.gz.sha256
+          )
+          for file in "${assets[@]}"; do
+            if [[ ! -f "$file" || ! -s "$file" || -L "$file" ]]; then
+              echo "Missing, empty or unsafe release asset: $file" >&2
+              exit 1
+            fi
+          done
+          actual_count="$(find release-artifacts -type f | wc -l | tr -d '[:space:]')"
+          if [[ "$actual_count" != "${#assets[@]}" ]]; then
+            echo "Unexpected additional release payload files; refusing upload." >&2
+            exit 1
+          fi
 
-          # Public GitHub release metadata is deliberately fixed and minimal.
-          # Detailed implementation notes belong in private engineering records,
-          # not in a public release body.
-          notes_file="$RUNNER_TEMP/antios-public-release-notes.md"
-          cat > "$notes_file" <<'EOF'
-          # AntiOS public prerelease
+          (cd release-artifacts/windows &&
+             sha256sum --check AntiOS-Setup.exe.sha256 &&
+             sha256sum --check AntiOS-windows-x64.zip.sha256)
+          (cd release-artifacts/linux &&
+             sha256sum --check AntiOS-linux-x64.tar.gz.sha256)
+          test -s release/RELEASE_NOTES.md
 
-          This prerelease contains user-facing improvements, reliability fixes and compatibility updates.
+          # An existing tag takes precedence over target_commitish on release.
+          # Refuse any tag whose peeled commit differs from this signed build.
+          tag_refs="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")"
+          tag_commit="$(printf '%s\n' "$tag_refs" | awk -v ref="refs/tags/$tag^{}" '$2 == ref {print $1}')"
+          if [[ -z "$tag_commit" ]]; then
+            tag_commit="$(printf '%s\n' "$tag_refs" | awk -v ref="refs/tags/$tag" '$2 == ref {print $1}')"
+          fi
+          if [[ -n "$tag_commit" && "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Existing release tag does not match signed build commit; refusing upload." >&2
+            exit 1
+          fi
 
-          Public release metadata intentionally omits internal security implementation details that could make reconnaissance, reverse engineering or bypass development easier.
+          # Do not publish; only update the existing draft by its API ID.
+          jq -n --arg title "AntiOS $tag" \
+                --arg body "$(cat release/RELEASE_NOTES.md)" \
+                --arg target "$GITHUB_SHA" \
+                '{name:$title,body:$body,target_commitish:$target,draft:true,prerelease:true}' |
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" --input - >/dev/null
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.draft')" = "true"
 
-          For supported usage, current limitations, privacy information and responsible vulnerability reporting, see README.md, PRIVACY.md and SECURITY.md.
-
-          AntiOS v2 remains prerelease software.
-          EOF
-
-          gh release create "$tag" "${assets[@]}" \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --title "AntiOS $tag" \
-            --notes-file "$notes_file"
+          # Upload by ID through GitHub's release-assets API; tag-based CLI
+          # lookup is unreliable for an untagged draft.
+          for file in "${assets[@]}"; do
+            name="$(basename "$file")"
+            if [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "Unsafe release asset name: $name" >&2
+              exit 1
+            fi
+            digest="sha256:$(sha256sum "$file" | cut -d ' ' -f 1)"
+            curl --fail-with-body --silent --show-error --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Content-Type: application/octet-stream" \
+              --data-binary "@$file" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" \
+              > "$RUNNER_TEMP/antios-upload-result.json"
+            jq -e --arg name "$name" --arg digest "$digest" \
+              '.name == $name and .digest == $digest and .state == "uploaded"' \
+              "$RUNNER_TEMP/antios-upload-result.json" >/dev/null
+          done
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.draft')" = "true"

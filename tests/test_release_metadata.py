@@ -1,5 +1,6 @@
 from pathlib import Path
 import tomllib
+import re
 
 from antios import __version__
 
@@ -11,8 +12,13 @@ def test_release_version_matches_package_version():
 
 def test_release_tag_matches_package_version():
     tag = Path("release/TAG").read_text(encoding="utf-8").strip()
-    base, alpha = __version__.split("a")
-    assert tag == f"v{base}-alpha.{alpha}"
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)a(\d+)", __version__)
+    assert match is not None
+    major, minor, patch, alpha = map(int, match.groups())
+    expected = f"V.{major}.{minor}.{patch:02d}-Alpha"
+    if alpha > 1:
+        expected += f".{alpha}"
+    assert tag == expected
 
 
 def test_package_declares_apache_2_license():
@@ -43,9 +49,11 @@ def test_license_and_notice_are_present():
 
 
 def test_windows_and_store_versions_track_package_alpha():
-    _base, alpha = __version__.split("a")
-    expected_numeric = f"2.0.{int(alpha)}.0"
-    expected_tuple = f"(2, 0, {int(alpha)}, 0)"
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)a(\d+)", __version__)
+    assert match is not None
+    major, minor, patch, _alpha = map(int, match.groups())
+    expected_numeric = f"{major}.{minor}.{patch}.0"
+    expected_tuple = f"({major}, {minor}, {patch}, 0)"
 
     for path in (
         "release/windows-cli-version.txt",
@@ -64,3 +72,27 @@ def test_windows_and_store_versions_track_package_alpha():
     store_workflow = Path(".github/workflows/store-msix.yml").read_text(encoding="utf-8")
     assert expected_numeric in store_script
     assert expected_numeric in store_workflow
+
+    release_workflow = Path(".github/workflows/windows-release.yml").read_text(encoding="utf-8")
+    assert "Expected exactly one empty draft for the requested tag" in release_workflow
+    assert "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" in release_workflow
+    assert 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"' in release_workflow
+    assert "gh release create" not in release_workflow
+    assert "gh release upload" not in release_workflow
+    assert "signed_release:" in release_workflow
+    assert "inputs.signed_release == true" in release_workflow
+    assert "Refuse unconfigured signed release" in release_workflow
+    assert 'cat release/RELEASE_NOTES.md' in release_workflow
+    assert "draft:true,prerelease:true" in release_workflow
+    # Upload preflight must verify both artifact types and every checksum
+    # before changing or uploading assets to the release draft.
+    assert "Only the eight reviewed deliverables" in release_workflow
+    assert "Expected one wheel and one source distribution." in release_workflow
+    assert "Unexpected additional release payload files" in release_workflow
+    assert "sha256sum --check AntiOS-Setup.exe.sha256" in release_workflow
+    assert "sha256sum --check AntiOS-windows-x64.zip.sha256" in release_workflow
+    assert "sha256sum --check AntiOS-linux-x64.tar.gz.sha256" in release_workflow
+    assert release_workflow.index("sha256sum --check AntiOS-Setup.exe.sha256") < release_workflow.index(
+        'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"'
+    )
+

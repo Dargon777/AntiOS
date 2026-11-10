@@ -20,11 +20,24 @@ MAX_SETUP_BYTES = 512 * 1024 * 1024
 MAX_CHECKSUM_BYTES = 4096
 
 
-def _alpha_number(version: str) -> int:
-    match = re.fullmatch(r"2\.0\.0a(\d+)", version)
+def _version_key(version: str) -> tuple[int, int, int, int]:
+    """Return comparable major/minor/patch/alpha components."""
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)a(\d+)", version)
     if not match:
         raise ValueError(f"Unsupported AntiOS version format: {version}")
-    return int(match.group(1))
+    return tuple(map(int, match.groups()))
+
+
+def _tag_key(tag: str) -> tuple[int, int, int, int] | None:
+    """Support legacy v2 tags and the V.3.0.01-Alpha release naming."""
+    match = re.fullmatch(
+        r"v\.?(\d+)\.(\d+)\.(\d+)-alpha(?:\.(\d+))?",
+        tag, flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    major, minor, patch, alpha = match.groups()
+    return int(major), int(minor), int(patch), int(alpha or "1")
 
 
 def _request_json(url: str) -> object:
@@ -44,12 +57,12 @@ def latest_alpha() -> dict:
     for release in data:
         if not isinstance(release, dict) or release.get("draft"):
             continue
-        match = re.fullmatch(r"v2\.0\.0-alpha\.(\d+)", str(release.get("tag_name", "")))
-        if match:
-            candidates.append((int(match.group(1)), release))
+        key = _tag_key(str(release.get("tag_name", "")))
+        if key is not None:
+            candidates.append((key, release))
     if not candidates:
         raise RuntimeError("No AntiOS alpha releases found")
-    number, release = max(candidates, key=lambda item: item[0])
+    key, release = max(candidates, key=lambda item: item[0])
     assets = {}
     for asset in release.get("assets") or []:
         if isinstance(asset, dict) and isinstance(asset.get("name"), str):
@@ -58,16 +71,17 @@ def latest_alpha() -> dict:
                 "size": asset.get("size"),
                 "digest": asset.get("digest"),
             }
-    current = _alpha_number(__version__)
+    current = _version_key(__version__)
+    major, minor, patch, alpha = key
     return {
         "current_version": __version__,
-        "current_alpha": current,
-        "latest_alpha": number,
-        "latest_version": f"2.0.0a{number}",
+        "current_alpha": current[3],
+        "latest_alpha": alpha,
+        "latest_version": f"{major}.{minor}.{patch}a{alpha}",
         "tag": release.get("tag_name"),
         "published_at": release.get("published_at"),
         "html_url": release.get("html_url"),
-        "update_available": number > current,
+        "update_available": key > current,
         "assets": assets,
     }
 
