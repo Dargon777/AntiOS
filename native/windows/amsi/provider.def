@@ -1,4 +1,0 @@
-LIBRARY "AntiOS-AmsiProvider"
-EXPORTS
-    DllGetClassObject PRIVATE
-    DllCanUnloadNow PRIVATE

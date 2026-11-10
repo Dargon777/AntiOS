@@ -18,7 +18,6 @@ import uuid
 
 from .antivirus import checked_path, fingerprint, is_link
 from .behavior import BehaviorEngine
-from .clamav import ClamAVScanner
 from .coexistence import companion_protected_roots, defender_protected_roots
 from .incident import IncidentGraph
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
@@ -63,6 +62,7 @@ class GuardPolicy:
     max_files: int = 50000
     max_queue: int = 256
     engine_service: str | None = None
+    scan_engine: str = "antios"
 
     def validate(self):
         if not 1 <= len(self.roots) <= 16:
@@ -71,9 +71,10 @@ class GuardPolicy:
             raise ValueError('Invalid guard time limits')
         if not 1 <= self.max_files <= 100000 or not 1 <= self.max_queue <= 4096:
             raise ValueError('Invalid guard capacity limits')
-        if self.engine_service is not None:
-            from .windows_clamd_peer import validate_service_name
-            validate_service_name(self.engine_service)
+        if self.scan_engine != "antios":
+            raise ValueError("Unknown Guard scan engine")
+        # Older startup policies may retain engine_service. It is ignored by
+        # the native AntiOS Engine and never used for a network connection.
         roots = tuple(dict.fromkeys(checked_path(root) for root in self.roots))
         if any(not root.is_dir() for root in roots):
             raise ValueError('Guard roots must be directories')
@@ -128,10 +129,17 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
     return files, issues, limited
 
 
-def probe_engine(service_name=None):
-    engine = ClamAVScanner(service_name=service_name, require_verified_peer=os.name == 'nt')
+def probe_engine(service_name=None, *, scan_engine="antios"):
+    """Probe our local engine, without connecting to external services."""
+    from .antivirus import load_managed_signatures
+    from .engine import AntiOSEngine
+
+    if scan_engine != "antios":
+        raise ValueError("Unknown Guard scan engine")
+    rules, catalog = load_managed_signatures()
+    engine = AntiOSEngine(signatures=rules)
     try:
-        return dict(engine.metadata, available=True)
+        return dict(engine.metadata, available=True, **catalog)
     finally:
         engine.close()
 
@@ -155,11 +163,10 @@ class Guard:
                 raise ValueError('A watched root cannot be inside protected Guard, quarantine or Defender storage')
         if scanner is None:
             self.scanner = lambda path, **kwargs: run_scan_process(
-                path, engine_service=policy.engine_service,
-                require_verified_peer=os.name == 'nt', **kwargs)
+                path, **kwargs)
         else:
             self.scanner = scanner
-        self.probe = (lambda: probe_engine(policy.engine_service)) if probe is None else probe
+        self.probe = (lambda: probe_engine(scan_engine=policy.scan_engine)) if probe is None else probe
         self.quarantine_factory = quarantine_factory
         self.watcher_factory = watcher_factory or (DirectoryNotifications if os.name == 'nt' else PollNotifications)
         self.status_observer = status_observer
@@ -198,10 +205,8 @@ class Guard:
         if native_probe is not None:
             self.native_probe = native_probe
         elif os.name == 'nt':
-            def _default_native_probe():
-                from .protection import native_pre_execution_active
-                return native_pre_execution_active()
-            self.native_probe = _default_native_probe
+            # Old native service speaks to ClamAV, not AntiOS Engine.
+            self.native_probe = lambda: None
         else:
             self.native_probe = lambda: None
         self._native_checked_at = float('-inf')
@@ -216,6 +221,7 @@ class Guard:
                        'state': 'starting', 'running': True, 'pid': os.getpid(),
                        'started_at': time.time(), 'heartbeat': time.time(),
                        'roots': [str(root) for root in self.roots],
+                       'scan_engine': self.policy.scan_engine,
                        'mode': 'quarantine' if policy.auto_quarantine else 'notify',
                        'pre_execution_blocking': False, 'coverage': 'selected-directories-after-change',
                        'engine': {}, 'scanned': 0, 'detections': 0, 'quarantined': 0,
@@ -465,9 +471,11 @@ class Guard:
                     last_probe = now
                     try:
                         metadata = self.probe()
-                        if metadata.get('version') != version:
-                            version = metadata.get('version')
+                        probed_version = (metadata.get('version'), metadata.get('signature_catalog_version'))
+                        if probed_version != version:
+                            version = probed_version
                             self.known.clear()
+                            self.queue_cursor = None
                             changed = True
                         if metadata != self.status['engine']:
                             store.event('engine', metadata)
@@ -525,7 +533,7 @@ class Guard:
                     store.publish(self.status)
                     self._notify_status()
                     try:
-                        result = self.scanner(path, engine='clamav', timeout=45, cancelled=cancelled)
+                        result = self.scanner(path, engine=self.policy.scan_engine, timeout=45, cancelled=cancelled)
                         if cancelled():
                             break
                         self.transient_retries.pop(path, None)
@@ -607,7 +615,9 @@ class Guard:
                     raise RuntimeError('Guard incident capacity exceeded; review history and reduce watched scope')
                 degraded = (notification_error or self.failures or self.status['inventory_issues'] or
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
-                            self.status['engine'].get('database_freshness') != 'current' or
+                            self.status['engine'].get('signature_catalog_status') == 'fallback' or
+                            self.status['engine'].get('database_freshness') != (
+                                'local' if self.policy.scan_engine == 'antios' else 'current') or
                             (self._process_visibility_required and self.process_sampler is None) or
                             self.status['behavior_alerts_dropped'] > 0)
                 behavior_attention = self.status.get('behavior', {}).get('state') in {'attention', 'alert'}
@@ -667,7 +677,7 @@ def load_policy(path):
     data = json.loads(content)
     if not isinstance(data, dict) or data.get('schema') != 1:
         raise ValueError('Guard policy must use schema 1')
-    unknown = set(data) - {'schema', 'roots', 'auto_quarantine', 'engine_service'}
+    unknown = set(data) - {'schema', 'roots', 'auto_quarantine', 'engine_service', 'scan_engine'}
     if unknown:
         # Show safe *field names* in diagnostics without leaking arbitrary JSON
         # keys. Never ignore unknown policy options or weaken Guard defaults.
@@ -688,13 +698,19 @@ def load_policy(path):
     if not isinstance(automatic, bool):
         raise ValueError('auto_quarantine must be boolean')
     engine_service = data.get('engine_service')
-    if engine_service is not None and not isinstance(engine_service, str):
-        raise ValueError('engine_service must be a service name string')
-    if engine_service is not None:
-        from .windows_clamd_peer import validate_service_name
-        validate_service_name(engine_service)
+    if engine_service is not None and (
+            not isinstance(engine_service, str)
+            or re.fullmatch(r'[A-Za-z0-9_-]{1,80}', engine_service) is None):
+        raise ValueError('Invalid legacy engine_service field')
+    # Ignore historical service bindings; all new scans are local.
+    scan_engine = data.get('scan_engine', 'antios')
+    if scan_engine == 'clamav':
+        # A policy from an older installation is migrated to our engine.
+        scan_engine = 'antios'
+    if scan_engine != 'antios':
+        raise ValueError('Unknown Guard scan engine')
     return GuardPolicy(tuple(Path(p) for p in roots), auto_quarantine=automatic,
-                       engine_service=engine_service)
+                       engine_service=engine_service, scan_engine=scan_engine)
 
 
 def _startup_error_file(state_dir=None):
@@ -734,7 +750,8 @@ def main(argv=None):
     run.add_argument('roots', nargs='*', type=Path)
     run.add_argument('--policy', type=Path)
     run.add_argument('--auto-quarantine', action='store_true', help='Explicitly permit automatic encrypted isolation of confirmed detections.')
-    run.add_argument('--engine-service', help='Windows SCM service name owning the trusted ClamD process.')
+    run.add_argument('--engine', choices=('antios',),
+                     help='Native AntiOS Engine (default).')
     run.add_argument('--state-dir', type=Path)
     for name in ('status', 'stop', 'history'):
         commands.add_parser(name).add_argument('--state-dir', type=Path)
@@ -746,12 +763,12 @@ def main(argv=None):
             print(json.dumps(status, indent=2, ensure_ascii=False))
             return 0
         if args.policy:
-            if args.roots or args.auto_quarantine or args.engine_service:
+            if args.roots or args.auto_quarantine or args.engine is not None:
                 raise ValueError('Use a policy file or inline roots/options, not both')
             policy = load_policy(args.policy)
         else:
             policy = GuardPolicy(tuple(args.roots), auto_quarantine=args.auto_quarantine,
-                                 engine_service=args.engine_service)
+                                 scan_engine=args.engine or 'antios')
         if policy.auto_quarantine and os.name != 'nt':
             raise ValueError('Automatic encrypted quarantine requires Windows DPAPI')
         print('AntiOS Guard: post-write detection for selected directories; pre-execution blocking is unavailable.', flush=True)

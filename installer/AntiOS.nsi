@@ -26,15 +26,14 @@ Unicode true
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\AntiOS"
 !define APP_PATH_KEY "Software\Microsoft\Windows\CurrentVersion\App Paths\AntiOS-GUI.exe"
 
-Var SkipEngine
+Var SkipGuard
 Var ExistingVersion
 Var StageDir
 Var BackupDir
 Var RollbackFailed
 
-; Application payload only: DO NOT put managed ClamAV or ProgramData in this
-; transaction. ClamAV\clamd.exe can be a live SCM service, and its files must
-; never be moved with GUI/CLI application binaries.
+; Application payload contains only our own AntiOS Engine, GUI, Guard and
+; support scripts. Third-party AV services and their databases are untouched.
 !macro ANTIOS_EACH_APP_ITEM OP
   !insertmacro ${OP} "AntiOS.exe"
   !insertmacro ${OP} "AntiOS-GUI.exe"
@@ -43,21 +42,12 @@ Var RollbackFailed
   !insertmacro ${OP} "_cli"
   !insertmacro ${OP} "_gui"
   !insertmacro ${OP} "_guard"
-  !insertmacro ${OP} "AntiOS-AmsiProvider.dll"
   !insertmacro ${OP} "guard-startup.ps1"
+  !insertmacro ${OP} "guard-trust.ps1"
   !insertmacro ${OP} "guard-state-access.cs"
   !insertmacro ${OP} "dashboard-startup.ps1"
-  !insertmacro ${OP} "protection-engine.ps1"
-  !insertmacro ${OP} "clamav-trust.ps1"
-  !insertmacro ${OP} "clamav-repair-validation.ps1"
-  !insertmacro ${OP} "protection-bootstrap.ps1"
-  !insertmacro ${OP} "protection-repair.ps1"
   !insertmacro ${OP} "protection-first-run.ps1"
-  !insertmacro ${OP} "Install-AmsiProvider.ps1"
-  !insertmacro ${OP} "LICENSE.microsoft"
   !insertmacro ${OP} "COEXISTENCE.md"
-  !insertmacro ${OP} "clamav-windows.json"
-  !insertmacro ${OP} "clamav-config"
   !insertmacro ${OP} "README.md"
   !insertmacro ${OP} "README.ru.md"
   !insertmacro ${OP} "README.es.md"
@@ -171,11 +161,19 @@ Function .onInit
   ${EndIf}
 
   ${GetParameters} $R0
-  ${GetOptions} "$R0" "/NOENGINE=" $R1
+  ; NOENGINE previously skipped a third-party service. It no longer has
+  ; that meaning. Do not silently convert it into disabling Guard.
+  ${GetOptions} "$R0" "/NOENGINE=" $R2
+  ${If} $R2 != ""
+    SetErrorLevel 31
+    MessageBox MB_ICONSTOP|MB_OK "The /NOENGINE option is obsolete. AntiOS Engine is bundled and cannot be disabled in setup. Use /NOGUARD=1 only to skip resident Guard configuration." /SD IDOK
+    Abort
+  ${EndIf}
+  ${GetOptions} "$R0" "/NOGUARD=" $R1
   ${If} $R1 == "1"
-    StrCpy $SkipEngine "1"
+    StrCpy $SkipGuard "1"
   ${Else}
-    StrCpy $SkipEngine "0"
+    StrCpy $SkipGuard "0"
   ${EndIf}
 
   SetRegView 64
@@ -212,6 +210,49 @@ Section "AntiOS" SecMain
       Abort
     ${EndIf}
 antios_path_preflight_done:
+
+  ; Fail closed on old anti-malware components. Replacing application files
+  ; without ownership-verified retirement of a SYSTEM service or AMSI DLL
+  ; would leave a misleading and potentially vulnerable mixed installation.
+  ClearErrors
+  ReadRegStr $0 HKLM "${INSTALL_KEY}" "EngineServiceName"
+  ${If} $0 != ""
+    Goto antios_legacy_upgrade_blocked
+  ${EndIf}
+  ; Original managed ClamAV installer wrote its binding to a different key.
+  ClearErrors
+  ReadRegStr $0 HKLM "SOFTWARE\AntiOS" "EngineServiceName"
+  ${If} $0 != ""
+    Goto antios_legacy_upgrade_blocked
+  ${EndIf}
+  ; The retired provider registered this fixed CLSID. Its presence is a
+  ; migration warning, not authorization to remove or execute it.
+  ClearErrors
+  ReadRegStr $0 HKLM "SOFTWARE\Microsoft\AMSI\Providers\{8E8A9D7D-814F-4A83-A127-8C4894E41121}" ""
+  ${If} $0 != ""
+    Goto antios_legacy_upgrade_blocked
+  ${EndIf}
+  ClearErrors
+  ReadRegStr $0 HKLM "SOFTWARE\Classes\CLSID\{8E8A9D7D-814F-4A83-A127-8C4894E41121}\InprocServer32" ""
+  ${If} $0 != ""
+    Goto antios_legacy_upgrade_blocked
+  ${EndIf}
+  IfFileExists "$INSTDIR\protection-engine.ps1" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\protection-bootstrap.ps1" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\protection-repair.ps1" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\AntiOS-AmsiProvider.dll" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\AntiOS-Service.exe" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\AntiOS-Filter.sys" antios_legacy_upgrade_blocked
+  IfFileExists "$INSTDIR\ClamAV\*.*" antios_legacy_upgrade_blocked
+  Goto antios_legacy_upgrade_safe
+
+antios_legacy_upgrade_blocked:
+  SetErrorLevel 30
+  MessageBox MB_ICONSTOP|MB_OK "AntiOS detected a previous protection engine. Automatic replacement is blocked. Use the original version uninstaller and verify its services are removed before installing this version. No files were changed." /SD IDOK
+  Abort
+
+antios_legacy_upgrade_safe:
 
   ; Extract the complete new payload and generate its uninstaller before
   ; stopping the previous Guard or replacing one installed application file.
@@ -340,51 +381,28 @@ antios_payload_copy_ok:
 control_center_done:
   ${EndIf}
 
-  ${If} $SkipEngine != "1"
-    DetailPrint "Checking current-user Guard database access..."
+  ; AntiOS Engine is bundled in the application. Never download ClamAV or
+  ; register an AMSI provider as part of installing this build.
+  ${If} $SkipGuard != "1"
+    DetailPrint "Verifying current-user Guard state access..."
     nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\guard-startup.ps1" -RepairStateAccess -Apply'
     Pop $2
     ${If} $2 == "error"
       StrCpy $2 9001
     ${EndIf}
     WriteRegDWORD HKLM "${INSTALL_KEY}" "GuardAccessRepairExitCode" $2
-    DetailPrint "Bootstrapping AntiOS protection engine..."
-    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-bootstrap.ps1" -ManifestPath "$INSTDIR\clamav-windows.json" -Apply'
-    Pop $0
-    ${If} $0 == "error"
-      StrCpy $0 9001
+    DetailPrint "Configuring AntiOS Engine resident Guard..."
+    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply'
+    Pop $2
+    ${If} $2 == "error"
+      StrCpy $2 9001
     ${EndIf}
-    WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapExitCode" $0
-    ${If} $0 == 0
-      nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-first-run.ps1" -Apply'
-      Pop $2
-      ${If} $2 == "error"
-        StrCpy $2 9001
-      ${EndIf}
-      WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionFirstRunExitCode" $2
-      ; AMSI coexistence is optional and secondary. Registration succeeds only
-      ; for a valid Authenticode-signed provider and never changes Defender/WSC.
-      IfFileExists "$INSTDIR\AntiOS-AmsiProvider.dll" 0 amsi_done
-      IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 amsi_done
-      DetailPrint "Configuring AntiOS AMSI coexistence provider..."
-      nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -ProviderDll "$INSTDIR\AntiOS-AmsiProvider.dll" -Apply'
-      Pop $3
-      ${If} $3 == "error"
-        StrCpy $3 9001
-      ${EndIf}
-      WriteRegDWORD HKLM "${INSTALL_KEY}" "AmsiProviderExitCode" $3
-      ${If} $3 != 0
-        DetailPrint "AntiOS AMSI provider was not registered; Defender and Windows security policy remain unchanged."
-      ${EndIf}
-amsi_done:
-    ${Else}
-      IfSilent bootstrap_done bootstrap_notice
-bootstrap_notice:
-      MessageBox MB_ICONEXCLAMATION|MB_OK "AntiOS was installed, but the protection engine could not be initialized. Open AntiOS and run Protection Repair after checking your Internet connection."
-bootstrap_done:
+    WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionFirstRunExitCode" $2
+    ${If} $2 != 0
+      DetailPrint "Guard startup needs user attention. Manual scanning remains available."
     ${EndIf}
   ${Else}
-    WriteRegDWORD HKLM "${INSTALL_KEY}" "ProtectionBootstrapSkipped" 1
+    WriteRegDWORD HKLM "${INSTALL_KEY}" "ResidentGuardSetupSkipped" 1
   ${EndIf}
 
   ; A successful install retires only its own app-file rollback area. A crash
@@ -399,9 +417,6 @@ Section "Uninstall"
   ; would otherwise redirect deletion into an unrelated directory.
   !insertmacro ANTIOS_UNINSTALL_CHECK_PATHS
   SetOutPath "$TEMP"
-  IfFileExists "$INSTDIR\Install-AmsiProvider.ps1" 0 +3
-    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-AmsiProvider.ps1" -Uninstall -Apply'
-    Pop $0
   IfFileExists "$INSTDIR\AntiOS-Guard.exe" 0 +3
     nsExec::Exec '"$INSTDIR\AntiOS-Guard.exe" stop'
     Pop $0
@@ -410,9 +425,6 @@ Section "Uninstall"
     Pop $0
   IfFileExists "$INSTDIR\dashboard-startup.ps1" 0 +3
     nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\dashboard-startup.ps1" -Uninstall -Apply'
-    Pop $0
-  IfFileExists "$INSTDIR\protection-engine.ps1" 0 +3
-    nsExec::Exec '"$NativePowerShell" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\protection-engine.ps1" -Uninstall -Apply'
     Pop $0
 
   Delete "$COMMONDESKTOP\AntiOS.lnk"

@@ -1,8 +1,8 @@
 """Read-only Defender/Windows Security coexistence diagnostics.
 
 AntiOS deliberately does not register itself as the primary antivirus here.  The
-module only observes Windows Security/Defender state and whether the optional
-AntiOS AMSI provider is registered.  It never disables Defender, changes WSC
+module only observes Windows Security/Defender state and checks for possible
+legacy AntiOS AMSI registrations left by older installers.  It never disables Defender, changes WSC
 registration, exclusions, Tamper Protection or AMSI policy.
 """
 from __future__ import annotations
@@ -166,7 +166,8 @@ def evaluate_coexistence(defender: dict, wsc: dict, amsi: dict) -> dict:
         "mode": mode,
         "defender_active_parallel": defender_active,
         "wsc_antivirus_health_good": wsc.get("health") == "good",
-        "amsi_provider_registered": bool(amsi.get("registered") and amsi.get("module_exists")),
+        "amsi_provider_registered": False,
+        "legacy_amsi_registration_detected": bool(amsi.get("registered")),
         # Invariant: coexistence must not advertise AntiOS as the primary AV.
         "antios_primary_wsc_registration": False,
         "defender_changes_required": False,
@@ -236,7 +237,7 @@ def render_coexistence_status(status: dict) -> str:
         f"Third-party real-time confirmed: {', '.join(realtime) if realtime else 'none'}",
         f"Defender running mode: {defender.get('running_mode', 'unknown')}",
         f"Windows Security AV health: {wsc.get('health', 'unknown')}",
-        f"AntiOS AMSI provider: {'registered' if amsi.get('registered') else 'not registered'}",
+        f"Legacy AntiOS AMSI registration: {'detected (requires migration)' if amsi.get('registered') else 'none'}",
         "AntiOS primary WSC registration: no",
         "Defender settings changed by AntiOS: no",
         "Kaspersky / Dr.Web settings changed by AntiOS: no",

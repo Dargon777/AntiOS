@@ -95,6 +95,8 @@ def test_linux_companion_never_claims_vendor_control(monkeypatch):
     status = companion.collect_linux_companion_status()
 
     assert status["coexistence"]["mode"] == "companion-with-kaspersky"
+    assert status["coexistence"]["antios_native_scan"] is True
+    assert "antios_clamav_scan" not in status["coexistence"]
     assert status["coexistence"]["resident_guard_recommended"] is False
     assert status["policy"]["modify_vendor_settings"] is False
     assert status["policy"]["modify_vendor_exclusions"] is False
@@ -117,16 +119,15 @@ def test_linux_protection_status_is_separate_from_windows_contract(monkeypatch):
 
     class Ready:
         metadata = {
-            "version": "ClamAV test",
-            "database_freshness": "current",
-            "peer_verification_required": False,
+            "version": "AntiOS Engine test",
+            "database_freshness": "local",
         }
         def __init__(self, **kwargs):
             pass
         def close(self):
             pass
 
-    monkeypatch.setattr(protection, "ClamAVScanner", Ready)
+    monkeypatch.setattr(protection, "AntiOSEngine", Ready)
     monkeypatch.setattr(protection, "read_guard_state",
                         lambda: {"running": False, "state": "not-running"})
     monkeypatch.setattr(companion, "_is_linux", lambda: True)

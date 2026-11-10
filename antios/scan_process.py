@@ -1,4 +1,4 @@
-"""Isolate read-only scans so a blocked filesystem/AMSI call can be terminated.
+"""Isolate read-only native AntiOS scans so blocked filesystem calls can be terminated.
 
 The child appends JSON events to a private temporary directory. This works with
 windowed frozen executables (which have no stdout), and killing a writer cannot
@@ -18,7 +18,7 @@ from .windows_process import hidden_process_kwargs
 import time
 from typing import Callable
 
-from .antivirus import DEFAULT_MAX_BYTES, scan_files, utc_now
+from .antivirus import DEFAULT_SCAN_WORKERS, scan_files, utc_now
 from .quarantine import default_quarantine_path
 from .scan_cache import default_scan_cache_path
 
@@ -51,13 +51,13 @@ def worker_main(request_path: str, events_path: str) -> int:
 
         try:
             scan_files(request["path"], signature_path=request.get("signatures"),
-                       engine=request.get("engine", "clamav"),
+                       engine=request.get("engine", "antios"),
                        max_files=None,
-                       max_bytes=None if request.get("engine", "clamav") == "clamav" else DEFAULT_MAX_BYTES,
+                       max_bytes=None,
                        engine_service=request.get("engine_service"),
                        require_verified_peer=bool(request.get("require_verified_peer", False)),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint,
-                       workers=int(request.get("workers", 4)),
+                       workers=int(request.get("workers", DEFAULT_SCAN_WORKERS)),
                        cache_path=default_scan_cache_path(),
                        use_cache=bool(request.get("use_cache", True)))
             emit("done", None)
@@ -85,10 +85,10 @@ def _terminate(process: subprocess.Popen) -> None:
 
 
 def run_scan_process(path: Path, *, signature_path: Path | None = None,
-                     engine: str = "clamav",
+                     engine: str = "antios",
                      engine_service: str | None = None,
                      require_verified_peer: bool = False,
-                     workers: int = 4,
+                     workers: int = DEFAULT_SCAN_WORKERS,
                      use_cache: bool = True,
                      timeout: float | None = None,
                      cancelled: Callable[[], bool] = lambda: False,

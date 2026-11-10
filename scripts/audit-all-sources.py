@@ -148,7 +148,7 @@ def main() -> int:
         f"Errors: {len(errors)}; heuristic manual-review leads: {len(leads)}",
         "",
         "This is whole-line inventory and syntax validation, not proof of semantic correctness.",
-        "PowerShell/NSIS/WDK checks run in separate Windows jobs.", "",
+        "PowerShell/NSIS checks run in separate Windows jobs.", "",
         "## Errors",
     ]
     report += [f"- {path}: {err}" for path, err in errors] or ["None."]

@@ -1,14 +1,14 @@
 from antios.risk import classify_origin, evaluate_risk
 
 
-def scan(*, verdict="no-threats-found", coverage="clamav-and-signatures", findings=None, fresh=True):
+def scan(*, verdict="no-threats-found", coverage="antios-local-inspection", findings=None, fresh=True):
     return {
         "verdict": verdict,
         "coverage": coverage,
         "findings": findings or [],
         "engine": {
             "available": True,
-            "database_freshness": "current" if fresh else "stale",
+            "database_freshness": "local" if fresh else "stale",
         },
     }
 
@@ -94,9 +94,11 @@ def test_origin_classifier_is_conservative():
 
 
 def test_real_antios_coverage_values_define_complete_scan():
+    native = evaluate_risk(r"C:\Data\a.exe", scan(), now=1)
     clamav = evaluate_risk(r"C:\Data\a.exe", scan(coverage="clamav-and-signatures"), now=1)
     amsi = evaluate_risk(r"C:\Data\a.exe", scan(coverage="provider-and-signatures"), now=1)
     limited = evaluate_risk(r"C:\Data\a.exe", scan(coverage="limited", verdict="incomplete"), now=1)
-    assert clamav.scanner_complete is True
-    assert amsi.scanner_complete is True
+    assert native.scanner_complete is True
+    assert clamav.scanner_complete is False
+    assert amsi.scanner_complete is False
     assert limited.scanner_complete is False

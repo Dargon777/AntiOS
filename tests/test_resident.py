@@ -46,8 +46,8 @@ def test_configure_resident_guard_uses_persistent_task(monkeypatch, tmp_path):
     assert result["configured"] is True
     args = captured["args"]
     assert "-Apply" in args
-    assert "-EngineServiceName" in args
-    assert "clamd" in args
+    assert "-EngineServiceName" not in args
+    assert "clamd" not in args
     assert "-RootsJson" in args
     payload = json.loads(args[args.index("-RootsJson") + 1])
     assert payload == [str(root)]

@@ -13,6 +13,12 @@ Resident Guard is AntiOS's optional resident protection layer.
 
 Guard is designed to fail visibly when protection cannot be established.
 
+Resident Guard now scans with the independent AntiOS Engine by default. It
+does not install or connect to ClamAV/AMSI; the older native service is not
+an AntiOS Engine enforcement backend. Guard remains post-write and should not
+be presented as pre-execution malware prevention. The new configuration must
+pass Windows acceptance tests before a production release.
+
 ## Privacy and coexistence
 
 Guard is local and is intended to coexist with supported security products. AntiOS does not disable Defender or add hidden exclusions as part of normal coexistence.

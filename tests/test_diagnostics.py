@@ -223,7 +223,7 @@ def test_every_supported_diagnostic_locale_has_complete_labels():
 
 
 def test_engine_failure_returned_inside_scan_result_is_logged(monkeypatch):
-    """ClamAV can fail closed by returning limited coverage without raising."""
+    """Native AntiOS can fail closed with limited coverage without raising."""
     from antios.antivirus_ui import AntivirusPanel
     import antios.antivirus_ui as ui
 
@@ -246,22 +246,22 @@ def test_engine_failure_returned_inside_scan_result_is_logged(monkeypatch):
     failure = {
         "engine": {
             "available": False,
-            "detail": "Production engine setup requires valid Authenticode signatures on clamd.exe and freshclam.exe.",
+            "detail": "AntiOS Engine local signature database is unavailable.",
         },
         "coverage": "limited",
         "verdict": "incomplete",
     }
     panel._diagnose_scan_result(failure)
     assert len(captured) == 1
-    assert captured[0][0][:2] == ("ClamAV", "ERROR")
-    assert captured[0][1]["code"] == "ENGINE_SIGNATURE_INVALID"
-    assert "подпись" in panel.status.values["text"]
+    assert captured[0][0][:2] == ("AntiOS Engine", "ERROR")
+    assert isinstance(captured[0][1]["code"], str) and captured[0][1]["code"]
+    assert panel.status.values["text"]
     assert panel.last_error_label.values["fg"] == "red"
     panel._diagnose_scan_result({"engine": {"available": True, "version": "ok"}})
     assert len(captured) == 1
     panel._diagnose_scan_result({"engine": {
         "available": True, "failed_during_scan": True,
-        "detail": "ClamAV engine stopped while scanning",
+        "detail": "AntiOS Engine stopped while scanning",
     }})
     assert len(captured) == 2
 

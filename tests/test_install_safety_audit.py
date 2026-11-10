@@ -12,60 +12,28 @@ def read(path):
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_engine_fresh_install_refuses_existing_scheduler_and_registry_bindings():
-    script = read("scripts/protection-engine.ps1")
-    assert "function Assert-FreshEngineInstallTargets" in script
-    preflight = script.split("function Assert-FreshEngineInstallTargets {", 1)[1].split(
-        "\n}\n", 1
-    )[0]
-    for requirement in (
-        "Get-Service -Name $EngineServiceName",
-        "Get-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName",
-        "Test-Path -LiteralPath $destination",
-        "Get-OptionalEngineRegistryValue $AntiOSRegistry 'EngineServiceName'",
-        "Get-OptionalEngineRegistryValue $ClamRegistry 'ConfDir'",
-        "Get-OptionalEngineRegistryValue $ClamRegistry 'DataDir'",
-    ):
-        assert requirement in preflight, requirement
-    assert script.count("Assert-FreshEngineInstallTargets") >= 3
-    assert script.index("Assert-Administrator\n# Do not trust a pre-elevation dry-run") < (
-        script.index("New-Item -ItemType Directory -Path $InstallRoot -ErrorAction Stop")
-    )
+def test_native_install_refuses_ambiguous_pending_update_directories():
+    installer = read("installer/AntiOS.nsi")
+    assert 'IfFileExists "$StageDir"' in installer
+    assert 'IfFileExists "$BackupDir"' in installer
+    assert "ANTIOS_CHECK_STAGED" in installer
+    assert "ANTIOS_RESTORE_APP_ITEM" in installer
 
 
-def test_engine_install_never_forces_clamav_task_or_existing_destinations():
-    script = read("scripts/protection-engine.ps1")
-    assert "Register-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName" in script
-    registration = next(line for line in script.splitlines() if
-                        "Register-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName" in line)
-    assert " -Force" not in registration
-    assert "New-Item -ItemType Directory -Path $InstallRoot -Force" not in script
-    assert "New-Item -ItemType Directory -Path $DataRoot -Force" not in script
-    assert script.index("$createdData = $true") < script.index(
-        "Set-Acl -LiteralPath $DataRoot -AclObject $dataAcl"
-    )
+def test_native_install_does_not_start_or_configure_clamd():
+    installer = read("installer/AntiOS.nsi")
+    installation = installer.split('Section "AntiOS" SecMain', 1)[1].split('Section "Uninstall"', 1)[0]
+    active = installation.split("antios_legacy_upgrade_safe:", 1)[1]
+    assert "protection-bootstrap.ps1" not in active
+    assert "Install-AmsiProvider.ps1" not in active
+    assert "clamd.exe" not in active
+    assert "protection-first-run.ps1" in installation
 
 
-def test_engine_install_failed_operations_have_owned_rollback_and_original_error():
-    script = read("scripts/protection-engine.ps1")
-    for marker in (
-        "$serviceInstallAttempted = $true",
-        "$taskInstallAttempted = $true",
-        "Assert-ManagedClamdService",
-        "Get-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName",
-        "Scheduled-task rollback:",
-        "ClamD service rollback:",
-        "$unsafeToRemovePayload",
-        "Keeping managed files and registry values",
-        "throw $installFailure",
-    ):
-        assert marker in script, marker
-    assert script.index("$serviceInstallAttempted = $true") < script.index(
-        "& $ManagedClamd --install-service"
-    )
-    assert script.index("$taskInstallAttempted = $true") < script.index(
-        "Register-ScheduledTask -TaskPath '\\' -TaskName $UpdaterTaskName"
-    )
+def test_current_guard_registration_never_claims_native_preexecution():
+    script = read("scripts/guard-startup.ps1")
+    assert "scan_engine = 'antios'" in script
+    assert "no pre-execution blocking" in script
 
 
 def test_logon_guard_and_dashboard_do_not_touch_foreign_scheduler_tasks():
@@ -91,4 +59,4 @@ def test_logon_guard_and_dashboard_do_not_touch_foreign_scheduler_tasks():
 def test_windows_behavioral_gate_registered():
     workflow = read(".github/workflows/full-source-audit.yml")
     assert "tests/install-boundary-audit-smoke.ps1" in workflow
-    assert "shell: powershell" in workflow
+    assert "shell: pwsh" in workflow

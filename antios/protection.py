@@ -1,235 +1,85 @@
 """Truthful aggregate status for AntiOS antivirus protection layers."""
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
-from pathlib import Path
-import subprocess
 
-from .clamav import ClamAVScanner
-from .coexistence import amsi_provider_status
+from .engine import AntiOSEngine
+from .antivirus import load_managed_signatures
 from .guard_state import read_guard_state
-from .private_core import (
-    INTERFACE_VERSION as PRIVATE_CORE_INTERFACE_VERSION,
-    PrivateCoreError,
-    invoke_private_core,
-)
-from .windows_antivirus import coexistence_profile, defender_status
-from .windows_process import hidden_process_kwargs, system_executable
+from .windows_defender import coexistence_profile, defender_status
 
 
-def _managed_runtime_status() -> dict:
-    if os.name != "nt":
-        return {"available": False, "reason": "windows-only"}
-    program_files = Path(os.environ.get("ProgramFiles") or r"C:\Program Files")
-    program_data = Path(os.environ.get("ProgramData") or r"C:\ProgramData")
-    install = program_files / "AntiOS" / "ClamAV"
-    data = program_data / "AntiOS-ClamAV"
-    required = {
-        "clamd": install / "clamd.exe",
-        "freshclam": install / "freshclam.exe",
-        "clamd_config": data / "config" / "clamd.conf",
-        "freshclam_config": data / "config" / "freshclam.conf",
-        "database": data / "database",
-    }
-    # Machine configuration is deliberately administrator-only. A normal
-    # desktop session must still report the independently verified engine.
-    access_errors = {}
-    def presence(name, path):
-        try:
-            return path.exists()
-        except OSError as exc:
-            access_errors[name] = type(exc).__name__
-            return None
-    files = {key: presence(key, path) for key, path in required.items()}
-    available = presence("install_root", install)
-    task = {"available": False}
-    schtasks = system_executable("schtasks.exe")
+def _engine_status() -> dict:
     try:
-        process = subprocess.run(
-            [str(schtasks), "/Query", "/TN", "AntiOS ClamAV Signature Update", "/FO", "LIST"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=5,
-            **hidden_process_kwargs(),
-        )
-        task = {
-            "available": process.returncode == 0,
-            "exit_code": process.returncode,
-        }
-    except (OSError, subprocess.SubprocessError) as exc:
-        task = {"available": False, "error": str(exc)[:300]}
-
-    bootstrap_exit = None
-    try:
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\DargonITP\AntiOS") as key:
-            bootstrap_exit = int(winreg.QueryValueEx(key, "ProtectionBootstrapExitCode")[0])
-    except (OSError, ValueError):
-        pass
-
-    inspection_complete = not access_errors
-    healthy = (all(files.values()) and task.get("available") is True) if inspection_complete else None
-    return {
-        "available": available,
-        "healthy": healthy,
-        "inspection_complete": inspection_complete,
-        "access_errors": access_errors,
-        "install_root": str(install),
-        "data_root": str(data),
-        "files": files,
-        "updater_task": task,
-        "bootstrap_exit_code": bootstrap_exit,
-    }
-
-
-def _native_status() -> dict:
-    if os.name != "nt":
-        return {"available": False, "reason": "windows-only"}
-    program_files = os.environ.get("ProgramFiles")
-    if not program_files:
-        return {"available": False, "reason": "ProgramFiles unavailable"}
-    executable = Path(program_files) / "AntiOSNative" / "AntiOS-Service.exe"
-    if not executable.is_file():
-        return {"available": False, "reason": "not-installed"}
-    result = {"available": True, "path": str(executable)}
-    for key, flag in (("service", "--status"), ("driver", "--driver-status")):
+        rules, catalog = load_managed_signatures()
+        scanner = AntiOSEngine(signatures=rules)
         try:
-            process = subprocess.run(
-                [str(executable), flag],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=5,
-                **hidden_process_kwargs(),
-            )
-            payload = json.loads(process.stdout) if process.stdout.strip() else {}
-            payload["exit_code"] = process.returncode
-            if process.stderr.strip():
-                payload["stderr"] = process.stderr.strip()[:500]
-            result[key] = payload
-        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            result[key] = {"error": str(exc)[:500]}
-    return result
+            return dict(scanner.metadata, available=True, **catalog)
+        finally:
+            scanner.close()
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {"available": False, "detail": str(exc)[:500]}
+
+
+def _managed_runtime_status(engine: dict | None = None) -> dict:
+    """Report the health of the bundled engine and its selected catalog."""
+    engine = _engine_status() if engine is None else engine
+    if not engine["available"]:
+        return dict(engine, healthy=False, inspection_complete=True, files={},
+                    updater_task={"available": False})
+    return {"available": True, "healthy": engine.get("signature_catalog_status") != "fallback",
+            "inspection_complete": True,
+            "kind": "bundled-antios-engine", "files": {},
+            "updater_task": {"available": False, "not_required": True}}
+
 
 
 def native_pre_execution_active(native: dict | None = None) -> bool | None:
-    """Return truthful native pre-exec state, or None when it cannot be determined."""
-    state = _native_status() if native is None else native
-    if not isinstance(state, dict) or state.get("available") is False:
-        return None
-    service = state.get("service") if isinstance(state.get("service"), dict) else {}
-    driver = state.get("driver") if isinstance(state.get("driver"), dict) else {}
-    if "error" in service or "error" in driver:
-        return None
-    return bool(
-        service.get("service_state") == 4 and
-        service.get("exit_code") == 0 and
-        driver.get("driver_available") is True and
-        driver.get("exit_code") == 0 and
-        driver.get("enforcement") == 1
-    )
+    """No AntiOS Engine pre-execution backend is implemented."""
+    return None
 
 
 def _native_coexistence_health(native_running: bool, driver: dict) -> dict:
-    configured = bool(
-        native_running and
-        driver.get("driver_available") is True and
-        driver.get("exit_code") == 0 and
-        isinstance(driver.get("protocol"), int) and
-        driver.get("protocol") >= 4 and
-        driver.get("coexistence_mode") == 1 and
-        driver.get("fail_open_on_incomplete") is True and
-        isinstance(driver.get("max_pending"), int) and
-        1 <= driver.get("max_pending") <= 4 and
-        isinstance(driver.get("pending"), int) and
-        0 <= driver.get("pending") <= driver.get("max_pending") and
-        isinstance(driver.get("clean_cache_ttl_ms"), int) and
-        0 <= driver.get("clean_cache_ttl_ms") <= 300000 and
-        isinstance(driver.get("database_generation"), int) and
-        driver.get("database_generation") > 0
+    """Legacy ClamAV driver cannot enforce AntiOS Engine verdicts."""
+    return {"configured": False, "observed": False, "state": "inactive/not-implemented",
+            "attention_reasons": [], "telemetry": {}}
+
+
+def _legacy_registration_status(reader=None) -> dict:
+    """Read fixed historical AntiOS registry markers without changing services."""
+    if reader is None:
+        if os.name != "nt":
+            return {"available": False, "state": "not-applicable", "markers": []}
+        import winreg
+
+        def reader(path, name):
+            access = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, access) as key:
+                return winreg.QueryValueEx(key, name)[0]
+
+    clsid = "{8E8A9D7D-814F-4A83-A127-8C4894E41121}"
+    probes = (
+        (r"SOFTWARE\AntiOS", "EngineServiceName", "service-binding"),
+        (r"SOFTWARE\DargonITP\AntiOS", "EngineServiceName", "service-binding"),
+        (rf"SOFTWARE\Microsoft\AMSI\Providers\{clsid}", "", "amsi-registration"),
+        (rf"SOFTWARE\Classes\CLSID\{clsid}\InprocServer32", "", "amsi-registration"),
     )
-    if not configured:
-        return {
-            "configured": False,
-            "observed": False,
-            "state": "inactive/not-validated",
-            "attention_reasons": [],
-        }
-
-    counters = {}
-    for key in (
-        "attempts", "incomplete", "busy_bypass", "section_conflicts",
-        "delivery_timeouts", "completion_timeouts", "cancelled_opens", "max_wait_ms",
-        "cache_hits", "cache_expired", "cache_invalidations",
-        "database_generation", "database_generation_changes",
-    ):
-        value = driver.get(key)
-        counters[key] = value if isinstance(value, int) and value >= 0 else None
-
-    attempts = counters["attempts"]
-    reasons = []
-    if counters["delivery_timeouts"]:
-        reasons.append("delivery-timeouts")
-    if counters["completion_timeouts"]:
-        reasons.append("completion-timeouts")
-    if counters["max_wait_ms"] is not None and counters["max_wait_ms"] > 15000:
-        reasons.append("latency-ceiling-exceeded")
-
-    if attempts is None:
-        state = "configured-unmeasured"
-        observed = False
-    elif attempts == 0:
-        state = "configured-unexercised"
-        observed = False
-    elif reasons:
-        state = "attention"
-        observed = True
-    elif any(counters[key] for key in ("incomplete", "busy_bypass", "section_conflicts")):
-        state = "operational-with-gaps"
-        observed = True
-    else:
-        state = "operational"
-        observed = True
-
-    return {
-        "configured": True,
-        "observed": observed,
-        "state": state,
-        "attention_reasons": reasons,
-        "telemetry": counters,
-    }
-
-
-def _private_core_protection_status(engine_service: str | None = None) -> dict | None:
-    """Prefer the private core when its narrow public contract is available.
-
-    The open implementation remains a migration fallback until the sensitive
-    components have actually moved to the private repository.
-    """
-    payload = {}
-    if engine_service is not None:
-        payload["engine_service"] = engine_service
-    try:
-        result = invoke_private_core("protection.status", payload, timeout_seconds=10)
-    except PrivateCoreError:
-        return None
-
-    if (
-        result.get("schema") != 1
-        or result.get("kind") != "antios-protection-status"
-        or not isinstance(result.get("capabilities"), dict)
-    ):
-        return None
-    status = dict(result)
-    status["private_core"] = {
-        "active": True,
-        "interface": PRIVATE_CORE_INTERFACE_VERSION,
-    }
-    return status
+    markers, complete = set(), True
+    for path, name, marker in probes:
+        try:
+            value = reader(path, name)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            complete = False
+            continue
+        if isinstance(value, str) and value.strip():
+            markers.add(marker)
+    return {"available": True, "read_only": True,
+            "state": ("attention" if markers else
+                      "none-observed" if complete else "incomplete"),
+            "markers": sorted(markers), "inspection_complete": complete}
 
 
 def _guard_status() -> dict:
@@ -242,46 +92,28 @@ def _guard_status() -> dict:
 
 
 def collect_protection_status(engine_service: str | None = None) -> dict:
-    private_status = _private_core_protection_status(engine_service)
-    if private_status is not None:
-        return private_status
-
-    engine: dict
-    try:
-        scanner = ClamAVScanner(
-            service_name=engine_service,
-            require_verified_peer=os.name == "nt",
-            timeout=5,
-        )
-        try:
-            engine = dict(scanner.metadata, available=True)
-        finally:
-            scanner.close()
-    except (OSError, RuntimeError, ValueError) as exc:
-        engine = {"available": False, "detail": str(exc)[:500]}
+    # Use the installed AntiOS Engine, not a legacy external service.
+    engine = _engine_status()
 
     # A denied/corrupt Guard state database must not make the entire protection
     # probe fail and be incorrectly reported as a ClamAV engine failure. Keep
     # the Guard explicitly unavailable (fail closed) while inspecting the other
     # independent layers.
     guard = _guard_status()
-    managed = _managed_runtime_status()
-    native = _native_status()
+    managed = _managed_runtime_status(engine)
+    # The previous native service is ClamAV-backed; it cannot enforce the
+    # new AntiOS Engine's verdicts. Do not probe/credit it as native protection.
+    native = {"available": False, "reason": "legacy-service-not-an-antios-engine-backend"}
     defender = defender_status()
     coexistence = coexistence_profile(defender)
-    amsi = amsi_provider_status()
+    amsi = {"registered": False, "module_exists": False, "active": False}
     from .windows_companion import collect_windows_companion_status
     vendor_companion = collect_windows_companion_status() if os.name == "nt" else {
         "coexistence": {"vendor_products_detected": [], "vendor_realtime_confirmed": []},
         "products": [],
     }
-    peer_ok = (not engine.get("peer_verification_required") or
-               engine.get("peer_verified") is True)
-    engine_ready = bool(
-        engine.get("available") and
-        engine.get("database_freshness") == "current" and
-        peer_ok
-    )
+    engine_ready = bool(engine.get("available") and
+                        engine.get("database_freshness") == "local")
     guard_running = bool(
         guard.get("running") and
         guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
@@ -308,10 +140,11 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     )
     service = native.get("service", {})
     driver = native.get("driver", {})
-    native_running = service.get("service_state") == 4 and service.get("exit_code") == 0
+    native_running = False
     native_health = _native_coexistence_health(native_running, driver)
-    native_coexistence = native_health["configured"]
-    pre_execution = native_pre_execution_active(native) is True
+    native_coexistence = False
+    # Legacy native service still depends on ClamAV; not our enforcement.
+    pre_execution = False
     antios_resident = bool(engine_ready and (guard_operational or pre_execution))
     defender_realtime = defender.get("realtime_active") is True
     layered_active = bool(defender_realtime and antios_resident)
@@ -334,13 +167,15 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
     elif defender_realtime:
         coexistence["mode"] = "defender-active-antios-incomplete"
 
+    legacy = _legacy_registration_status()
     blockers = []
+    if legacy.get("state") in {"attention", "incomplete"}:
+        blockers.append("legacy-engine-registration-requires-migration")
     if not engine_ready:
-        blockers.append("trusted-current-engine")
+        blockers.append("antios-native-engine")
     if not guard_operational:
         blockers.append("resident-post-write-guard")
-    if not pre_execution:
-        blockers.append("signed-native-pre-execution-enforcement")
+    blockers.append("antios-native-pre-execution-enforcement-not-implemented")
     # These are intentionally never inferred from local process state.
     blockers.extend(["windows-security-center-registration", "elam-ppl-production-approval"])
 
@@ -350,6 +185,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         "engine": engine,
         "guard": guard,
         "managed_runtime": managed,
+        "legacy_registrations": legacy,
         "native": native,
         "native_coexistence": native_health,
         "defender": defender,
@@ -387,26 +223,13 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
 
 def collect_linux_protection_status() -> dict:
     """Linux-specific companion protection view without changing Windows contracts."""
-    engine: dict
-    try:
-        scanner = ClamAVScanner(require_verified_peer=False, timeout=5)
-        try:
-            engine = dict(scanner.metadata, available=True)
-        finally:
-            scanner.close()
-    except (OSError, RuntimeError, ValueError) as exc:
-        engine = {"available": False, "detail": str(exc)[:500]}
+    engine = _engine_status()
 
     guard = _guard_status()
     from .linux_companion import collect_linux_companion_status
     companion = collect_linux_companion_status()
-    peer_ok = (not engine.get("peer_verification_required") or
-               engine.get("peer_verified") is True)
-    engine_ready = bool(
-        engine.get("available") and
-        engine.get("database_freshness") == "current" and
-        peer_ok
-    )
+    engine_ready = bool(engine.get("available") and
+                        engine.get("database_freshness") == "local")
     guard_running = bool(
         guard.get("running") and
         guard.get("state") not in {"failed", "stopped", "unresponsive", "not-running"}
@@ -414,7 +237,7 @@ def collect_linux_protection_status() -> dict:
     vendor_realtime = companion["coexistence"]["vendor_realtime_confirmed"]
     blockers = []
     if not engine_ready:
-        blockers.append("local-clamd-with-current-signatures")
+        blockers.append("antios-native-engine")
     return {
         "schema": 1,
         "kind": "antios-linux-protection-status",
@@ -435,9 +258,16 @@ def collect_linux_protection_status() -> dict:
 
 
 def render_protection_status(status: dict) -> str:
+    engine = status["engine"]
+    catalog_warning = engine.get("signature_catalog_warning")
+    catalog_lines = []
+    if engine.get("signature_catalog_version") is not None:
+        catalog_lines.append(f"Signature catalog: v{engine['signature_catalog_version']}"
+                             f" ({engine['signature_catalog_status']})")
+    if catalog_warning:
+        catalog_lines.append(catalog_warning)
     if status.get("kind") == "antios-linux-protection-status":
         caps = status["capabilities"]
-        engine = status["engine"]
         guard = status["guard"]
         companion = status["companion"]["coexistence"]
         products = status["companion"]["products"]
@@ -448,6 +278,7 @@ def render_protection_status(status: dict) -> str:
             f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
             f" ({engine.get('version', engine.get('detail', 'unavailable'))})",
             f"Database: {engine.get('database_freshness', 'unknown')}",
+            *catalog_lines,
             f"Vendor AV detected: {', '.join(detected) if detected else 'none'}",
             f"Vendor realtime confirmed: {', '.join(realtime) if realtime else 'none'}",
             f"Companion mode: {companion['mode']}",
@@ -457,7 +288,6 @@ def render_protection_status(status: dict) -> str:
             "Remaining gates: " + (", ".join(status["remaining_gates"]) or "none"),
         ])
     caps = status["capabilities"]
-    engine = status["engine"]
     guard = status["guard"]
     managed = status.get("managed_runtime", {})
     native = status["native"]
@@ -479,6 +309,7 @@ def render_protection_status(status: dict) -> str:
         f"Engine: {'ready' if caps['standalone_detection_engine'] else 'not ready'}"
         f" ({engine.get('version', engine.get('detail', 'unavailable'))})",
         f"Database: {engine.get('database_freshness', 'unknown')}",
+        *catalog_lines,
         f"Engine identity: {engine.get('peer_identity', 'unknown')}",
         f"Resident Guard: {guard.get('state', 'not-running')}",
         "Behavior monitor: "
@@ -500,7 +331,9 @@ def render_protection_status(status: dict) -> str:
         f"nodes={latest_incident.get('node_count', 0)}, "
         f"edges={latest_incident.get('edge_count', 0)})",
         f"Managed runtime: {'not fully inspected (access unavailable)' if managed.get('inspection_complete') is False else 'healthy' if managed.get('healthy') else 'needs review'}",
-        f"Updater task: {'ready' if managed.get('updater_task', {}).get('available') else 'missing'}",
+        "External engine updater task: not required",
+        "Legacy registration markers: "
+        + status.get("legacy_registrations", {}).get("state", "uninspected"),
         f"Native service: {native.get('service', {}).get('service_state', 'not-running')}",
         f"Native coexistence: {native_health.get('state', 'inactive/not-validated')}",
         f"Native max wait: {native.get('driver', {}).get('max_wait_ms', 'unknown')} ms",
@@ -521,7 +354,7 @@ def render_protection_status(status: dict) -> str:
         f"Kaspersky / Dr.Web detected: {', '.join(vendor_detected) if vendor_detected else 'none'}",
         f"Vendor real-time confirmed: {', '.join(vendor_realtime) if vendor_realtime else 'none'}",
         f"Coexistence mode: {coexistence.get('mode', 'unknown')}",
-        f"AntiOS AMSI provider: {'registered' if amsi.get('registered') and amsi.get('module_exists') else 'not registered'}",
+        "AntiOS Engine: local inspection; no AMSI provider",
         "AntiOS role: independent companion; Defender settings unchanged; Kaspersky/Dr.Web settings unchanged",
         "Primary Windows antivirus registration: not claimed",
         "Remaining gates: " + ", ".join(status["remaining_gates"]),

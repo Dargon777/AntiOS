@@ -6,11 +6,15 @@ from pathlib import Path
 import pytest
 
 from antios import antivirus
+from antios.engine_types import ScanOutcome
 
 
 class Provider:
-    def __init__(self, value=0, failure=False):
-        self.value, self.failure, self.closed = value, failure, False
+    metadata = {"version": "AntiOS test", "database_freshness": "local"}
+
+    def __init__(self, value=None, failure=False):
+        self.value = value or ScanOutcome()
+        self.failure, self.closed = failure, False
 
     def scan(self, content, name):
         if self.failure:
@@ -22,7 +26,7 @@ class Provider:
 
 
 def unavailable():
-    raise OSError("no AMSI provider")
+    raise OSError("native engine unavailable")
 
 
 def test_native_provider_no_detection_and_scan_is_read_only(tmp_path):
@@ -32,7 +36,7 @@ def test_native_provider_no_detection_and_scan_is_read_only(tmp_path):
     provider = Provider()
     result = antivirus.scan_files(target, provider_factory=lambda: provider)
     assert result["verdict"] == "no-threats-found"
-    assert result["coverage"] == "provider-and-signatures"
+    assert result["coverage"] == "antios-local-inspection"
     assert provider.closed
     assert (target.read_bytes(), target.stat().st_mtime_ns) == before
 
@@ -43,15 +47,15 @@ def test_missing_provider_never_claims_a_clean_scan(tmp_path):
     assert result["verdict"] == "incomplete"
     assert result["coverage"] == "limited"
     assert result["summary"]["files_scanned"] == 1
-    assert result["engine"]["detail"] == "no AMSI provider"
+    assert result["engine"]["detail"] == "native engine unavailable"
 
 
 @pytest.mark.parametrize("value,kind,verdict", [
-    (0, None, "no-threats-found"), (1, None, "no-threats-found"),
-    (32767, None, "no-threats-found"), (0x4000, "review", "review"),
-    (0x4FFF, "review", "review"), (32768, "threat", "threats-found"),
+    (ScanOutcome(), None, "no-threats-found"),
+    (ScanOutcome("review", "Inert heuristic", "AntiOS Engine"), "review", "review"),
+    (ScanOutcome("threat", "Inert signature", "AntiOS Engine"), "threat", "threats-found"),
 ])
-def test_provider_policy_blocks_are_not_classified_as_malware(tmp_path, value, kind, verdict):
+def test_native_detection_results_are_distinct(tmp_path, value, kind, verdict):
     target = tmp_path / "fixture.txt"
     target.write_bytes(b"benign mocked provider fixture")
     result = antivirus.scan_files(target, provider_factory=lambda: Provider(value))
@@ -86,14 +90,23 @@ def test_eicar_whitespace_matching_uses_hash_without_writing_eicar(tmp_path, mon
     assert not antivirus.scan_files(target, provider_factory=unavailable)["findings"]
 
 
-@pytest.mark.parametrize("data", [[], {"schema": 2}, {"schema": 1, "sha256": []},
+@pytest.mark.parametrize("data", [[], {"schema": 2}, {"schema": True, "sha256": {}},
+    {"schema": 1, "sha256": []},
     {"schema": 1, "sha256": {"not-a-hash": "name"}},
     {"schema": 1, "sha256": {"a" * 64: ""}},
-    {"schema": 1, "sha256": {"a" * 64: 123}}])
+    {"schema": 1, "sha256": {"a" * 64: 123}}, {"schema": 1, "sha256": {"a" * 64: "\ud800"}},
+    {"schema": 1, "sha256": {"a" * 64: "First", "A" * 64: "Second"}}])
 def test_signature_input_is_validated(tmp_path, data):
     database = tmp_path / "bad.json"
     database.write_text(json.dumps(data))
     with pytest.raises(ValueError):
+        antivirus.load_signatures(database)
+
+
+def test_signature_database_rejects_duplicate_json_keys(tmp_path):
+    database = tmp_path / "bad.json"
+    database.write_text('{"schema": 1, "schema": 1, "sha256": {}}')
+    with pytest.raises(ValueError, match="Duplicate"):
         antivirus.load_signatures(database)
 
 
@@ -173,7 +186,7 @@ def test_special_files_do_not_block_scan(tmp_path):
     assert result["summary"]["files_scanned"] == 0
 
 
-@pytest.mark.parametrize("kwargs", [{"max_bytes": 0}, {"max_bytes": 257 * 1024 * 1024},
+@pytest.mark.parametrize("kwargs", [{"max_bytes": 0}, {"max_bytes": antivirus.MAX_EXPLICIT_SCAN_BYTES + 1},
                                   {"max_files": 0}, {"max_files": -1}])
 def test_invalid_limits_rejected_before_scanning(tmp_path, kwargs):
     with pytest.raises(ValueError):
@@ -191,7 +204,8 @@ def test_cli_scan_exit_codes_and_structured_output(tmp_path, monkeypatch, capsys
     result = json.loads(capsys.readouterr().out)
     assert result["kind"] == "antivirus-scan"
     monkeypatch.setattr(cli, "scan_files", lambda path, **options:
-        antivirus.scan_files(path, **options, provider_factory=lambda: Provider(32768)))
+        antivirus.scan_files(path, **options, provider_factory=lambda: Provider(
+            ScanOutcome("threat", "Inert signature", "AntiOS Engine"))))
     assert cli.main(["--config", str(tmp_path / "none.toml"), "virus-scan", str(target)]) == 1
     assert target.exists()
 

@@ -41,7 +41,7 @@ def verify_package(path: Path, *, wheel: bool = False) -> None:
     expected = {prefix + source.name: source.read_bytes() for source in runtime_files()}
     required = set(expected)
     if not wheel:
-        required.update({"AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "AntiOS-AmsiProvider.dll"})
+        required.update({"AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe"})
     if path.is_dir():
         names = {p.relative_to(path).as_posix() for p in path.rglob("*") if p.is_file()}
         read = lambda name: path.joinpath(*PurePosixPath(name).parts).read_bytes()

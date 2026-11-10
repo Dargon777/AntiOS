@@ -32,12 +32,6 @@ foreach ($source in @(
     Copy-Item (Join-Path $full "*") $stage -Recurse -Force
 }
 
-$amsiProvider = Join-Path $repoRoot "build\native\windows\AntiOS-AmsiProvider.dll"
-if (-not (Test-Path -LiteralPath $amsiProvider -PathType Leaf)) {
-    throw "AMSI provider build not found: $amsiProvider"
-}
-Copy-Item -LiteralPath $amsiProvider -Destination (Join-Path $stage "AntiOS-AmsiProvider.dll") -Force
-
 python (Join-Path $PSScriptRoot "release-payload.py") stage-runtime $stage
 if ($LASTEXITCODE -ne 0) { throw "Windows runtime resource staging failed." }
 
@@ -65,11 +59,6 @@ foreach ($path in @(
     Copy-Item -LiteralPath $source -Destination $stage -Force
 }
 
-$clamConfig = Join-Path $repoRoot "config\clamav"
-if (Test-Path -LiteralPath $clamConfig) {
-    Copy-Item -LiteralPath $clamConfig -Destination (Join-Path $stage "clamav-config") -Recurse -Force
-}
-
 $required = @(
     "AntiOS.exe",
     "AntiOS-GUI.exe",
@@ -80,17 +69,9 @@ $required = @(
     "guard-startup.ps1",
     "guard-state-access.cs",
     "dashboard-startup.ps1",
-    "protection-engine.ps1",
-    "clamav-trust.ps1",
-    "clamav-repair-validation.ps1",
-    "protection-bootstrap.ps1",
-    "protection-repair.ps1",
+    "guard-trust.ps1",
     "protection-first-run.ps1",
-    "AntiOS-AmsiProvider.dll",
-    "Install-AmsiProvider.ps1",
-    "LICENSE.microsoft",
     "COEXISTENCE.md",
-    "clamav-windows.json",
     "LICENSE"
 )
 foreach ($name in $required) {

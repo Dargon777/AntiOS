@@ -39,6 +39,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Refuse unsigned master publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING != 'true'
+        shell: pwsh
+        run: throw 'Refusing to publish unsigned AntiOS executables'
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -89,13 +94,10 @@ jobs:
         shell: pwsh
         run: |
           foreach ($path in @(
-            ".\scripts\protection-engine.ps1",
-            ".\scripts\protection-bootstrap.ps1",
-            ".\scripts\protection-repair.ps1",
             ".\scripts\protection-first-run.ps1",
             ".\scripts\guard-startup.ps1",
-            ".\scripts\dashboard-startup.ps1",
-            ".\native\windows\amsi\Install-AmsiProvider.ps1"
+            ".\scripts\guard-trust.ps1",
+            ".\scripts\dashboard-startup.ps1"
           )) {
             $tokens = $null
             $errors = $null
@@ -104,14 +106,6 @@ jobs:
               $errors | Format-List | Out-String | Write-Error
               exit 1
             }
-          }
-
-      - name: Preview protection bootstrap
-        shell: pwsh
-        run: |
-          $bootstrap = .\scripts\protection-bootstrap.ps1 -ManifestPath .\release\clamav-windows.json -Json | ConvertFrom-Json
-          if ($bootstrap.version -ne "1.5.4" -or $bootstrap.architecture -ne "x64" -or -not $bootstrap.dry_run) {
-            throw "Protection bootstrap preview is invalid."
           }
 
       - name: Build Python distributions
@@ -142,7 +136,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\wheel-smoke\Scripts\python.exe -m pip install $wheel
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .\wheel-smoke\Scripts\python.exe -I -c "from antios.protection_repair import _script_path, _bootstrap_script_path, _bootstrap_manifest_path; assert all(p.is_file() for p in (_script_path(), _bootstrap_script_path(), _bootstrap_manifest_path())); print('Installed wheel resources: OK')"
+          .\wheel-smoke\Scripts\python.exe -I -c "from antios.engine import AntiOSEngine; assert AntiOSEngine().metadata['database_freshness'] == 'local'; print('Native engine wheel: OK')"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\wheel-smoke\Scripts\antios.exe --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -180,15 +174,6 @@ jobs:
           pyinstaller --clean --noconfirm --onedir --contents-directory _guard --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --hidden-import pystray._win32 --version-file release/windows-guard-version.txt --console --name AntiOS-Guard antios_guard_entry.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build AMSI coexistence provider
-        shell: pwsh
-        run: |
-          .\native\windows\build.ps1 -Target Amsi
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path -LiteralPath ".\build\native\windows\AntiOS-AmsiProvider.dll")) {
-            throw "AntiOS-AmsiProvider.dll was not produced"
-          }
-
       - name: Verify Windows resources and scan worker
         shell: pwsh
         run: |
@@ -219,27 +204,11 @@ jobs:
           description: DargonITP AntiOS Antivirus
           description-url: https://github.com/Dargon777/AntiOS
 
-      - name: Sign AMSI coexistence provider
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
-        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
-        with:
-          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
-          files-folder: ${{ github.workspace }}\build\native\windows
-          files-folder-filter: dll
-          files-folder-recurse: false
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          description: DargonITP AntiOS AMSI Provider
-          description-url: https://github.com/Dargon777/AntiOS
-
       - name: Verify application Authenticode signatures
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
         shell: pwsh
         run: |
-          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe", ".\build\native\windows\AntiOS-AmsiProvider.dll")) {
+          foreach ($file in @(".\dist\AntiOS\AntiOS.exe", ".\dist\AntiOS-GUI\AntiOS-GUI.exe", ".\dist\AntiOS-Guard\AntiOS-Guard.exe")) {
             $signature = Get-AuthenticodeSignature $file
             Write-Host "$file => $($signature.Status) / $($signature.SignerCertificate.Subject)"
             if ($signature.Status -ne "Valid") {
@@ -308,9 +277,9 @@ jobs:
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "AntiOS-Setup-Smoke"
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
-          ./installer-output/AntiOS-Setup.exe /S /NOENGINE=1 "/D=$installDir"
+          ./installer-output/AntiOS-Setup.exe /S /NOGUARD=1 "/D=$installDir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "AntiOS-AmsiProvider.dll", "Install-AmsiProvider.ps1", "dashboard-startup.ps1", "Uninstall.exe")) {
+          foreach ($required in @("AntiOS.exe", "AntiOS-GUI.exe", "AntiOS-Guard.exe", "dashboard-startup.ps1", "Uninstall.exe")) {
             if (-not (Test-Path -LiteralPath (Join-Path $installDir $required))) {
               throw "Installer smoke missing $required"
             }
@@ -387,7 +356,7 @@ jobs:
           New-Item -ItemType Directory -Force $junctionTarget | Out-Null
           New-Item -ItemType Junction -Path $junctionInstall -Target $junctionTarget | Out-Null
           try {
-            $rejected = Start-Process -FilePath (Resolve-Path "./installer-output/AntiOS-Setup.exe").Path -ArgumentList @("/S", "/NOENGINE=1", "/D=$junctionInstall") -Wait -PassThru
+            $rejected = Start-Process -FilePath (Resolve-Path "./installer-output/AntiOS-Setup.exe").Path -ArgumentList @("/S", "/NOGUARD=1", "/D=$junctionInstall") -Wait -PassThru
             if ($rejected.ExitCode -eq 0) {
               throw "Installer incorrectly accepted a reparse-point destination"
             }
@@ -474,7 +443,6 @@ jobs:
           Copy-Item .\dist\AntiOS\* .\package\ -Recurse -Force
           Copy-Item .\dist\AntiOS-GUI\* .\package\ -Recurse -Force
           Copy-Item .\dist\AntiOS-Guard\* .\package\ -Recurse -Force
-          Copy-Item .\build\native\windows\AntiOS-AmsiProvider.dll .\package\AntiOS-AmsiProvider.dll -Force
           python scripts/release-payload.py stage-runtime .\package
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item .\scripts\install.ps1 .\package\install.ps1
@@ -495,10 +463,8 @@ jobs:
           Copy-Item .\NOTICE .\package\NOTICE
           Copy-Item .\docs\SIGNING.md .\package\SIGNING.md
           Copy-Item .\docs\ANTIVIRUS.md .\package\ANTIVIRUS.md
-          Copy-Item .\docs\CLAMAV.md .\package\CLAMAV.md
           Copy-Item .\docs\GUARD.md .\package\GUARD.md
           Copy-Item .\docs\COEXISTENCE.md .\package\COEXISTENCE.md
-          Copy-Item .\config\clamav .\package\clamav-config -Recurse
           $version = (Get-Content .\release\VERSION -Raw).Trim()
           $commit = "$env:GITHUB_SHA"
           $python = (python --version 2>&1).Trim()
@@ -570,7 +536,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clamav-daemon python3-tk xvfb xauth
+          sudo apt-get install -y python3-tk xvfb xauth
           python -m pip install --upgrade pip
           python -m pip install pytest pyinstaller -e .
 
@@ -632,7 +598,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
     needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:

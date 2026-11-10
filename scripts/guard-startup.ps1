@@ -5,7 +5,6 @@ param(
     [string[]]$Roots = @(),
     [string]$RootsJson,
     [ValidateSet('notify', 'quarantine')][string]$Mode = 'notify',
-    [ValidatePattern('^[A-Za-z0-9_-]{1,80}$')][string]$EngineServiceName,
     [switch]$AllowManagedUnsigned,
     [switch]$RepairStateAccess,
     [switch]$Uninstall,
@@ -155,7 +154,7 @@ function Assert-ManagedUnsignedGuard([string]$Path) {
         throw 'Unsigned Guard startup is allowed only for the machine-installed AntiOS-Guard.exe.'
     }
 
-    . (Join-Path $ScriptDirectory 'clamav-trust.ps1')
+    . (Join-Path $ScriptDirectory 'guard-trust.ps1')
     Assert-AntiOSProtectedInstallPath $expected
 }
 
@@ -167,14 +166,14 @@ function Assert-ManagedUnsignedGuard([string]$Path) {
     Signature = $signature.Status
     Roots = ($resolvedRoots -join ', ')
     Mode = $Mode
-    EngineService = $EngineServiceName
+    Engine = 'AntiOS Engine'
     Policy = $policyPath
     Privilege = 'Limited'
     Trigger = 'Current user logon'
 } | Format-List
 
 if (-not $Apply) {
-    Write-Output 'Preview only. Use -Apply after reviewing the executable, signer, roots, engine service and mode.'
+    Write-Output 'Preview only. Use -Apply after reviewing the executable, signer, roots and mode.'
     return
 }
 if ($signature.Status -ne 'Valid') {
@@ -182,14 +181,6 @@ if ($signature.Status -ne 'Valid') {
         throw 'Automatic startup requires a valid Authenticode signature. Manual development runs remain available.'
     }
     Assert-ManagedUnsignedGuard $exe
-}
-
-if ($EngineServiceName) {
-    $engine = Get-CimInstance Win32_Service -Filter "Name='$EngineServiceName'"
-    if (-not $engine -or $engine.ServiceType -ne 'Own Process' -or
-        $engine.StartName -notin @('LocalSystem', 'NT AUTHORITY\SYSTEM')) {
-        throw 'Resident protection requires the configured ClamD service to be an own-process LocalSystem service.'
-    }
 }
 
 # Check the existing task before rewriting policy files or stopping anything.
@@ -218,9 +209,7 @@ $policyData = @{
     schema = 1
     roots = $resolvedRoots
     auto_quarantine = ($Mode -eq 'quarantine')
-}
-if ($EngineServiceName) {
-    $policyData.engine_service = $EngineServiceName
+    scan_engine = 'antios'
 }
 $policy = $policyData | ConvertTo-Json
 [IO.File]::WriteAllText($policyPath, $policy, [Text.UTF8Encoding]::new($false))
@@ -253,7 +242,7 @@ if ($existing) {
 # managed Guard executable, so a stale lock cannot block the replacement.
 Stop-ManagedGuardProcess $exe
 
-Register-ScheduledTask -TaskPath '\' -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AntiOS selected-folder post-write monitoring with trusted ClamD binding; no pre-execution blocking.' -Force | Out-Null
+Register-ScheduledTask -TaskPath '\' -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AntiOS Engine local post-write monitoring; no pre-execution blocking.' -Force | Out-Null
 Start-ScheduledTask -TaskPath '\' -TaskName $taskName
 
 # The Guard is long-lived. If the task immediately returns to Ready, capture the

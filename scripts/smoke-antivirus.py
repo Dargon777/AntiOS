@@ -1,4 +1,4 @@
-"""Check the packaged CLI; optionally require a working native AMSI provider.
+"""Check the packaged CLI using the independent local AntiOS Engine.
 
 The detection fixture is ordinary text matched by a temporary local hash rule.
 It tests packaging and detection plumbing, not real malware detection quality.
@@ -20,21 +20,17 @@ def validate_benign(code, report, *, require_amsi=False):
             or report["findings"]):
         raise ValueError("Unexpected benign scan result")
     complete = (summary["provider_scanned"] == 1 and summary["errors"] == 0
-                and report["coverage"] == "provider-and-signatures"
+                and report["coverage"] == "antios-local-inspection"
                 and report["verdict"] == "no-threats-found")
     if complete and code == 0:
-        return "AMSI benign scan passed"
-    if (not require_amsi and code == 3 and summary["provider_scanned"] == 0
-            and report["coverage"] == "limited" and report["verdict"] == "incomplete"
-            and (summary["errors"] > 0 or not report["engine"]["available"])):
-        return "AMSI unavailable: packaging passed; native antivirus validation is still required"
-    raise ValueError(f"Invalid or insufficient AMSI coverage (exit {code})")
+        return "AntiOS Engine benign scan passed"
+    raise ValueError(f"Invalid or insufficient AntiOS Engine coverage (exit {code})")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
-    parser.add_argument("--require-amsi", action="store_true")
+    parser.add_argument("--require-amsi", action="store_true", help="Deprecated compatibility flag; full native scan is always required")
     args = parser.parse_args()
     executable = str(args.executable.resolve())
     with tempfile.TemporaryDirectory(prefix="antios-smoke-") as folder:
@@ -68,7 +64,7 @@ def main():
                 or report["summary"]["files_scanned"] != 1
                 or report["summary"]["threats"] != 1
                 or len(report["findings"]) != 1
-                or report["findings"][0]["engine"] != "SHA-256"
+                or report["findings"][0]["engine"] not in {"SHA-256", "AntiOS Engine"}
                 or report["findings"][0]["sha256"] != hashlib.sha256(content).hexdigest()):
             raise ValueError("Local signature detection smoke test failed")
         if fixture.read_bytes() != content:

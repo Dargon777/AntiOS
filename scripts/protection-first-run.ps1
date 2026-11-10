@@ -1,4 +1,4 @@
-# Configure current-user Resident Guard after a successful machine engine bootstrap.
+# Configure current-user Guard after application installation.
 # Runs only when the elevated identity is also the active interactive user.
 [CmdletBinding()]
 param(
@@ -32,8 +32,6 @@ if (-not $interactive) {
 } elseif (-not (Test-Path -LiteralPath $guardScript -PathType Leaf) -or
         -not (Test-Path -LiteralPath $guardExe -PathType Leaf)) {
     $result.deferred_reason = 'guard-files-missing'
-} elseif (-not (Get-Service -Name 'clamd' -ErrorAction SilentlyContinue)) {
-    $result.deferred_reason = 'clamd-service-missing'
 } else {
     $profile = [Environment]::GetFolderPath('UserProfile')
     $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
@@ -60,7 +58,7 @@ if (-not $interactive) {
     } elseif ($roots.Count -eq 0) {
         $result.deferred_reason = 'no-monitorable-user-roots'
     } else {
-        & $guardScript -Executable $guardExe -Roots $roots -Mode notify -EngineServiceName clamd -AllowManagedUnsigned -Apply
+        & $guardScript -Executable $guardExe -Roots $roots -Mode notify -AllowManagedUnsigned -Apply
         if ($LASTEXITCODE -ne 0) {
             throw "Guard startup configuration failed with exit code $LASTEXITCODE"
         }
