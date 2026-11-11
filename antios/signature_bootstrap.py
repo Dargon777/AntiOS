@@ -5,6 +5,26 @@ See NOTICE for attribution.
 """
 
 PUBLIC_KEY = bytes.fromhex("8f54c4b2c7d99a51c6686a1e46e12e3544c9b675d137233c91ac4e4bbbc4901b")
+
+# Tables 3 and 4 of CISA/FBI AA24-109A identify these exact Windows and ELF samples.
+# https://www.cisa.gov/sites/default/files/2024-04/aa24-109a-stopransomware-akira-ransomware_2.pdf
+# A newer signed catalog can supersede this supplement.
+AKIRA_SUPPLEMENT = (
+    "03aa12ac2884251aa24bf0ccd854047de403591a8537e6aba19e822807e06a45",
+    "0b5b31af5956158bfbd14f6cbf4f1bca23c5d16a40dbf3758f3289146c565f43",
+    "0d700ca5f6cc093de4abba9410480ee7a8870d5e8fe86c9ce103eec3872f225f",
+    "2e88e55cc8ee364bf90e7a51671366efb3dac3e9468005b044164ba0f1624422",
+    "3d2b58ef6df743ce58669d7387ff94740ceb0122c4fc1c4ffd81af00e72e60a4",
+    "40221e1c2e0c09bc6104548ee847b6ec790413d6ece06ad675fff87e5b8dc1d5",
+    "5ea65e2bb9d245913ad69ce90e3bd9647eb16d992301145372565486c77568a2",
+    "643061ac0b51f8c77f2ed202dc91afb9879f796ddd974489209d45f84f644562",
+    "6f9d50bab16b2532f4683eeb76bd25449d83bdd6c85bf0b05f716a4b49584f84",
+    "74f497088b49b745e6377b32ed5d9dfaef3c84c7c0bb50fabf30363ad2e0bfb1",
+    "a2df5477cf924bd41241a3326060cc2f913aff2379858b148ddec455e4da67bc",
+    "e1321a4b2b104f31aceaf4b19c5559e40ba35b73a754d3ae13d8e90c53146c0f",
+    "fef09b0aa37cbdb6a8f60a6bd8b473a7e5bffdc7fd2e952444f781574abccf64",
+)
+
 BUNDLED_PACKAGE = b"""
 {
   "catalog": {

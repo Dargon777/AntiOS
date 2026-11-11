@@ -6,16 +6,20 @@ import time
 import pytest
 
 from antios import scan_process
+from antios.scan_verdict import replay_scan_report
 
 
 def test_real_worker_returns_report_and_can_restart(tmp_path):
     target = tmp_path / 'normal.txt'
     target.write_text('ordinary benign fixture')
-    for _ in range(2):
-        result = scan_process.run_scan_process(target)
+    for profile, override, expected in [('light', None, 2), ('heavy', 16, 16)]:
+        result = scan_process.run_scan_process(target, profile=profile, workers=override)
         assert result['summary']['files_scanned'] == 1
+        assert result['limits']['profile'] == profile
+        assert result['limits']['workers'] == expected
         assert not result['summary']['cancelled']
         assert not result['findings']
+        assert replay_scan_report(result)['verdict'] == 'no-threats-found'
         assert target.read_text() == 'ordinary benign fixture'
 
 
@@ -23,7 +27,8 @@ def test_forced_stop_reaps_blocked_child_and_keeps_checkpoint(tmp_path, monkeypa
     script = tmp_path / 'blocked.py'
     started = tmp_path / 'started'
     pid_file = tmp_path / 'pid'
-    checkpoint = {'schema': 1, 'summary': {'files_scanned': 1, 'threats': 1, 'reviews': 0},
+    checkpoint = {'schema': 1, 'kind': 'antivirus-scan',
+                  'summary': {'files_scanned': 1, 'threats': 1, 'reviews': 0},
                   'findings': [{'kind': 'threat', 'name': 'fixture'}], 'issues': [],
                   'coverage': 'limited', 'verdict': 'incomplete'}
     script.write_text('import os,sys,time\nfrom pathlib import Path\n'
@@ -51,6 +56,8 @@ def test_forced_stop_reaps_blocked_child_and_keeps_checkpoint(tmp_path, monkeypa
     assert result['findings'] == checkpoint['findings']
     assert result['coverage'] == 'limited'
     assert result['verdict'] == 'threats-found'
+    assert 'scan-cancelled' in result['coverage_contract']['reasons']
+    assert replay_scan_report(result)['dimensions']['coverage'] == 'limited'
 
 
 def test_stop_before_first_checkpoint_is_incomplete(tmp_path):
@@ -83,3 +90,4 @@ def test_deadline_kills_a_blocked_worker_and_preserves_incomplete_state(tmp_path
     assert time.monotonic() - start < 5
     assert result['summary']['timed_out']
     assert result['verdict'] == 'incomplete'
+    assert 'scan-timed-out' in result['coverage_contract']['reasons']

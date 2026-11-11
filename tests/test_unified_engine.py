@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import tracemalloc
+from types import SimpleNamespace
 import zipfile
 
 from antios import antivirus, engine
@@ -160,7 +161,10 @@ def test_native_large_file_hash_is_shared_with_scan_report(tmp_path, monkeypatch
         calls.append(None)
         return hash_factory(*args, **kwargs)
 
-    monkeypatch.setattr(antivirus.hashlib, "sha256", count_hashes)
+    # Count file hashes in the scanner and engine, excluding receipt and catalog digests.
+    file_hashing = SimpleNamespace(sha256=count_hashes)
+    monkeypatch.setattr(antivirus, "hashlib", file_hashing)
+    monkeypatch.setattr(engine, "hashlib", file_hashing)
     result = antivirus.scan_files(target, signature_path=database)
     assert result["verdict"] == "threats-found"
     assert result["coverage"] == "antios-local-inspection"

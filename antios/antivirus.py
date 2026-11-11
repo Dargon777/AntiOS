@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import asdict
 import hashlib
 import json
 import os
@@ -12,16 +13,21 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
-from .engine import MAX_INLINE_BYTES, AntiOSEngine
+from .engine import MAX_INLINE_BYTES, AntiOSEngine, inspection_limits
 from .engine_types import ScanOutcome
 from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
+from .scan_verdict import apply_scan_verdict
+from .signature_bootstrap import AKIRA_SUPPLEMENT
 from .signature_catalog import load_active_catalog
 
 DEFAULT_MAX_BYTES = MAX_INLINE_BYTES
 MAX_EXPLICIT_SCAN_BYTES = 2 * 1024 * 1024 * 1024
-DEFAULT_SCAN_WORKERS = 8
+SCAN_PROFILE_WORKERS = {"light": 2, "balanced": 4, "heavy": 8}
+DEFAULT_SCAN_PROFILE = "balanced"
+DEFAULT_SCAN_WORKERS = SCAN_PROFILE_WORKERS[DEFAULT_SCAN_PROFILE]
+MAX_SCAN_WORKERS = 16
 DEFAULT_MAX_FILES = 100_000
 MAX_DETAILS = 1000
 # Hash only: do not embed the EICAR test payload in packaged executables.
@@ -44,15 +50,19 @@ def is_link(info: os.stat_result) -> bool:
 
 def _checked_path_info(path: str | Path) -> tuple[Path, os.stat_result]:
     target = Path(os.path.abspath(Path(path).expanduser()))
+    return target, _checked_absolute_path_info(target, reversed(target.parents))
+
+
+def _checked_absolute_path_info(target: Path, ancestors: Iterable[Path]) -> os.stat_result:
     if os.name == "nt" and any(":" in part for part in target.parts[1:]):
         raise ValueError("Alternate data streams are not supported")
-    for component in reversed(target.parents):
+    for component in ancestors:
         if is_link(component.lstat()):
             raise ValueError("Symbolic links and reparse points are not supported")
     info = target.lstat()
     if is_link(info):
         raise ValueError("Symbolic links and reparse points are not supported")
-    return target, info
+    return info
 
 
 def checked_path(path: str | Path) -> Path:
@@ -90,8 +100,12 @@ def _read_checked_file(target, before, max_bytes) -> tuple[bytes, os.stat_result
 def load_managed_signatures() -> tuple[dict[str, str], dict]:
     catalog = load_active_catalog()
     rules = dict(catalog.rules)
+    if catalog.version <= 3:
+        for digest in AKIRA_SUPPLEMENT:
+            rules.setdefault(digest, "Akira ransomware (CISA/FBI)")
+    metadata = dict(catalog.metadata(), signature_bundled_supplement_entries=len(rules) - len(catalog.rules))
     rules[EICAR_SHA256] = "EICAR test file (not live malware)"
-    return rules, catalog.metadata()
+    return rules, metadata
 
 
 def load_signatures(path: str | Path | None = None) -> dict[str, str]:
@@ -130,11 +144,30 @@ def load_signatures(path: str | Path | None = None) -> dict[str, str]:
     return signatures
 
 
-def _scan_large_file(item, target, before, provider, signatures, stopped):
+def _describe_inspection(outcome: ScanOutcome | None, label: str | None) -> dict[str, Any]:
+    finding = None
+    if label:
+        finding = {"kind": "threat", "engine": "SHA-256", "name": label}
+    elif outcome and outcome.kind:
+        finding = {"kind": outcome.kind, "engine": outcome.engine, "name": outcome.name}
+        if outcome.rule_id:
+            finding["rule_id"] = outcome.rule_id
+            finding["rule_family"] = outcome.rule_id.partition(".")[0]
+
+    coverage_gaps = ()
+    coverage_detail = ""
+    if outcome and not outcome.complete:
+        coverage_gaps = sorted(outcome.coverage_gaps) or ["engine-inspection-incomplete"]
+        coverage_detail = outcome.detail or outcome.name or "Engine inspection was incomplete"
+    return {"finding": finding, "provider_scanned": outcome is not None,
+            "coverage_gaps": coverage_gaps, "coverage_detail": coverage_detail}
+
+
+def _scan_large_file(item, before, provider, signatures, stopped):
     """Hash one stable snapshot while sending identical bytes to AntiOS Engine."""
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
-    with os.fdopen(os.open(target, flags), "rb") as stream:
+    with os.fdopen(os.open(item, flags), "rb") as stream:
         opened = os.fstat(stream.fileno())
         if fingerprint(opened) != fingerprint(before) or not stat.S_ISREG(opened.st_mode):
             raise ValueError("File changed while opening")
@@ -168,7 +201,8 @@ def _scan_large_file(item, target, before, provider, signatures, stopped):
                     outcome = provider.scan_stream(chunks)
                 else:
                     raise OSError("Engine does not support large-file streaming")
-                if not complete or not isinstance(outcome, ScanOutcome):
+                if (not complete or not isinstance(outcome, ScanOutcome)
+                        or outcome.kind not in (None, "review", "threat")):
                     raise OSError("Engine did not confirm the complete stream")
             except (OSError, RuntimeError) as exc:
                 # Engine stream limits are per file. Continue hashing and
@@ -181,16 +215,13 @@ def _scan_large_file(item, target, before, provider, signatures, stopped):
                 or fingerprint(after) != fingerprint(_checked_path_info(item)[1])):
             raise ValueError("File changed or could not be read completely")
     sha = digest.hexdigest()
-    finding = None
-    if sha in signatures:
-        finding = {"kind": "threat", "engine": "SHA-256", "name": signatures[sha]}
-    elif outcome and outcome.kind:
-        finding = {"kind": outcome.kind, "engine": outcome.engine, "name": outcome.name}
     return {"item": item, "info": after, "size": after.st_size, "sha256": sha,
-            "finding": finding, "provider_scanned": outcome is not None,
-            "file_engine_error": error,
-            "coverage_detail": (outcome.detail or outcome.name) if outcome and not outcome.complete else "",
-            "limited_result": bool(error or (outcome and (outcome.kind == "review" or not outcome.complete)))}
+            "file_engine_error": error, **_describe_inspection(outcome, signatures.get(sha))}
+
+
+def finalize_scan_result(result: dict[str, Any]) -> None:
+    apply_scan_verdict(result)
+    result["finished_at"] = utc_now()
 
 
 def scan_files(
@@ -207,41 +238,50 @@ def scan_files(
     require_verified_peer: bool = False,
     excluded_paths: tuple[Path, ...] = (),
     checkpoint: Callable[[dict], None] | None = None,
-    workers: int = DEFAULT_SCAN_WORKERS,
+    workers: int | None = None,
+    profile: str = DEFAULT_SCAN_PROFILE,
     cache_path: str | Path | None = None,
     use_cache: bool = True,
 ) -> dict[str, Any]:
     if engine != "antios":
         raise ValueError("Unsupported scan engine: only independent AntiOS Engine is supported")
+    depth_limits = inspection_limits(profile)
     if provider_factory is None:
-        provider_factory = lambda: AntiOSEngine(signatures=signatures)
+        provider_factory = lambda: AntiOSEngine(signatures=signatures, profile=profile)
     if any(v is not None and (type(v) is not int or v <= 0) for v in (max_files, max_bytes)):
         raise ValueError("Explicit scan limits must be positive integers")
     if max_bytes is not None and max_bytes > MAX_EXPLICIT_SCAN_BYTES:
         raise ValueError("Explicit scan size limit cannot exceed 2 GiB")
-    buffer_limit = min(max_bytes or DEFAULT_MAX_BYTES, DEFAULT_MAX_BYTES)
-    if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
-        raise ValueError("Scan workers must be between 1 and 8")
+    inline_limit = DEFAULT_MAX_BYTES if profile == DEFAULT_SCAN_PROFILE else depth_limits.inline_bytes
+    buffer_limit = min(max_bytes or inline_limit, inline_limit)
+    workers = SCAN_PROFILE_WORKERS[profile] if workers is None else workers
+    if type(workers) is not int or not 1 <= workers <= MAX_SCAN_WORKERS:
+        raise ValueError(f"Scan workers must be between 1 and {MAX_SCAN_WORKERS}")
     target, target_info = _checked_path_info(path)
     target_is_file = stat.S_ISREG(target_info.st_mode)
     if not target_is_file and not stat.S_ISDIR(target_info.st_mode):
         raise ValueError("Select a regular file or directory")
     signatures, catalog = (load_managed_signatures() if signature_path is None
                            else (load_signatures(signature_path), {}))
+    signatures_sha256 = make_signature_key(signatures)
     result: dict[str, Any] = {
         "schema": 1, "kind": "antivirus-scan", "path": str(target),
         "started_at": utc_now(), "finished_at": None,
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
-                   "max_entries": max_files * 2 if max_files is not None else None, "workers": workers},
+                   "max_entries": max_files * 2 if max_files is not None else None, "workers": workers,
+                   "profile": profile, "inspection": {**asdict(depth_limits), "inline_bytes": buffer_limit}},
         "engine": {"provider": "AntiOS Engine", "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or ""),
                    "signature_source": "local-file" if signature_path is not None else "signed-catalog",
+                   "signatures_sha256": signatures_sha256,
+                   "inspection_profile": profile,
                    **catalog},
         "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0, "provider_scanned": 0,
                     "bytes_scanned": 0, "cache_hits": 0, "threats": 0, "reviews": 0, "skipped": 0,
                     "errors": 0, "cancelled": False, "limit_reached": False},
         "findings": [], "issues": [],
         "coverage": "limited", "verdict": "incomplete",
+        "coverage_contract": {"status": "limited", "file_gaps": {}},
     }
     if checkpoint:
         checkpoint(result)
@@ -266,8 +306,9 @@ def scan_files(
         return any(item == root or root in item.parents for root in exclusions)
 
     def candidates():
+        ancestors = tuple(reversed(target.parents))
         if target_is_file:
-            yield target
+            yield target, ancestors
             return
         # Keep one iterator per active ancestor. A drive with many sibling
         # directories never needs a drive-sized list of pending paths.
@@ -276,18 +317,19 @@ def scan_files(
             with os.scandir(checked_path(folder)) as entries:
                 yield from entries
 
-        def descend(folder):
-            stack.append((folder, children(folder)))
-        descend(target)
+        def descend(folder, parents):
+            stack.append((folder, parents + (folder,), children(folder)))
+        descend(target, ancestors)
         try:
             while stack and not stopped():
-                folder, entries = stack[-1]
+                folder, ancestors, entries = stack[-1]
                 try:
                     entry = next(entries)
                 except (StopIteration, OSError, ValueError) as exc:
                     if not isinstance(exc, StopIteration):
                         issue(folder, str(exc), error=True)
-                    stack.pop()[1].close()
+                    stack.pop()
+                    entries.close()
                     continue
                 if max_files is not None and summary["entries_seen"] >= max_files * 2:
                     summary["limit_reached"] = True
@@ -305,11 +347,11 @@ def scan_files(
                 if is_link(info):
                     issue(item, "link-or-reparse-point")
                 elif stat.S_ISDIR(info.st_mode):
-                    descend(item)
+                    descend(item, ancestors)
                 else:
-                    yield item
+                    yield item, ancestors
         finally:
-            for _folder, entries in stack:
+            for _folder, _ancestors, entries in stack:
                 entries.close()
 
     provider_failed = threading.Event()
@@ -317,14 +359,12 @@ def scan_files(
     initial_probe = threading.Lock()
     cache = None
     cache_engine = ""
-    cache_signatures = ""
     cache_allowed = bool(
         use_cache and cache_path and provider is not None
         and result["engine"].get("database_freshness") == "local"
     )
     if cache_allowed:
         try:
-            cache_signatures = make_signature_key(signatures)
             cache = ScanCache(cache_path)
             cache_engine = make_engine_key(result["engine"])
             result["engine"]["cache"] = "enabled"
@@ -339,7 +379,7 @@ def scan_files(
         effective_workers = min(workers, os.cpu_count() or 1)
     if target_is_file:
         effective_workers = 1
-    large_slots = threading.BoundedSemaphore(2)
+    large_slots = threading.BoundedSemaphore(1 if profile == "light" else 2)
     result["limits"]["effective_workers"] = effective_workers
     result["engine"]["limited_results"] = 0
 
@@ -359,9 +399,13 @@ def scan_files(
             issue(item, outcome["provider_error"], error=True)
             result["engine"]["detail"] = outcome["provider_error"]
             result["engine"]["failed_during_scan"] = True
-        if outcome.get("limited_result"):
+        coverage_gaps = outcome["coverage_gaps"]
+        if coverage_gaps:
             result["engine"]["limited_results"] += 1
-        coverage_detail = outcome.get("coverage_detail")
+            counts = result["coverage_contract"]["file_gaps"]
+            for code in coverage_gaps:
+                counts[code] = counts.get(code, 0) + 1
+        coverage_detail = outcome["coverage_detail"]
         if outcome.get("file_engine_error"):
             issue(item, "Scan engine could not finish this file: " + outcome["file_engine_error"], error=True)
         finding = outcome.get("finding")
@@ -372,28 +416,31 @@ def scan_files(
                 size=outcome["size"],
                 fingerprint=list(fingerprint(outcome["info"])),
             )
-            if coverage_detail:
-                finding["detail"] = coverage_detail
+            if coverage_gaps:
+                finding.update(detail=coverage_detail, coverage_gaps=coverage_gaps)
             summary["threats" if finding["kind"] == "threat" else "reviews"] += 1
             result["findings"].append(finding)
-        elif coverage_detail and len(result["issues"]) < MAX_DETAILS:
-            result["issues"].append({"path": str(item), "reason": coverage_detail, "error": False})
+        elif coverage_gaps and len(result["issues"]) < MAX_DETAILS:
+            result["issues"].append({"path": str(item), "reason": coverage_detail, "error": False,
+                                     "coverage_gaps": coverage_gaps})
         elif (cache is not None and outcome.get("provider_scanned")
-              and not outcome.get("limited_result") and not outcome.get("provider_error")
-              and outcome["size"] <= DEFAULT_MAX_BYTES):
+              and not coverage_gaps and not outcome.get("provider_error")
+              and outcome["size"] <= inline_limit):
             try:
                 cache.put(
-                    item, outcome["info"], cache_engine, cache_signatures, outcome["sha256"]
+                    item, outcome["info"], cache_engine, signatures_sha256, outcome["sha256"]
                 )
             except (OSError, sqlite3.Error):
                 pass
 
-    def scan_one(candidate: tuple[Path, str | None]) -> dict:
-        item, cached_digest = candidate
+    def scan_one(candidate: tuple[Path, tuple[Path, ...], str | None]) -> dict:
+        item, ancestors, cached_digest = candidate
         try:
             if stopped():
                 return {"item": item, "issue": "cancelled"}
-            checked, info = _checked_path_info(item)
+            # Reuse the path objects for siblings. Every ancestor is still
+            # checked again before opening each file.
+            info = _checked_absolute_path_info(item, ancestors)
             if not stat.S_ISREG(info.st_mode):
                 return {"item": item, "issue": "not-a-regular-file"}
             if max_bytes is not None and info.st_size > max_bytes:
@@ -401,14 +448,14 @@ def scan_files(
             with (large_slots if info.st_size > 16 * 1024 * 1024 else nullcontext()):
                 if stopped():
                     return {"item": item, "issue": "cancelled"}
-                if info.st_size > DEFAULT_MAX_BYTES:
-                    return _scan_large_file(item, checked, info, provider, signatures, stopped)
-                return scan_buffered(item, checked, info, cached_digest)
+                if info.st_size > inline_limit:
+                    return _scan_large_file(item, info, provider, signatures, stopped)
+                return scan_buffered(item, info, cached_digest)
         except (OSError, ValueError) as exc:
             return {"item": item, "issue": str(exc), "error": True}
 
-    def scan_buffered(item, checked, info, cached_digest) -> dict:
-        content, info = _read_checked_file(checked, info, buffer_limit)
+    def scan_buffered(item, info, cached_digest) -> dict:
+        content, info = _read_checked_file(item, info, buffer_limit)
         digest = hashlib.sha256(content).hexdigest()
         # A cache hint only applies to the exact bytes of this verified snapshot.
         if digest == cached_digest:
@@ -417,11 +464,8 @@ def scan_files(
         if label is None and 68 <= len(content) <= 128:
             if hashlib.sha256(content.rstrip(b" \t\r\n\x1a")).hexdigest() == EICAR_SHA256:
                 label = signatures[EICAR_SHA256]
-        finding = {"kind": "threat", "engine": "SHA-256", "name": label} if label else None
-        provider_scanned = False
+        outcome = None
         provider_error = None
-        limited_result = False
-        coverage_detail = ""
         if provider is not None:
             # Only the first real inspection is serialized. Cache validation can
             # proceed in parallel even when every file has a cache hint.
@@ -431,14 +475,9 @@ def scan_files(
                         value = (provider.scan_with_digest(content, str(item), digest)
                                  if hasattr(provider, "scan_with_digest")
                                  else provider.scan(content, str(item)))
-                        if not isinstance(value, ScanOutcome):
+                        if not isinstance(value, ScanOutcome) or value.kind not in (None, "review", "threat"):
                             raise OSError("AntiOS Engine returned an invalid result")
-                        provider_scanned = True
-                        limited_result = value.kind == "review" or not value.complete
-                        if not value.complete:
-                            coverage_detail = value.detail or value.name
-                        if value.kind and finding is None:
-                            finding = {"kind": value.kind, "engine": value.engine, "name": value.name}
+                        outcome = value
                     except (OSError, RuntimeError) as exc:
                         provider_failed.set()
                         provider_error = str(exc)
@@ -449,11 +488,8 @@ def scan_files(
             "info": info,
             "size": len(content),
             "sha256": digest,
-            "finding": finding,
-            "provider_scanned": provider_scanned,
             "provider_error": provider_error,
-            "coverage_detail": coverage_detail,
-            "limited_result": limited_result,
+            **_describe_inspection(outcome, label),
         }
 
     def cache_hint(item: Path) -> str | None:
@@ -462,7 +498,7 @@ def scan_files(
         try:
             info = item.lstat()
             if info.st_size <= buffer_limit and stat.S_ISREG(info.st_mode) and not is_link(info):
-                return cache.get(item, info, cache_engine, cache_signatures)
+                return cache.get(item, info, cache_engine, signatures_sha256)
         except (OSError, sqlite3.Error):
             pass
         return None
@@ -473,7 +509,7 @@ def scan_files(
         if progress and (summary["files_seen"] == 1 or summary["files_seen"] % 25 == 0):
             progress(dict(summary))
 
-    pending: list[tuple[Path, str | None]] = []
+    pending: list[tuple[Path, tuple[Path, ...], str | None]] = []
     executor = ThreadPoolExecutor(max_workers=effective_workers) if effective_workers > 1 else None
     try:
         def flush_pending() -> None:
@@ -489,7 +525,7 @@ def scan_files(
                 after_item()
             pending = []
 
-        for item in candidates():
+        for item, ancestors in candidates():
             if stopped():
                 break
             if max_files is not None and summary["files_seen"] >= max_files:
@@ -500,7 +536,7 @@ def scan_files(
                 issue(item, "quarantine-excluded")
                 after_item()
                 continue
-            pending.append((item, cache_hint(item)))
+            pending.append((item, ancestors, cache_hint(item)))
             if len(pending) >= effective_workers * 4:
                 flush_pending()
         flush_pending()
@@ -515,21 +551,7 @@ def scan_files(
                 cache.close()
             except (OSError, sqlite3.Error):
                 pass
-    result["finished_at"] = utc_now()
-    complete = (summary["files_scanned"] > 0 and not any(
-        summary[key] for key in ("cancelled", "limit_reached", "errors", "skipped")
-    ))
-    if (result["engine"].get("limited_results") or
-            result["engine"].get("database_freshness") != "local"):
-        complete = False
-    if complete and summary["provider_scanned"] == summary["files_scanned"]:
-        result["coverage"] = "antios-local-inspection"
-    if summary["threats"]:
-        result["verdict"] = "threats-found"
-    elif summary["reviews"]:
-        result["verdict"] = "review"
-    elif complete and result["coverage"] != "limited":
-        result["verdict"] = "no-threats-found"
+    finalize_scan_result(result)
     if progress:
         progress(dict(summary))
     if checkpoint:
@@ -544,8 +566,15 @@ def render_antivirus_scan(result: dict) -> str:
              f"Verdict: {result['verdict']}; coverage: {result['coverage']}",
              f"Scanned: {summary['files_scanned']}; threats: {summary['threats']}; "
              f"review: {summary['reviews']}; skipped: {summary['skipped']}; errors: {summary['errors']}"]
+    limits = result.get("limits", {})
+    if "profile" in limits and "effective_workers" in limits:
+        lines.append(f"Profile: {limits['profile']}; workers: {limits['effective_workers']}")
+    if "decision" in result:
+        dimensions = result["decision"]["dimensions"]
+        lines.append("Decision: " + ", ".join(f"{key}={value}" for key, value in dimensions.items()))
     for key in ("version", "database_freshness", "signature_source", "signature_catalog_version",
-                "signature_catalog_status", "signature_catalog_warning", "detail"):
+                "signature_catalog_status", "signature_bundled_supplement_entries",
+                "signature_catalog_warning", "detail"):
         if key in result["engine"]:
             lines.append(f"{key}: {result['engine'][key]}")
     lines.extend(f"{f['kind']}: {f['name']} | {f['path']}" for f in result["findings"])
