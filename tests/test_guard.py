@@ -251,11 +251,12 @@ def test_cli_status_is_available_without_windows_or_a_running_guard(tmp_path, ca
     assert json.loads(capsys.readouterr().out)['state'] == 'not-running'
 
 
-def test_reviews_never_enter_automatic_quarantine(tmp_path):
+@pytest.mark.parametrize(('complete', 'expected_state'), [(False, 'degraded'), (True, 'attention')])
+def test_reviews_never_enter_automatic_quarantine(tmp_path, complete, expected_state):
     calls = []
     class ReviewEngine(Engine):
         def scan(self, data, name):
-            return ScanOutcome('review', 'Heuristics.Encrypted.Zip')
+            return ScanOutcome('review', 'Advisory test fixture', complete=complete)
     def review_scan(path, **options):
         return scan_files(path, engine='antios', provider_factory=ReviewEngine)
     class Vault:
@@ -271,7 +272,7 @@ def test_reviews_never_enter_automatic_quarantine(tmp_path):
         # thread under a full matrix load; keep the same assertion with a
         # slightly wider bounded startup window.
         until(lambda: instance.status['scanned'] == 1, seconds=20)
-        until(lambda: instance.status['state'] == 'degraded', seconds=10)
+        until(lambda: instance.status['state'] == expected_state, seconds=10)
         assert target.exists()
         assert not calls
     finally:

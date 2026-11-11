@@ -8,7 +8,9 @@ import sys
 from pathlib import Path
 
 from .build_info import render_version, version_info
-from .antivirus import DEFAULT_MAX_BYTES, DEFAULT_SCAN_WORKERS, render_antivirus_scan, scan_files
+from .antivirus import (
+    DEFAULT_SCAN_PROFILE, MAX_SCAN_WORKERS, SCAN_PROFILE_WORKERS, read_regular, render_antivirus_scan, scan_files,
+)
 from .config import default_config_path, load_config, write_default_config
 from .consumer import evaluate_health, render_quick_check
 from .core import (
@@ -27,6 +29,7 @@ from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .quarantine import Quarantine, default_quarantine_path
 from .scan_cache import default_scan_cache_path
+from .scan_verdict import MAX_REPLAY_BYTES, replay_scan_json
 from .windows_defender import defender_action
 from .report import render_doctor_human, render_operations_human, render_scan_human
 from .storage_cleanup import (
@@ -207,11 +210,22 @@ def build_parser() -> argparse.ArgumentParser:
     av.add_argument("--signatures", help="Override the signed catalog with a local schema-1 SHA-256 database.")
     av.add_argument("--max-mb", type=int, help="Optional per-file limit in MiB; larger files use bounded streaming.")
     av.add_argument("--max-files", type=int, help="Optional maximum number of files. Default: scan the entire selection.")
-    av.add_argument("--workers", type=int, default=DEFAULT_SCAN_WORKERS,
-                    help=f"Maximum concurrent AntiOS Engine scans, 1..8 (default: {DEFAULT_SCAN_WORKERS}).")
+    av.add_argument("--profile", choices=tuple(SCAN_PROFILE_WORKERS), default=DEFAULT_SCAN_PROFILE,
+                    help="Inspection depth and default workers (default: balanced).")
+    av.add_argument("--workers", type=int, metavar="N",
+                    help=f"Override the profile's workers, 1..{MAX_SCAN_WORKERS}, subject to CPU limits.")
     av.add_argument("--no-cache", action="store_true",
                     help="Do not reuse clean results for unchanged files.")
     av.add_argument("--json", action="store_true")
+
+    replay = sub.add_parser("virus-scan-replay", help="Recompute the verdict from an exported AntiOS JSON report.")
+    replay.add_argument("report", type=Path)
+    replay.add_argument("--json", action="store_true")
+
+    benchmark = sub.add_parser("virus-scan-benchmark", help="Check scan profiles on a labeled, inert control corpus.")
+    benchmark.add_argument("--profile", choices=tuple(SCAN_PROFILE_WORKERS), help="Default: run all profiles.")
+    benchmark.add_argument("--repeat", type=int, choices=range(1, 6), default=3)
+    benchmark.add_argument("--json", action="store_true")
 
     catalog = sub.add_parser("signatures", help="Inspect or install a signed AntiOS signature catalog.")
     catalog_sub = catalog.add_subparsers(dest="signatures_command", required=True)
@@ -522,6 +536,7 @@ def main(argv: list[str] | None = None) -> int:
                                            else None),
                                 max_files=args.max_files,
                                 workers=args.workers,
+                                profile=args.profile,
                                 cache_path=default_scan_cache_path(),
                                 use_cache=not args.no_cache,
                                 excluded_paths=(default_quarantine_path(),))
@@ -536,6 +551,33 @@ def main(argv: list[str] | None = None) -> int:
                         result["summary"]["files_scanned"], result["summary"]["threats"])
             # 0: fully scanned/no findings, 1: threats/review, 3: incomplete/limited.
             return 1 if result["findings"] else (0 if result["verdict"] == "no-threats-found" else 3)
+
+        if args.command == "virus-scan-replay":
+            data, _ = read_regular(args.report, MAX_REPLAY_BYTES)
+            replayed = replay_scan_json(data)
+            if args.json:
+                _print_json(replayed)
+            else:
+                print(f"Replayed verdict: {replayed['verdict']} ({replayed['policy']})")
+                for key, value in replayed["dimensions"].items():
+                    print(f"{key}: {value}")
+            return 0
+
+        if args.command == "virus-scan-benchmark":
+            from .scan_benchmark import run_detection_benchmark
+
+            benchmark = run_detection_benchmark(profile=args.profile, repeat=args.repeat)
+            if args.json:
+                _print_json(benchmark)
+            else:
+                for profile, result in benchmark["profiles"].items():
+                    replay_status = "stable replay" if result["stable_replay"] else "replay mismatch"
+                    print(f"{profile}: {result['passed']}/{result['total']} control cases passed, "
+                          f"median {result['median_seconds']:.3f} s, {replay_status}")
+                    for case in result["cases"]:
+                        if not case["passed"]:
+                            print(f"  {case['name']}: expected {case['expected']}, observed {case['observed']}")
+            return 0 if benchmark["passed"] else 1
 
         if args.command == "quarantine":
             if os.name != "nt":
@@ -736,7 +778,7 @@ def main(argv: list[str] | None = None) -> int:
         operation = str(getattr(args, "command", "cli") or "cli")
         component = (
             "AntiOS Engine" if operation.startswith("protection") or operation == "signatures" else
-            "Scanner" if operation == "virus-scan" else
+            "Scanner" if operation.startswith("virus-scan") else
             "Updater" if operation == "update" else "System"
         )
         record_event(component, "ERROR", str(exc),

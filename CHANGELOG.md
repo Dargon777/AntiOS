@@ -4,6 +4,14 @@ This public changelog intentionally contains only user-facing capability summari
 
 Detailed security architecture, trust-boundary sequencing, service/task identities, IPC/state layouts, detection thresholds, cache/queue settings, update handoff mechanics, repair/rollback sequencing and native protocol details are not published here.
 
+## 3.0.2a1 - 2026-11-11 (prerelease)
+
+- Redesigns the Windows dashboard around protection status, scanning, quarantine and tools.
+- Adds light, balanced and heavy scan profiles with an independent worker setting.
+- Adds curated signatures and improves performance in folders with many small files.
+- Explains scan coverage and supports replaying decisions from saved reports.
+- Adds an inert detection benchmark with known expected outcomes.
+
 ## 3.0.1a1 - 2026-11-10 (release candidate)
 
 - introduces AntiOS's independent local scan engine across the app, CLI and optional resident monitor;

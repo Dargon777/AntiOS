@@ -18,7 +18,7 @@ from .windows_process import hidden_process_kwargs
 import time
 from typing import Callable
 
-from .antivirus import DEFAULT_SCAN_WORKERS, scan_files, utc_now
+from .antivirus import DEFAULT_SCAN_PROFILE, finalize_scan_result, scan_files, utc_now
 from .quarantine import default_quarantine_path
 from .scan_cache import default_scan_cache_path
 
@@ -57,7 +57,8 @@ def worker_main(request_path: str, events_path: str) -> int:
                        engine_service=request.get("engine_service"),
                        require_verified_peer=bool(request.get("require_verified_peer", False)),
                        excluded_paths=(default_quarantine_path(),), checkpoint=checkpoint,
-                       workers=int(request.get("workers", DEFAULT_SCAN_WORKERS)),
+                       workers=request.get("workers"),
+                       profile=request.get("profile", DEFAULT_SCAN_PROFILE),
                        cache_path=default_scan_cache_path(),
                        use_cache=bool(request.get("use_cache", True)))
             emit("done", None)
@@ -88,7 +89,8 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
                      engine: str = "antios",
                      engine_service: str | None = None,
                      require_verified_peer: bool = False,
-                     workers: int = DEFAULT_SCAN_WORKERS,
+                     workers: int | None = None,
+                     profile: str = DEFAULT_SCAN_PROFILE,
                      use_cache: bool = True,
                      timeout: float | None = None,
                      cancelled: Callable[[], bool] = lambda: False,
@@ -105,6 +107,7 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
             "engine_service": engine_service,
             "require_verified_peer": bool(require_verified_peer),
             "workers": workers,
+            "profile": profile,
             "use_cache": bool(use_cache),
             "signatures": str(signature_path.absolute()) if signature_path else None,
         }), encoding="utf-8")
@@ -157,7 +160,7 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
                 if result is None:
                     # Cancellation can arrive before the interpreter starts.
                     result = {"schema": 1, "kind": "antivirus-scan", "path": str(path),
-                              "started_at": utc_now(), "engine": {}, "limits": {},
+                              "started_at": utc_now(), "engine": {}, "limits": {"profile": profile},
                               "summary": {"files_seen": 0, "entries_seen": 0, "files_scanned": 0,
                                           "provider_scanned": 0, "bytes_scanned": 0, "threats": 0,
                                           "reviews": 0, "skipped": 0, "errors": 0, "limit_reached": False},
@@ -165,9 +168,7 @@ def run_scan_process(path: Path, *, signature_path: Path | None = None,
                 result["summary"].update(cancelled=True, forced_stop=True)
                 if timed_out:
                     result["summary"]["timed_out"] = True
-                result.update(coverage="limited", finished_at=utc_now(),
-                              verdict="threats-found" if result["summary"]["threats"] else
-                              "review" if result["summary"]["reviews"] else "incomplete")
+                finalize_scan_result(result)
                 return result
             if failure or not done or result is None or process.returncode != 0:
                 raise RuntimeError(failure or f"Scan worker exited unexpectedly ({process.returncode})")

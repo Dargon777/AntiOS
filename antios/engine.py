@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import bz2
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 import hashlib
 import io
 import lzma
@@ -41,10 +41,55 @@ _ARCHIVE_ERRORS = (zipfile.BadZipFile, RuntimeError, OSError, EOFError, ValueErr
                    NotImplementedError, zlib.error, struct.error, lzma.LZMAError)
 
 
+@dataclass(frozen=True)
+class InspectionLimits:
+    inline_bytes: int
+    archive_member_bytes: int
+    archive_total_bytes: int
+    archive_members: int
+    archive_directory_bytes: int
+    archive_depth: int
+
+
+def inspection_limits(profile: str) -> InspectionLimits:
+    mib = 1024 * 1024
+    if profile == "light":
+        return InspectionLimits(16 * mib, 12 * mib, 32 * mib, 1024, mib, 2)
+    if profile == "heavy":
+        return InspectionLimits(96 * mib, 64 * mib, 192 * mib, 8192, 4 * mib, 6)
+    if profile != "balanced":
+        raise ValueError("Unsupported scan profile")
+    return InspectionLimits(MAX_INLINE_BYTES, MAX_ARCHIVE_MEMBER_BYTES, MAX_ARCHIVE_TOTAL_BYTES,
+                            MAX_ARCHIVE_MEMBERS, MAX_ARCHIVE_DIRECTORY_BYTES, MAX_ARCHIVE_DEPTH)
+
+
+@dataclass(frozen=True)
+class _FamilyRule:
+    rule_id: str
+    label: str
+    minimum_matches: int = 1
+
+    def evaluate(self, matches: int = 1) -> ScanOutcome:
+        if matches < self.minimum_matches:
+            return ScanOutcome()
+        return ScanOutcome("review", self.label, rule_id=self.rule_id)
+
+
+_SCRIPT_COMBINATION = _FamilyRule("script.combined-indicators", "Script requires manual review", minimum_matches=2)
+_PE_SECTION = _FamilyRule("executable.unusual-pe-section", "Unusual executable section")
+_ARCHIVE_PATH = _FamilyRule("archive.suspicious-entry-path", "Suspicious archive entry path")
+_OFFICE_VBA = _FamilyRule("office.vba-macros", "Office document contains VBA macros")
+
+
+def _inspection_gap(code: str, label: str = "", *, detail: str = "") -> ScanOutcome:
+    return ScanOutcome("review" if label else None, label, complete=False, detail=detail or label,
+                       coverage_gaps=frozenset({code}))
+
+
 @dataclass
 class _Budget:
-    members: int = field(default_factory=lambda: MAX_ARCHIVE_MEMBERS)
-    bytes_left: int = field(default_factory=lambda: MAX_ARCHIVE_TOTAL_BYTES)
+    members: int
+    bytes_left: int
 
 
 def _preferred(left: ScanOutcome, right: ScanOutcome) -> ScanOutcome:
@@ -53,13 +98,14 @@ def _preferred(left: ScanOutcome, right: ScanOutcome) -> ScanOutcome:
     if left.kind is None and left.complete and not left.detail:
         return right
     priority = {None: 0, "review": 1, "threat": 2}
-    selected = right if priority.get(right.kind, 0) > priority.get(left.kind, 0) else left
-    return ScanOutcome(
-        selected.kind,
-        selected.name,
-        selected.engine,
-        left.complete and right.complete,
-        (left.detail or right.detail)[:500],
+    left_priority = (priority.get(left.kind, 0), bool(left.rule_id))
+    right_priority = (priority.get(right.kind, 0), bool(right.rule_id))
+    selected = right if right_priority > left_priority else left
+    return replace(
+        selected,
+        complete=left.complete and right.complete,
+        detail=(left.detail or right.detail)[:500],
+        coverage_gaps=left.coverage_gaps | right.coverage_gaps,
     )
 
 
@@ -92,7 +138,7 @@ def _archive_format(data: bytes, name: str) -> str | None:
     return None
 
 
-def _zip_entry_count(data: bytes) -> int | None:
+def _zip_entry_count(data: bytes, max_directory_bytes: int) -> int | None:
     """Reject oversized or malformed central directories before ZipFile loads them."""
     tail = data[-65557:]
     marker = tail.rfind(b"PK\x05\x06")
@@ -107,7 +153,7 @@ def _zip_entry_count(data: bytes) -> int | None:
     # Use only the ordinary single-disk directory record for bounded enumeration.
     if (disk or directory_disk or disk_members != total_members or total_members == 0xFFFF
             or directory_offset + directory_size > directory_end
-            or directory_size > MAX_ARCHIVE_DIRECTORY_BYTES
+            or directory_size > max_directory_bytes
             or (directory_end >= 20 and data[directory_end - 20:directory_end - 16] == b"PK\x06\x07")):
         return None
     return total_members
@@ -116,7 +162,7 @@ def _zip_entry_count(data: bytes) -> int | None:
 def _archive_path_signal(name: str) -> ScanOutcome:
     parts = PurePosixPath(name).parts
     if name.startswith("/") or ".." in parts or not parts or ":" in parts[0]:
-        return ScanOutcome("review", "Suspicious archive entry path")
+        return _ARCHIVE_PATH.evaluate()
     return ScanOutcome()
 
 
@@ -155,27 +201,28 @@ def _script_signal(data: bytes, name: str) -> ScanOutcome:
         b"downloadstring(" in sample or b"downloadfile(" in sample,
         b"set-mppreference" in sample or b"add-mppreference" in sample,
     )
-    detail = "" if complete else "Only a bounded script preview was inspected"
-    if sum(indicators) >= 2:
-        return ScanOutcome("review", "Script requires manual review", complete=complete, detail=detail)
-    return ScanOutcome(complete=complete, detail=detail)
+    outcome = _SCRIPT_COMBINATION.evaluate(sum(indicators))
+    if not complete:
+        outcome = _preferred(outcome, _inspection_gap(
+            "script-preview-only", detail="Only a bounded script preview was inspected"))
+    return outcome
 
 
 def _pe_signal(data: bytes) -> ScanOutcome:
     if not data.startswith(b"MZ"):
         return ScanOutcome()
     if len(data) < 64:
-        return ScanOutcome("review", "Truncated executable header", "AntiOS Engine", complete=False)
+        return _inspection_gap("invalid-pe-header", "Truncated executable header")
     offset = struct.unpack_from("<I", data, 0x3C)[0]
     if offset > len(data) - 24 or data[offset:offset + 4] != b"PE\x00\x00":
-        return ScanOutcome("review", "Unrecognized executable header", "AntiOS Engine", complete=False)
+        return _inspection_gap("invalid-pe-header", "Unrecognized executable header")
     sections = struct.unpack_from("<H", data, offset + 6)[0]
     optional_size = struct.unpack_from("<H", data, offset + 20)[0]
     if sections == 0 or sections > 96 or optional_size < 2:
-        return ScanOutcome("review", "Invalid executable section table", "AntiOS Engine", complete=False)
+        return _inspection_gap("invalid-pe-header", "Invalid executable section table")
     table = offset + 24 + optional_size
     if table > len(data) or sections > (len(data) - table) // 40:
-        return ScanOutcome("review", "Truncated executable section table", "AntiOS Engine", complete=False)
+        return _inspection_gap("invalid-pe-header", "Truncated executable section table")
     for index in range(sections):
         entry = table + index * 40
         raw_size, raw_offset, flags = struct.unpack_from("<II12xI", data, entry + 16)
@@ -185,21 +232,21 @@ def _pe_signal(data: bytes) -> ScanOutcome:
         if raw_offset > len(data) or raw_size > len(data) - raw_offset:
             continue
         if _entropy(data[raw_offset:raw_offset + min(raw_size, 32768)]) > 7.5:
-            return ScanOutcome("review", "Unusual executable section", "AntiOS Engine")
+            return _PE_SECTION.evaluate()
     return ScanOutcome()
 
 
 def _executable_signal(data: bytes) -> ScanOutcome:
     if data.startswith(b"\x7fELF"):
         if len(data) < 16 or data[4] not in (1, 2) or data[5] not in (1, 2) or data[6] != 1:
-            return ScanOutcome("review", "Invalid ELF identification header", complete=False)
+            return _inspection_gap("invalid-elf-header", "Invalid ELF identification header")
         byte_order = "<" if data[5] == 1 else ">"
         header_size, size_field = (52, 40) if data[4] == 1 else (64, 52)
         if len(data) < header_size:
-            return ScanOutcome("review", "Truncated ELF header", complete=False)
+            return _inspection_gap("invalid-elf-header", "Truncated ELF header")
         declared_size = struct.unpack_from(byte_order + "H", data, size_field)[0]
         if not header_size <= declared_size <= len(data):
-            return ScanOutcome("review", "Invalid ELF header size", complete=False)
+            return _inspection_gap("invalid-elf-header", "Invalid ELF header size")
         return ScanOutcome()
     return _pe_signal(data)
 
@@ -228,11 +275,12 @@ class AntiOSEngine:
 
     name = "AntiOS Engine"
 
-    def __init__(self, *, signatures: dict[str, str] | None = None) -> None:
+    def __init__(self, *, signatures: dict[str, str] | None = None, profile: str = "balanced") -> None:
         self._signatures = dict(signatures or {})
         if len(self._signatures) > 100_001:
             raise ValueError("Too many local signatures")
-        self._archive_slots = BoundedSemaphore(2)
+        self._limits = inspection_limits(profile)
+        self._archive_slots = BoundedSemaphore(1 if profile == "light" else 2)
         self.metadata = {
             "version": "AntiOS Engine/0.3",
             "database_freshness": "local",
@@ -252,13 +300,13 @@ class AntiOSEngine:
         if archive_format is None:
             return outcome
         if archive_format == "unsupported":
-            return _preferred(outcome, ScanOutcome(
-                "review", "Unsupported archive format", complete=False,
+            return _preferred(outcome, _inspection_gap(
+                "unsupported-archive-format", "Unsupported archive format",
                 detail="Archive contents were not inspected"))
-        if depth >= MAX_ARCHIVE_DEPTH:
-            return _preferred(outcome, ScanOutcome(
-                "review", "Nested archive depth limit reached", self.name,
-                complete=False, detail="Nested archive was not fully examined"))
+        if depth >= self._limits.archive_depth:
+            return _preferred(outcome, _inspection_gap(
+                "archive-depth-limit", "Nested archive depth limit reached",
+                detail="Nested archive was not fully examined"))
         if depth == 0:
             with self._archive_slots:
                 archive = self._inspect_archive(data, name, archive_format, depth, budget)
@@ -277,9 +325,9 @@ class AntiOSEngine:
     def _inspect_compressed(self, data: bytes, name: str, archive_format: str,
                             depth: int, budget: _Budget) -> ScanOutcome:
         # Ordinary TAR padding can compress to a very small GZIP payload.
-        limit = min(MAX_ARCHIVE_MEMBER_BYTES, budget.bytes_left, max(65536, len(data) * 200))
+        limit = min(self._limits.archive_member_bytes, budget.bytes_left, max(65536, len(data) * 200))
         if budget.members <= 0 or limit <= 0:
-            return ScanOutcome("review", "Archive inspection budget exceeded", complete=False)
+            return _inspection_gap("archive-budget-exceeded", "Archive inspection budget exceeded")
         budget.members -= 1
         budget.bytes_left -= limit
         if archive_format == "gzip":
@@ -291,11 +339,11 @@ class AntiOSEngine:
         try:
             payload = decompressor.decompress(data, limit + 1)
         except (OSError, EOFError, zlib.error, lzma.LZMAError):
-            return ScanOutcome("review", "Unreadable compressed archive", complete=False)
+            return _inspection_gap("unreadable-archive", "Unreadable compressed archive")
         if len(payload) > limit:
-            return ScanOutcome("review", "Archive inspection budget exceeded", complete=False)
+            return _inspection_gap("archive-budget-exceeded", "Archive inspection budget exceeded")
         if not decompressor.eof:
-            return ScanOutcome("review", "Truncated compressed archive", complete=False)
+            return _inspection_gap("unreadable-archive", "Truncated compressed archive")
         trailing = decompressor.unused_data
         unread = bool(trailing and (archive_format == "bzip2" or trailing.strip(b"\x00")
                                     or (archive_format == "xz" and len(trailing) % 4)))
@@ -310,8 +358,8 @@ class AntiOSEngine:
             inner_name = name[:-(len(extension) + 1)] + ".tar"
         outcome = self._inspect(payload, inner_name, depth=depth + 1, budget=budget)
         if unread:
-            outcome = _preferred(outcome, ScanOutcome(
-                "review", "Additional compressed data was not inspected", complete=False))
+            outcome = _preferred(outcome, _inspection_gap(
+                "uninspected-compressed-data", "Additional compressed data was not inspected"))
         return outcome
 
     def _inspect_tar(self, data: bytes, depth: int, budget: _Budget) -> ScanOutcome:
@@ -326,8 +374,8 @@ class AntiOSEngine:
                     return outcome
                 break
             if budget.members <= 0:
-                return _preferred(outcome, ScanOutcome(
-                    "review", "Archive entry limit reached", complete=False))
+                return _preferred(outcome, _inspection_gap(
+                    "archive-budget-exceeded", "Archive entry limit reached"))
             budget.members -= 1
             try:
                 member = tarfile.TarInfo.frombuf(header, "utf-8", "surrogateescape")
@@ -344,60 +392,60 @@ class AntiOSEngine:
             if member.type == tarfile.DIRTYPE and not member.size:
                 continue
             if member.type in (tarfile.SYMTYPE, tarfile.LNKTYPE) and not member.size:
-                outcome = _preferred(outcome, ScanOutcome(
-                    "review", "Archive link was not followed", complete=False))
+                outcome = _preferred(outcome, _inspection_gap(
+                    "archive-link-skipped", "Archive link was not followed"))
                 continue
             # Extension records can alter how later entries are interpreted.
             if member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE):
-                return _preferred(outcome, ScanOutcome(
-                    "review", "Unsupported TAR entry", complete=False))
-            if member.size > min(MAX_ARCHIVE_MEMBER_BYTES, budget.bytes_left):
-                outcome = _preferred(outcome, ScanOutcome(
-                    "review", "Archive inspection budget exceeded", complete=False))
+                return _preferred(outcome, _inspection_gap(
+                    "unsupported-archive-entry", "Unsupported TAR entry"))
+            if member.size > min(self._limits.archive_member_bytes, budget.bytes_left):
+                outcome = _preferred(outcome, _inspection_gap(
+                    "archive-budget-exceeded", "Archive inspection budget exceeded"))
                 continue
             budget.bytes_left -= member.size
             outcome = _preferred(outcome, self._inspect(
                 data[start:start + member.size], name, depth=depth + 1, budget=budget))
             if outcome.kind == "threat":
                 return outcome
-        return _preferred(outcome, ScanOutcome("review", "Unreadable TAR archive", complete=False))
+        return _preferred(outcome, _inspection_gap("unreadable-archive", "Unreadable TAR archive"))
 
     def _inspect_zip(self, data: bytes, depth: int, budget: _Budget) -> ScanOutcome:
-        declared_members = _zip_entry_count(data)
+        declared_members = _zip_entry_count(data, self._limits.archive_directory_bytes)
         if declared_members is None or declared_members > budget.members:
-            return ScanOutcome(
-                "review", "Archive directory requires manual review", self.name,
-                complete=False, detail="Archive could not be safely enumerated")
+            gap = "archive-directory-unavailable" if declared_members is None else "archive-budget-exceeded"
+            return _inspection_gap(gap, "Archive directory requires manual review",
+                                   detail="Archive could not be safely enumerated")
         outcome = ScanOutcome()
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 members = archive.infolist()
                 if len(members) != declared_members:
-                    return ScanOutcome("review", "Invalid archive directory", complete=False)
+                    return _inspection_gap("archive-directory-unavailable", "Invalid archive directory")
                 budget.members -= len(members)
                 for item in members:
                     if item.is_dir():
                         if item.file_size:
-                            outcome = _preferred(outcome, ScanOutcome(
-                                "review", "Archive directory entry contains data", complete=False))
+                            outcome = _preferred(outcome, _inspection_gap(
+                                "unsupported-archive-entry", "Archive directory entry contains data"))
                         continue
                     normalized = item.filename.replace("\\", "/")
                     outcome = _preferred(outcome, _archive_path_signal(normalized))
                     if item.flag_bits & 1:
-                        outcome = _preferred(outcome, ScanOutcome(
-                            "review", "Encrypted archive entry", self.name,
-                            complete=False, detail="Encrypted archive member could not be inspected"))
+                        outcome = _preferred(outcome, _inspection_gap(
+                            "encrypted-archive-entry", "Encrypted archive entry",
+                            detail="Encrypted archive member could not be inspected"))
                         continue
                     if item.compress_type not in _ZIP_METHODS:
-                        outcome = _preferred(outcome, ScanOutcome(
-                            "review", "Unsupported archive compression", complete=False))
+                        outcome = _preferred(outcome, _inspection_gap(
+                            "unsupported-archive-compression", "Unsupported archive compression"))
                         continue
-                    if (item.file_size > MAX_ARCHIVE_MEMBER_BYTES
+                    if (item.file_size > self._limits.archive_member_bytes
                             or item.file_size > budget.bytes_left
                             or (item.compress_size and item.file_size > item.compress_size * 200)):
-                        outcome = _preferred(outcome, ScanOutcome(
-                            "review", "Archive inspection budget exceeded", self.name,
-                            complete=False, detail="Archive member not inspected"))
+                        outcome = _preferred(outcome, _inspection_gap(
+                            "archive-budget-exceeded", "Archive inspection budget exceeded",
+                            detail="Archive member not inspected"))
                         continue
                     # Charge failed reads too. ZipFile verifies CRC without extracting to disk.
                     budget.bytes_left -= item.file_size
@@ -406,13 +454,12 @@ class AntiOSEngine:
                         if len(payload) != item.file_size:
                             raise ValueError("Archive member size changed")
                     except _ARCHIVE_ERRORS:
-                        outcome = _preferred(outcome, ScanOutcome(
-                            "review", "Unreadable archive member", complete=False))
+                        outcome = _preferred(outcome, _inspection_gap(
+                            "unreadable-archive-entry", "Unreadable archive member"))
                         continue
                     if (normalized.lower() in _OFFICE_MACROS
                             and payload.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")):
-                        outcome = _preferred(outcome, ScanOutcome(
-                            "review", "Office document contains VBA macros"))
+                        outcome = _preferred(outcome, _OFFICE_VBA.evaluate())
                     outcome = _preferred(
                         outcome,
                         self._inspect(payload, normalized, depth=depth + 1, budget=budget),
@@ -420,18 +467,18 @@ class AntiOSEngine:
                     if outcome.kind == "threat":
                         break
         except _ARCHIVE_ERRORS:
-            outcome = _preferred(outcome, ScanOutcome(
-                "review", "Unreadable archive", self.name,
-                complete=False, detail="Archive inspection failed"))
+            outcome = _preferred(outcome, _inspection_gap(
+                "unreadable-archive", "Unreadable archive", detail="Archive inspection failed"))
         return outcome
 
     def scan_with_digest(self, content: bytes, name: str, digest: str) -> ScanOutcome:
         if digest in self._signatures:
             return ScanOutcome("threat", self._signatures[digest], self.name)
-        if len(content) > MAX_INLINE_BYTES:
-            return ScanOutcome(None, "", self.name, False,
-                               "File exceeds full-content inspection budget")
-        return self._inspect(content, name, depth=0, budget=_Budget(), digest=digest)
+        if len(content) > self._limits.inline_bytes:
+            return _inspection_gap("file-inspection-budget-exceeded",
+                                   detail="File exceeds full-content inspection budget")
+        budget = _Budget(self._limits.archive_members, self._limits.archive_total_bytes)
+        return self._inspect(content, name, depth=0, budget=budget, digest=digest)
 
     def scan(self, content: bytes, name: str) -> ScanOutcome:
         return self.scan_with_digest(content, name, hashlib.sha256(content).hexdigest())
@@ -466,8 +513,8 @@ class AntiOSEngine:
         if size == len(content):
             return self.scan_with_digest(content, name, sha)
         advisory = _preferred(_script_signal(content, name), _executable_signal(content))
-        return ScanOutcome(advisory.kind, advisory.name, self.name, False,
-                           "Only local hash and bounded content preview were available")
+        outcome = _preferred(advisory, _inspection_gap("stream-preview-only"))
+        return replace(outcome, detail="Only local hash and bounded content preview were available")
 
     def close(self) -> None:
         pass
