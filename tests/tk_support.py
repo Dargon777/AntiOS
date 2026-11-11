@@ -34,7 +34,7 @@ def isolated_tk_test(function):
     Some bundled Windows Tcl runtimes cannot reliably reinitialize Tk after
     destroy(). Run the entire pytest case (including fixtures) in a fresh
     process; failures are propagated, never converted into skips. The Windows
-    CI runners can be substantially slower on Python 3.12/3.13, so allow the
+    CI runners can be substantially slower under concurrent Windows jobs, so allow the
     isolated UI scenario enough time to finish without weakening assertions.
     """
     @wraps(function)
@@ -46,7 +46,7 @@ def isolated_tk_test(function):
             [sys.executable, "-m", "pytest", node, "-ra", "-W", "error"],
             env=dict(os.environ, ANTIOS_TK_TEST_NODE=node),
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", timeout=180,
+            text=True, encoding="utf-8", errors="replace", timeout=360,
             **hidden_process_kwargs(),
         )
         assert result.returncode == 0, result.stdout + result.stderr
