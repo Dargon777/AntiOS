@@ -11,3 +11,5 @@ class ScanOutcome:
     engine: str = "AntiOS Engine"
     complete: bool = True
     detail: str = ""
+    rule_id: str = ""
+    coverage_gaps: frozenset[str] = frozenset()

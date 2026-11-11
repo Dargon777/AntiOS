@@ -1013,3 +1013,24 @@ _CENTER_LABELS = {
 for _locale, _labels in _CENTER_LABELS.items():
     MESSAGES[_locale].update(zip(("scan_center_title", "access_admin", "access_user",
                                   "open_admin", "system_drive", "admin_opened", "note"), _labels))
+
+
+_SCAN_PROFILE_LABELS = {
+    "en": ("Scan depth", "Light · quick", "Balanced", "Heavy · deep", "Workers", "Auto"),
+    "ru": ("Глубина проверки", "Лёгкая · быстрая", "Средняя · обычная", "Тяжёлая · глубокая", "Потоки", "Авто"),
+    "es": ("Profundidad", "Ligero · rápido", "Equilibrado", "Profundo", "Hilos", "Auto"),
+    "zh-CN": ("扫描深度", "轻量 · 快速", "均衡", "深度", "线程数", "自动"),
+    "fi": ("Tarkistuksen syvyys", "Kevyt · nopea", "Tasapainoinen", "Perusteellinen", "Säikeet", "Auto"),
+    "pl": ("Głębokość skanowania", "Lekki · szybki", "Zrównoważony", "Dogłębny", "Wątki", "Auto"),
+    "mn": ("Шалгалтын гүн", "Хөнгөн · хурдан", "Тэнцвэртэй", "Гүнзгий", "Урсгал", "Авто"),
+}
+for _locale, _labels in _SCAN_PROFILE_LABELS.items():
+    MESSAGES[_locale].update(zip(("scan_profile", "scan_profile_light", "scan_profile_balanced",
+                                  "scan_profile_heavy", "scan_workers", "scan_workers_auto"), _labels))
+
+MESSAGES["en"].update(protection_active="File monitoring is active",
+                      protection_active_detail="AntiOS Guard watches for file changes in the background.",
+                      limited="Limited scan coverage")
+MESSAGES["ru"].update(protection_active="Мониторинг файлов активен",
+                      protection_active_detail="AntiOS Guard отслеживает изменения файлов в фоне.",
+                      limited="Ограниченное покрытие")

@@ -143,6 +143,21 @@ def test_native_workers_are_bounded_and_concurrent(tmp_path):
     assert 1 <= state["peak"] <= 2
 
 
+def test_cache_does_not_share_results_between_depth_profiles(tmp_path):
+    target = tmp_path / "fixture.txt"
+    target.write_bytes(b"inert fixture")
+    cache = tmp_path / "cache.sqlite3"
+
+    def hits(profile):
+        result = antivirus.scan_files(target, profile=profile, cache_path=cache)
+        return result["summary"]["cache_hits"]
+
+    assert hits("light") == 0
+    assert hits("balanced") == 0
+    assert hits("balanced") == 1
+    assert hits("heavy") == 0
+
+
 def test_cache_database_prunes_and_closes(tmp_path):
     cache = ScanCache(tmp_path / "cache.sqlite3")
     cache.close()

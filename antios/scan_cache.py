@@ -39,6 +39,7 @@ def engine_key(metadata: dict) -> str:
         str(metadata.get("version", "")),
         str(metadata.get("database_freshness", "")),
         str(metadata.get("peer_identity", "")),
+        str(metadata.get("inspection_profile", "balanced")),
     )
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
 

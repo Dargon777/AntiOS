@@ -6,7 +6,9 @@ from pathlib import Path
 import threading
 from typing import Any
 
-from .antivirus import render_antivirus_scan, scan_files
+from .antivirus import (
+    DEFAULT_SCAN_PROFILE, MAX_SCAN_WORKERS, SCAN_PROFILE_WORKERS, render_antivirus_scan, scan_files,
+)
 from .linux_health import collect_linux_health
 
 
@@ -47,7 +49,7 @@ def launch(language: str | None = None, *, background: bool = False, self_test: 
         raise RuntimeError("Linux companion dashboard does not provide tray/background mode yet")
     validate_runtime()
     import tkinter as tk
-    from tkinter import filedialog, messagebox
+    from tkinter import filedialog, messagebox, ttk
 
     root = tk.Tk()
     if self_test:
@@ -78,6 +80,19 @@ def launch(language: str | None = None, *, background: bool = False, self_test: 
         rows[key] = value
     status_frame.grid_columnconfigure(1, weight=1)
 
+    scan_settings = tk.Frame(root)
+    scan_settings.pack(fill="x", padx=24, pady=(12, 0))
+    profile = tk.StringVar(value=DEFAULT_SCAN_PROFILE)
+    workers = tk.StringVar(value="Auto")
+    tk.Label(scan_settings, text="Scan depth").pack(side="left")
+    profile_choice = ttk.Combobox(scan_settings, textvariable=profile, state="readonly", width=12,
+                                  values=tuple(SCAN_PROFILE_WORKERS))
+    profile_choice.pack(side="left", padx=(6, 14))
+    tk.Label(scan_settings, text="Workers").pack(side="left")
+    workers_choice = ttk.Combobox(scan_settings, textvariable=workers, state="readonly", width=6,
+                                  values=("Auto", *(str(n) for n in range(1, MAX_SCAN_WORKERS + 1))))
+    workers_choice.pack(side="left", padx=6)
+
     output = tk.Text(root, height=12, wrap="word")
     output.pack(fill="both", expand=True, padx=24, pady=(18, 12))
     output.insert("1.0", "Ready.\n")
@@ -101,13 +116,27 @@ def launch(language: str | None = None, *, background: bool = False, self_test: 
             messagebox.showerror("AntiOS", str(exc))
 
     def scan_target(path: str) -> None:
+        selected_profile = profile.get()
+        selected_workers = workers.get()
+        worker_count = int(selected_workers) if selected_workers != "Auto" else None
+
+        def finish(rendered: str) -> None:
+            set_output(rendered)
+            file_button.configure(state="normal")
+            folder_button.configure(state="normal")
+            profile_choice.configure(state="readonly")
+            workers_choice.configure(state="readonly")
+
         def worker() -> None:
             try:
-                result = scan_files(path, engine="antios")
+                result = scan_files(path, profile=selected_profile, workers=worker_count)
                 rendered = render_antivirus_scan(result)
             except Exception as exc:
                 rendered = f"Scan failed: {exc}"
-            root.after(0, lambda: set_output(rendered))
+            root.after(0, lambda: finish(rendered))
+
+        for control in (file_button, folder_button, profile_choice, workers_choice):
+            control.configure(state="disabled")
         set_output("Scanning with independent AntiOS Engine…")
         threading.Thread(target=worker, daemon=True).start()
 
@@ -137,8 +166,10 @@ def launch(language: str | None = None, *, background: bool = False, self_test: 
         messagebox.showinfo("AntiOS", f"Saved: {target}")
 
     tk.Button(buttons, text="Refresh status", command=refresh).pack(side="left")
-    tk.Button(buttons, text="Scan file", command=choose_file).pack(side="left", padx=(8, 0))
-    tk.Button(buttons, text="Scan folder", command=choose_folder).pack(side="left", padx=(8, 0))
+    file_button = tk.Button(buttons, text="Scan file", command=choose_file)
+    file_button.pack(side="left", padx=(8, 0))
+    folder_button = tk.Button(buttons, text="Scan folder", command=choose_folder)
+    folder_button.pack(side="left", padx=(8, 0))
     tk.Button(buttons, text="Export status JSON", command=export_status).pack(side="left", padx=(8, 0))
 
     if self_test:

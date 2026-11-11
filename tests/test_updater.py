@@ -10,6 +10,7 @@ OTHER_CERT = "B" * 40
 
 
 def test_latest_alpha_selects_highest_non_draft(monkeypatch):
+    monkeypatch.setattr(updater, "__version__", "3.0.1a1")
     monkeypatch.setattr(updater, "_request_json", lambda _url: [
         {"tag_name": "v2.0.0-alpha.37", "draft": False, "assets": []},
         {"tag_name": "V.3.0.99-Alpha", "draft": True, "assets": []},

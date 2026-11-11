@@ -1985,3 +1985,70 @@ TRANSLATIONS["ru"].update({
     "page.security.subtitle": "Защитные механизмы Windows и их текущее состояние.",
     "page.settings.subtitle": "Настройте внешний вид, поведение защиты и обновления AntiOS.",
 })
+
+_WORKSPACE_KEYS = (
+    "scan", "tools", "activity", "choose_scan", "latest_scan", "no_scan", "no_scan_detail", "scan_totals",
+    "components", "recovery", "recovery_detail", "assistant", "assistant_detail", "guard_details",
+    "filter_all", "filter_threats", "filter_review", "filter_issues", "filter_empty", "details", "close",
+    "review_count", "visible_results",
+)
+_WORKSPACE_LABELS = {
+    "en": (
+        "Scan", "Tools", "Event log", "Scan files", "Latest scan", "No scans this session",
+        "Choose a file, folder or drive to check.", "{scanned} checked · {threats} threats · {reviews} to review",
+        "Protection components", "File recovery", "Open backups and restore selected files.",
+        "Protection assistant", "Run self-checks and review recovery options.", "Guard diagnostics",
+        "All results", "Confirmed threats", "For review", "Skipped and errors", "No results for this filter.",
+        "Details", "Close", "{count} to review", "Showing {shown} of {total}",
+    ),
+    "ru": (
+        "Проверка", "Инструменты", "Журнал событий", "Проверить файлы", "Последняя проверка", "За эту сессию проверок нет",
+        "Выберите файл, папку или диск для проверки.", "Проверено {scanned} · угроз {threats} · к проверке {reviews}",
+        "Компоненты защиты", "Восстановление файлов", "Откройте резервную копию и восстановите нужные файлы.",
+        "Помощник защиты", "Самопроверка AntiOS и доступ к восстановлению.", "Диагностика Guard",
+        "Все результаты", "Подтверждённые угрозы", "Требуют внимания", "Пропуски и ошибки", "В этой категории результатов нет.",
+        "Подробнее", "Закрыть", "К проверке: {count}", "Показано {shown} из {total}",
+    ),
+    "es": (
+        "Análisis", "Herramientas", "Registro de eventos", "Analizar archivos", "Último análisis", "Sin análisis en esta sesión",
+        "Selecciona un archivo, carpeta o unidad.", "{scanned} analizados · {threats} amenazas · {reviews} por revisar",
+        "Componentes de protección", "Recuperación", "Abre copias de seguridad y recupera archivos.",
+        "Asistente de protección", "Ejecuta comprobaciones y revisa opciones de recuperación.", "Diagnóstico de Guard",
+        "Todos los resultados", "Amenazas confirmadas", "Por revisar", "Omisiones y errores", "No hay resultados con este filtro.",
+        "Detalles", "Cerrar", "{count} por revisar", "Se muestran {shown} de {total}",
+    ),
+    "zh-CN": (
+        "扫描", "工具", "事件日志", "扫描文件", "上次扫描", "本次会话尚无扫描",
+        "选择要扫描的文件、文件夹或驱动器。", "已扫描 {scanned} · 威胁 {threats} · 待检查 {reviews}",
+        "防护组件", "文件恢复", "打开备份并恢复所选文件。",
+        "防护助手", "运行自检并查看恢复选项。", "Guard 诊断",
+        "全部结果", "已确认的威胁", "待检查", "跳过与错误", "此筛选条件下没有结果。",
+        "详细信息", "关闭", "{count} 项待检查", "显示 {shown} 项，共 {total} 项",
+    ),
+    "fi": (
+        "Tarkistus", "Työkalut", "Tapahtumaloki", "Tarkista tiedostot", "Viimeisin tarkistus", "Ei tarkistuksia tässä istunnossa",
+        "Valitse tiedosto, kansio tai asema.", "{scanned} tarkistettu · {threats} uhkaa · {reviews} arvioitavaa",
+        "Suojauskomponentit", "Tiedostojen palautus", "Avaa varmuuskopio ja palauta tiedostoja.",
+        "Suojausavustaja", "Suorita itsetesti ja tarkista palautusvaihtoehdot.", "Guard-diagnostiikka",
+        "Kaikki tulokset", "Vahvistetut uhat", "Arvioitavat", "Ohitetut ja virheet", "Suodattimella ei ole tuloksia.",
+        "Tiedot", "Sulje", "{count} arvioitavaa", "Näytetään {shown}/{total}",
+    ),
+    "pl": (
+        "Skanowanie", "Narzędzia", "Dziennik zdarzeń", "Skanuj pliki", "Ostatnie skanowanie", "Brak skanów w tej sesji",
+        "Wybierz plik, folder lub dysk.", "{scanned} sprawdzono · {threats} zagrożeń · {reviews} do weryfikacji",
+        "Składniki ochrony", "Odzyskiwanie plików", "Otwórz kopię zapasową i przywróć pliki.",
+        "Asystent ochrony", "Uruchom autotest i sprawdź opcje odzyskiwania.", "Diagnostyka Guard",
+        "Wszystkie wyniki", "Potwierdzone zagrożenia", "Do weryfikacji", "Pominięcia i błędy", "Brak wyników dla tego filtra.",
+        "Szczegóły", "Zamknij", "{count} do weryfikacji", "Wyświetlono {shown} z {total}",
+    ),
+    "mn": (
+        "Шалгалт", "Хэрэгслүүд", "Үйл явдлын бүртгэл", "Файл шалгах", "Сүүлийн шалгалт", "Энэ сешнд шалгалт хийгдээгүй",
+        "Шалгах файл, хавтас эсвэл дискээ сонгоно уу.", "{scanned} шалгасан · {threats} аюул · {reviews} нягтлах",
+        "Хамгаалалтын бүрэлдэхүүн", "Файл сэргээх", "Нөөц хуулбарыг нээж файлаа сэргээнэ үү.",
+        "Хамгаалалтын туслах", "Өөрийгөө шалгах болон сэргээх сонголтууд.", "Guard оношилгоо",
+        "Бүх үр дүн", "Батлагдсан аюул", "Нягтлах", "Алгассан ба алдаа", "Энэ шүүлтүүрт үр дүн алга.",
+        "Дэлгэрэнгүй", "Хаах", "{count} нягтлах", "{total}-аас {shown}-г харуулж байна",
+    ),
+}
+for _language, _labels in _WORKSPACE_LABELS.items():
+    TRANSLATIONS[_language].update({f"work.{key}": label for key, label in zip(_WORKSPACE_KEYS, _labels)})
