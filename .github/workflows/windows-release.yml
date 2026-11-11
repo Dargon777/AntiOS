@@ -699,13 +699,21 @@ jobs:
             exit 1
           fi
 
-          # Do not publish; only update the existing draft by its API ID.
-          jq -n --arg title "AntiOS $tag" \
+          verify_release_draft() {
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" |
+              jq -e --arg tag "$tag" --arg target "$GITHUB_SHA" '
+                .draft == true and .prerelease == true and
+                .tag_name == $tag and .target_commitish == $target
+              ' >/dev/null
+          }
+
+          # GitHub can clear an unpublished tag when a draft update omits tag_name.
+          jq -n --arg tag "$tag" --arg title "AntiOS $tag" \
                 --arg body "$(cat release/RELEASE_NOTES.md)" \
                 --arg target "$GITHUB_SHA" \
-                '{name:$title,body:$body,target_commitish:$target,draft:true,prerelease:true}' |
+                '{tag_name:$tag,name:$title,body:$body,target_commitish:$target,draft:true,prerelease:true}' |
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" --input - >/dev/null
-          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.draft')" = "true"
+          verify_release_draft
 
           # Upload by ID through GitHub's release-assets API; tag-based CLI
           # lookup is unreliable for an untagged draft.
@@ -727,4 +735,4 @@ jobs:
               '.name == $name and .digest == $digest and .state == "uploaded"' \
               "$RUNNER_TEMP/antios-upload-result.json" >/dev/null
           done
-          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.draft')" = "true"
+          verify_release_draft
