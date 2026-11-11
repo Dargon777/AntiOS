@@ -545,8 +545,22 @@ jobs:
 
       - name: Install Linux build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-tk xvfb xauth
+          set -euo pipefail
+          install_apt_packages() {
+            local packages=("$@")
+            for attempt in 1 2 3; do
+              if sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update &&
+                 sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 install -y "${packages[@]}"; then
+                return 0
+              fi
+              if [ "$attempt" -eq 1 ] && [ -f /etc/apt/apt-mirrors.txt ]; then
+                sudo sed -i 's#https\?://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt || true
+              fi
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
+          install_apt_packages python3-tk xvfb xauth
           python -m pip install --upgrade pip
           python -m pip install pytest pyinstaller -e .
 
