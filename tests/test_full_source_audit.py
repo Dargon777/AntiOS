@@ -56,6 +56,12 @@ def test_release_publication_requires_enabled_authenticode_signing():
     assert "(.[0].assets | length) == 0" in publish
     assert 'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id"' in publish
     assert "draft:true,prerelease:true" in publish
+    assert "tag_name:$tag" in publish
+    assert ".tag_name == $tag and .target_commitish == $target" in publish
+    after_patch = publish.split("--method PATCH", 1)[1]
+    before_upload, upload = after_patch.split('for file in "${assets[@]}"; do', 1)
+    assert "verify_release_draft" in before_upload
+    assert "verify_release_draft" in upload.rsplit("done", 1)[1]
     assert "--data-binary \"@$file\"" in publish
     assert "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" in publish
     assert ".digest == $digest" in publish
