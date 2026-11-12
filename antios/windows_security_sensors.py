@@ -898,10 +898,19 @@ class WindowsPersistenceSensor:
             maliciousness = 0.0
             severity = 0
             confidence = 1.0
-            if user_writable:
-                maliciousness, severity, confidence = .62, 65, .78
+            high_value_kind = entry.kind in {
+                "service", "driver-service", "com-override",
+                "wmi-command", "wmi-script",
+            }
+            if user_writable and high_value_kind:
+                maliciousness, severity, confidence = .66, 65, .76
+            elif user_writable:
+                # User-profile autoruns are common for legitimate software.
+                # Keep the signal below incident threshold unless another
+                # independent sensor corroborates it.
+                maliciousness, severity, confidence = .40, 40, .68
             elif embedded_wmi_script:
-                maliciousness, severity, confidence = .42, 45, .65
+                maliciousness, severity, confidence = .45, 45, .70
             elif interpreter:
                 maliciousness, severity, confidence = .30, 35, .65
 
@@ -1017,9 +1026,9 @@ class WindowsMemorySensor:
                     continue
                 embedded_pe = _looks_like_pe(region.prefix)
                 rwx = region.writable_executable
-                maliciousness = .82 if embedded_pe else (.60 if rwx else .45)
-                confidence = .88 if embedded_pe else .72
-                severity = 90 if embedded_pe else (75 if rwx else 65)
+                maliciousness = .82 if embedded_pe else (.48 if rwx else .32)
+                confidence = .88 if embedded_pe else (.70 if rwx else .68)
+                severity = 90 if embedded_pe else (60 if rwx else 50)
                 evidence.append(sensor_evidence(
                     self.descriptor,
                     context,
@@ -1038,7 +1047,11 @@ class WindowsMemorySensor:
                     maliciousness=maliciousness,
                     confidence=confidence,
                     severity=severity,
-                    complete=not inspection.truncated,
+                    complete=(
+                        not inspection.truncated
+                        and inspection.query_errors == 0
+                        and inspection.read_errors == 0
+                    ),
                     correlation_group=f"memory-private-exec:{process.subject}",
                     attributes={
                         "pid": process.pid,
