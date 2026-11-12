@@ -259,6 +259,7 @@ class WindowsProcessProvider:
         if (
             self._cache is not None
             and now - self._cache_at <= self.cache_seconds
+            and not self._cache.truncated
             and len(self._cache.processes) <= max_items
         ):
             return self._cache
@@ -506,8 +507,11 @@ class WindowsPersistenceProvider:
         root = Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32/Tasks"
         try:
             iterator = root.rglob("*")
+            visited = 0
+            visit_limit = min(10_000, max(512, remaining * 8))
             for path in iterator:
-                if len(entries) >= remaining:
+                visited += 1
+                if visited > visit_limit or len(entries) >= remaining:
                     truncated = True
                     break
                 try:
