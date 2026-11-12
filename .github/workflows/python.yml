@@ -1,4 +1,4 @@
-name: AntiOS v2 tests
+name: AntiOS test suite
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: antios-v2-${{ github.workflow }}-${{ github.ref }}
+  group: antios-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
