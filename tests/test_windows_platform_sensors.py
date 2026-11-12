@@ -308,30 +308,46 @@ def test_native_imagehlp_matches_signtool_authenticode_sha256():
         pytest.skip("Windows SDK SignTool is unavailable on this runner")
     signtool = candidates[0]
 
-    target = Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32/notepad.exe"
-    if not target.is_file():
-        pytest.skip("signed Windows system PE is unavailable")
-
-    result = subprocess.run(
-        [str(signtool), "verify", "/pa", "/v", str(target)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=30,
+    windows = Path(os.environ.get("SystemRoot") or r"C:\Windows")
+    targets = (
+        Path(sys.executable),
+        windows / "System32/WindowsPowerShell/v1.0/powershell.exe",
+        windows / "System32/kernel32.dll",
+        windows / "System32/notepad.exe",
     )
-    if result.returncode not in {0, 2}:
-        pytest.skip("SignTool could not verify the system PE on this runner")
-    match = re.search(
-        r"Hash of file \(sha256\):\s*([A-Fa-f0-9]{64})",
-        result.stdout,
-        flags=re.IGNORECASE,
-    )
-    if match is None:
-        pytest.skip("SignTool did not expose a SHA-256 file digest")
+    expected = ""
+    target = None
+    diagnostics = []
+    for candidate in targets:
+        if not candidate.is_file():
+            continue
+        for mode in (("/pa",), ("/a",), ("/a", "/pa")):
+            result = subprocess.run(
+                [str(signtool), "verify", *mode, "/v", str(candidate)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+            match = re.search(
+                r"Hash of file \(sha256\):\s*([A-Fa-f0-9]{64})",
+                result.stdout,
+                flags=re.IGNORECASE,
+            )
+            diagnostics.append(
+                (str(candidate), mode, result.returncode, bool(match))
+            )
+            if match is not None:
+                expected = match.group(1).lower()
+                target = candidate
+                break
+        if expected:
+            break
 
-    expected = match.group(1).lower()
+    assert expected and target is not None, diagnostics
+
     levels = {}
     with target.open("rb") as stream:
         handle = msvcrt.get_osfhandle(stream.fileno())
@@ -342,6 +358,7 @@ def test_native_imagehlp_matches_signtool_authenticode_sha256():
             levels[level] = digest
 
     assert levels[0x06] == expected, {
+        "target": str(target),
         "signtool": expected,
         "imagehlp_levels": levels,
     }
