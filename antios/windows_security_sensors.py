@@ -568,7 +568,6 @@ $out | ConvertTo-Json -Compress
                     "-NoLogo",
                     "-NoProfile",
                     "-NonInteractive",
-                    "-ExecutionPolicy", "Bypass",
                     "-Command", script,
                 ],
                 stdin=subprocess.DEVNULL,
@@ -583,7 +582,7 @@ $out | ConvertTo-Json -Compress
             )
             if result.returncode != 0:
                 return [], [f"wmi:powershell-exit-{result.returncode}"], False
-            text = result.stdout.strip()
+            text = result.stdout.strip().lstrip("\ufeff")
             if not text:
                 return [], [], False
             parsed = json.loads(text)
