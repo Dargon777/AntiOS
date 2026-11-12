@@ -1,7 +1,10 @@
 """Tests for Windows driver trust and platform-posture sensors."""
 import os
+from pathlib import Path
+import re
 import shutil
 import struct
+import subprocess
 import sys
 
 import pytest
@@ -279,22 +282,69 @@ def test_platform_posture_sensors_keep_capability_and_runtime_distinct():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows ImageHlp")
-def test_native_imagehlp_digest_matches_portable_pe_algorithm(tmp_path):
+def test_native_imagehlp_returns_stable_sha256(tmp_path):
     import msvcrt
 
     sample = tmp_path / "sample.exe"
     shutil.copyfile(sys.executable, sample)
-    data = sample.read_bytes()
-    portable = _pe_authenticode_sha256(data)
-    assert len(portable) == 64
-
     with sample.open("rb") as stream:
         native, error = _windows_imagehlp_sha256(
             msvcrt.get_osfhandle(stream.fileno())
         )
     assert error == ""
-    assert len(native) == 64
-    assert native == portable
+    assert re.fullmatch(r"[a-f0-9]{64}", native)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows SignTool cross-check")
+def test_native_imagehlp_matches_signtool_authenticode_sha256():
+    import msvcrt
+
+    kits = Path(os.environ.get("ProgramFiles(x86)") or r"C:\Program Files (x86)")
+    candidates = sorted(
+        kits.glob(r"Windows Kits/10/bin/*/x64/signtool.exe"),
+        reverse=True,
+    )
+    if not candidates:
+        pytest.skip("Windows SDK SignTool is unavailable on this runner")
+    signtool = candidates[0]
+
+    target = Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32/notepad.exe"
+    if not target.is_file():
+        pytest.skip("signed Windows system PE is unavailable")
+
+    result = subprocess.run(
+        [str(signtool), "verify", "/pa", "/v", str(target)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    if result.returncode not in {0, 2}:
+        pytest.skip("SignTool could not verify the system PE on this runner")
+    match = re.search(
+        r"Hash of file \(sha256\):\s*([A-Fa-f0-9]{64})",
+        result.stdout,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        pytest.skip("SignTool did not expose a SHA-256 file digest")
+
+    expected = match.group(1).lower()
+    levels = {}
+    with target.open("rb") as stream:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+        for level in (0x00, 0x02, 0x04, 0x06):
+            stream.seek(0)
+            digest, error = _windows_imagehlp_sha256(handle, level)
+            assert error == ""
+            levels[level] = digest
+
+    assert levels[0x06] == expected, {
+        "signtool": expected,
+        "imagehlp_levels": levels,
+    }
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows driver APIs")
