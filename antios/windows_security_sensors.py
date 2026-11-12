@@ -746,7 +746,7 @@ class WindowsPersistenceSensor:
                 self.descriptor,
                 context,
                 subject=subject,
-                kind="behavior",
+                kind="persistence",
                 rule_id="persistence.inventory",
                 detail=f"{record.source}: {record.location} -> {record.command}"[:1000],
                 complete=True,
