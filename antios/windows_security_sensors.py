@@ -203,8 +203,8 @@ def _command_executable(command: str) -> str:
     else:
         token = value.split(None, 1)[0]
     system_root = os.environ.get("SystemRoot") or r"C:\Windows"
-    if token.lower().startswith(r"\systemroot\"):
-        token = ntpath.join(system_root, token[len(r"\systemroot\"):])
+    if token.lower().startswith("\\systemroot\\"):
+        token = ntpath.join(system_root, token[len("\\systemroot\\"):])
     return token.strip().strip('"')
 
 
