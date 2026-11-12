@@ -4,11 +4,16 @@ This file summarizes user-visible changes. Detailed commit history remains avail
 
 ## Unreleased
 
-- Added Windows process, persistence and bounded process-memory security sensors.
-- Added loaded-driver trust/BYOVD intelligence and boot, Secure Boot, TPM, VBS and DMA posture checks.
-- Connected deep-security evidence to the existing risk and incident pipeline without giving weak heuristics independent quarantine authority.
-- Simplified GitHub Actions into five purpose-driven workflows.
-- Refreshed public documentation and removed stale references to the legacy third-party scan-engine path.
+No changes recorded yet.
+
+## 3.0.3a1 — 2026-11-12
+
+- Expanded read-only Windows process inspection with bounded token integrity, loaded-module inventory and on-disk image signing metadata.
+- Improved process identity handling and persistence evidence correlation without treating partial telemetry as a clean result.
+- Added bounded process-memory, persistence, loaded-driver trust/BYOVD and platform security-posture evidence, with explicit coverage limits.
+- Connected the new evidence to risk/incident review; weak heuristic evidence does not independently authorize quarantine.
+- Simplified the CI workflow layout and refreshed public documentation.
+- Hardened unsigned prerelease provenance checks to require exact commit SHA, master ref, workflow identity and consistent archive metadata.
 
 ## 3.0.2a1 — 2026-11-12
 
