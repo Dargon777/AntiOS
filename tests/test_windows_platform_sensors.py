@@ -1,7 +1,6 @@
 """Tests for Windows driver trust and platform-posture sensors."""
 import json
 import os
-from pathlib import Path
 import shutil
 import struct
 import subprocess
@@ -121,6 +120,7 @@ def test_driver_sensor_exact_microsoft_deny_hash_is_high_confidence_review():
                 path=r"C:\Windows\System32\drivers\vulnerable.sys",
                 size=4096,
                 sha256=digest,
+                authenticode_sha256=digest,
                 signature_status="Valid",
                 signer_subject="CN=Example Vendor",
                 microsoft_blocked_hash=True,
@@ -156,6 +156,7 @@ def test_driver_sensor_valid_system_driver_is_neutral_inventory():
                 path=r"C:\Windows\System32\drivers\good.sys",
                 size=1024,
                 sha256="e" * 64,
+                authenticode_sha256="2" * 64,
                 signature_status="Valid",
                 signer_subject="CN=Microsoft Windows",
             ),
@@ -180,6 +181,7 @@ def test_driver_sensor_untrusted_user_writable_driver_is_strong_signal():
                 path=r"C:\Users\alice\AppData\Local\Temp\bad.sys",
                 size=2048,
                 sha256="f" * 64,
+                authenticode_sha256="3" * 64,
                 signature_status="NotSigned",
                 user_writable_path=True,
             ),
@@ -210,6 +212,7 @@ def test_driver_unknown_signature_status_does_not_equal_untrusted():
                 path=r"C:\Windows\System32\drivers\unknown.sys",
                 size=1024,
                 sha256="1" * 64,
+                authenticode_sha256="4" * 64,
                 signature_status="UnknownError",
             ),
         ),
@@ -291,6 +294,9 @@ def test_authenticode_sha256_matches_windows_configci(tmp_path):
     executable = system_executable(r"WindowsPowerShell\v1.0\powershell.exe")
     script = r"""
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$WarningPreference = 'SilentlyContinue'
+$InformationPreference = 'SilentlyContinue'
 if ($null -eq (Get-Command Get-SystemDriver -ErrorAction SilentlyContinue)) {
   [Console]::Out.Write('{"available":false}')
   exit 0
@@ -339,6 +345,20 @@ def test_native_driver_enumeration_does_not_modify_kernel_state():
     assert isinstance(loaded, list)
     assert isinstance(issues, list)
     assert isinstance(truncated, bool)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows driver trust APIs")
+def test_native_driver_trust_snapshot_is_bounded_and_read_only():
+    provider = WindowsDriverProvider(cache_seconds=0)
+    snapshot = provider.snapshot(ScanBudget(
+        max_items=8,
+        max_bytes=32 * 1024 * 1024,
+        max_seconds=15,
+        allow_privileged=True,
+    ))
+    assert len(snapshot.drivers) <= 8
+    assert snapshot.inspected_bytes <= 32 * 1024 * 1024
+    assert isinstance(snapshot.issues, tuple)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows platform APIs")
