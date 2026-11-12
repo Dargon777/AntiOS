@@ -394,4 +394,27 @@ DEFAULT_DETECTION_SIGNATURES = DetectionSignatureEngine((
         ),
         severity=90, maliciousness=.94, confidence=.88,
     ),
+    DetectionSignature(
+        "driver.microsoft-blocklist-loaded",
+        "Loaded kernel driver matches a Microsoft recommended deny hash",
+        "byovd",
+        (
+            SignalPattern(kinds=frozenset({"driver"}), constraints=(
+                _eq("microsoft_blocked_hash", True),
+            )),
+        ),
+        severity=95, maliciousness=.99, confidence=.98,
+    ),
+    DetectionSignature(
+        "driver.untrusted-user-writable",
+        "Untrusted loaded kernel driver originates from a user-writable path",
+        "kernel-driver-abuse",
+        (
+            SignalPattern(kinds=frozenset({"driver"}), constraints=(
+                _eq("user_writable_path", True),
+                _eq("signature_valid", False),
+            )),
+        ),
+        severity=92, maliciousness=.96, confidence=.90,
+    ),
 ))
