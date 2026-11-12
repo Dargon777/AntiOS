@@ -58,6 +58,7 @@ class DriverRecord:
     base_address: int = 0
     size: int = 0
     sha256: str = ""
+    authenticode_sha256: str = ""
     signature_status: str = ""
     signer_subject: str = ""
     signer_thumbprint: str = ""
@@ -216,17 +217,124 @@ def _extract_microsoft_driver_hashes(path: Path) -> tuple[frozenset[str], str]:
     return frozenset(values), ""
 
 
-def _hash_regular_file(path: Path, budget: BudgetGuard) -> tuple[str, int, str]:
+def _pe_authenticode_sha256(data: bytes) -> str:
+    """Return the SHA-256 Authenticode/PE image hash for a PE image.
+
+    Microsoft App Control hash rules use this PE image hash, not a flat file
+    digest. The checksum field, Certificate Table directory entry, certificate
+    data and bytes after the last declared section are excluded.
+    """
+
+    if len(data) < 0x100 or data[:2] != b"MZ":
+        return ""
+    try:
+        pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+        if pe_offset < 0x40 or pe_offset + 24 > len(data):
+            return ""
+        if data[pe_offset:pe_offset + 4] != b"PE\x00\x00":
+            return ""
+
+        coff = pe_offset + 4
+        section_count = struct.unpack_from("<H", data, coff + 2)[0]
+        optional_size = struct.unpack_from("<H", data, coff + 16)[0]
+        if not 0 < section_count <= 96 or optional_size < 96:
+            return ""
+
+        optional = coff + 20
+        optional_end = optional + optional_size
+        if optional_end > len(data):
+            return ""
+        magic = struct.unpack_from("<H", data, optional)[0]
+        if magic == 0x10B:
+            data_directories = optional + 96
+            number_rva_offset = optional + 92
+        elif magic == 0x20B:
+            data_directories = optional + 112
+            number_rva_offset = optional + 108
+        else:
+            return ""
+
+        checksum_offset = optional + 64
+        size_headers = struct.unpack_from("<I", data, optional + 60)[0]
+        directory_count = struct.unpack_from("<I", data, number_rva_offset)[0]
+        certificate_entry = data_directories + 8 * 4
+        if (
+            directory_count <= 4
+            or certificate_entry + 8 > optional_end
+            or checksum_offset + 4 > certificate_entry
+            or size_headers > len(data)
+            or size_headers < optional_end
+        ):
+            return ""
+
+        certificate_offset, certificate_size = struct.unpack_from(
+            "<II", data, certificate_entry
+        )
+        section_table = optional_end
+        section_table_end = section_table + section_count * 40
+        if section_table_end > len(data) or section_table_end > size_headers:
+            return ""
+
+        sections: list[tuple[int, int, int]] = []
+        for index in range(section_count):
+            offset = section_table + index * 40
+            virtual_address = struct.unpack_from("<I", data, offset + 12)[0]
+            raw_size = struct.unpack_from("<I", data, offset + 16)[0]
+            raw_offset = struct.unpack_from("<I", data, offset + 20)[0]
+            if not raw_size:
+                continue
+            end = raw_offset + raw_size
+            if raw_offset < size_headers or end > len(data) or end < raw_offset:
+                return ""
+            sections.append((virtual_address, raw_offset, raw_size))
+
+        # A normal PE certificate table is outside the mapped sections. Reject
+        # overlapping/malformed layouts rather than risk claiming an exact
+        # App Control match with a non-standard image.
+        if certificate_offset or certificate_size:
+            cert_end = certificate_offset + certificate_size
+            if (
+                not certificate_offset
+                or not certificate_size
+                or cert_end > len(data)
+                or cert_end < certificate_offset
+            ):
+                return ""
+            for _rva, raw_offset, raw_size in sections:
+                if max(raw_offset, certificate_offset) < min(
+                    raw_offset + raw_size, cert_end
+                ):
+                    return ""
+
+        digest = hashlib.sha256()
+        digest.update(data[:checksum_offset])
+        digest.update(data[checksum_offset + 4:certificate_entry])
+        digest.update(data[certificate_entry + 8:size_headers])
+
+        for _rva, raw_offset, raw_size in sorted(
+            sections, key=lambda item: item[0]
+        ):
+            digest.update(data[raw_offset:raw_offset + raw_size])
+        return digest.hexdigest()
+    except (struct.error, OverflowError):
+        return ""
+
+
+def _hash_driver_file(
+    path: Path, budget: BudgetGuard
+) -> tuple[str, str, int, str]:
+    """Hash one stable driver snapshot once for flat and PE-image digests."""
+
     try:
         before = path.stat()
         if not stat.S_ISREG(before.st_mode):
-            return "", 0, "not-regular"
+            return "", "", 0, "not-regular"
         size = int(before.st_size)
         if size < 0 or size > _MAX_DRIVER_IMAGE_BYTES:
-            return "", 0, "driver-image-size-limit"
+            return "", "", 0, "driver-image-size-limit"
         if not budget.can_take(items=1, byte_count=size):
-            return "", 0, "scan-budget"
-        digest = hashlib.sha256()
+            return "", "", 0, "scan-budget"
+
         flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         with os.fdopen(os.open(path, flags), "rb") as stream:
             opened = os.fstat(stream.fileno())
@@ -234,23 +342,26 @@ def _hash_regular_file(path: Path, budget: BudgetGuard) -> tuple[str, int, str]:
                 int(opened.st_size) != size
                 or int(opened.st_mtime_ns) != int(before.st_mtime_ns)
             ):
-                return "", 0, "changed-while-opening"
-            while True:
-                chunk = stream.read(256 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
+                return "", "", 0, "changed-while-opening"
+            data = stream.read(size + 1)
             after = os.fstat(stream.fileno())
+
         if (
-            int(after.st_size) != size
+            len(data) != size
+            or int(after.st_size) != size
             or int(after.st_mtime_ns) != int(before.st_mtime_ns)
         ):
-            return "", 0, "changed-while-reading"
-        budget.take(items=1, byte_count=size)
-        return digest.hexdigest(), size, ""
-    except (OSError, ValueError):
-        return "", 0, "driver-image-unreadable"
+            return "", "", 0, "changed-while-reading"
 
+        budget.take(items=1, byte_count=size)
+        return (
+            hashlib.sha256(data).hexdigest(),
+            _pe_authenticode_sha256(data),
+            size,
+            "",
+        )
+    except (OSError, ValueError, MemoryError):
+        return "", "", 0, "driver-image-unreadable"
 
 class WindowsDriverProvider:
     """Inventory loaded kernel images, hashes and Authenticode trust."""
@@ -477,7 +588,11 @@ $out | ConvertTo-Json -Compress
 
     def snapshot(self, budget: ScanBudget) -> DriverSnapshot:
         now = time.monotonic()
-        if self._cache is not None and now - self._cache_at <= self.cache_seconds:
+        if (
+            self._cache is not None
+            and not self._cache.truncated
+            and now - self._cache_at <= self.cache_seconds
+        ):
             return self._cache
 
         loaded, issues, truncated = self._enum_loaded()
@@ -508,17 +623,20 @@ $out | ConvertTo-Json -Compress
         writable_roots = _user_writable_roots()
 
         guard = BudgetGuard(budget)
-        hashed: list[tuple[int, str, str, str, int, str]] = []
+        hashed: list[tuple[int, str, str, str, str, int, str]] = []
         inspected_bytes = 0
         for base, name, path in list(merged.values())[:budget.max_items]:
             if guard.expired():
                 truncated = True
                 break
             digest = ""
+            auth_digest = ""
             size = 0
             error = ""
             if path and re.match(r"^[A-Za-z]:\\", path):
-                digest, size, error = _hash_regular_file(Path(path), guard)
+                digest, auth_digest, size, error = _hash_driver_file(
+                    Path(path), guard
+                )
                 inspected_bytes += size
                 if error:
                     issues.append(f"driver:{name or ntpath.basename(path)}:{error}")
@@ -526,16 +644,19 @@ $out | ConvertTo-Json -Compress
                         truncated = True
             else:
                 issues.append(f"driver:{name}:path-unresolved")
-            hashed.append((base, name, path, digest, size, error))
+            hashed.append(
+                (base, name, path, digest, auth_digest, size, error)
+            )
 
         trust, trust_issues = self._authenticode(tuple(
-            path for _base, _name, path, digest, _size, _error in hashed
+            path
+            for _base, _name, path, digest, _auth, _size, _error in hashed
             if path and digest
         ))
         issues.extend(trust_issues)
 
         records = []
-        for base, name, path, digest, size, _error in hashed:
+        for base, name, path, digest, auth_digest, size, _error in hashed:
             status, subject, thumbprint = trust.get(
                 _normalize_windows_path(path), ("", "", "")
             )
@@ -546,12 +667,13 @@ $out | ConvertTo-Json -Compress
                 base_address=base,
                 size=size,
                 sha256=digest,
+                authenticode_sha256=auth_digest,
                 signature_status=status,
                 signer_subject=subject,
                 signer_thumbprint=thumbprint,
                 managed_label=managed.get(digest, "") if digest else "",
                 microsoft_blocked_hash=bool(
-                    digest and digest in microsoft_hashes
+                    auth_digest and auth_digest in microsoft_hashes
                 ),
                 user_writable_path=_under(path, writable_roots),
             ))
@@ -814,7 +936,10 @@ class WindowsDriverSensor:
                 maliciousness=maliciousness,
                 confidence=confidence,
                 severity=severity,
-                complete=bool(driver.path and driver.sha256 and status),
+                complete=bool(
+                    driver.path and driver.sha256
+                    and driver.authenticode_sha256 and status
+                ),
                 correlation_group=(
                     f"driver-image:{driver.sha256}"
                     if driver.sha256
@@ -824,6 +949,7 @@ class WindowsDriverSensor:
                     "name": driver.name,
                     "path": driver.path,
                     "sha256": driver.sha256,
+                    "authenticode_sha256": driver.authenticode_sha256,
                     "size": driver.size,
                     "signature_status": driver.signature_status,
                     "signature_valid": signature_valid if status else None,
@@ -838,8 +964,9 @@ class WindowsDriverSensor:
             ))
 
         reasons = [
-            "baseline driver trust does not yet evaluate Microsoft certificate/"
-            "publisher deny rules or detect manually mapped kernel code"
+            "baseline driver trust evaluates exact full-file Authenticode "
+            "SHA-256 deny hashes but not Microsoft page-hash, certificate/"
+            "publisher deny rules or manually mapped kernel code"
         ]
         if not snapshot.microsoft_policy_available:
             reasons.append("Microsoft recommended driver hash policy unavailable")
@@ -859,7 +986,10 @@ class WindowsDriverSensor:
             reason="; ".join(reasons),
             inspected_items=len(snapshot.drivers),
             inspected_bytes=snapshot.inspected_bytes,
-            skipped_items=sum(not item.sha256 for item in snapshot.drivers),
+            skipped_items=sum(
+                not item.sha256 or not item.authenticode_sha256
+                for item in snapshot.drivers
+            ),
             error_items=len(snapshot.issues),
         )
 
