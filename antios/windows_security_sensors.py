@@ -15,7 +15,6 @@ Coverage is intentionally conservative:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import ntpath
 import os
 from pathlib import Path
 import re
@@ -75,14 +74,14 @@ _INTERPRETER_NAMES = (
     "regsvr32.exe",
 )
 _USER_WRITABLE_MARKERS = (
-    r"\appdata\",
-    r"\downloads\",
-    r"\temp\",
-    r"\users\public\",
-    r"%appdata%",
-    r"%localappdata%",
-    r"%temp%",
-    r"%tmp%",
+    "\\appdata\\",
+    "\\downloads\\",
+    "\\temp\\",
+    "\\users\\public\\",
+    "%appdata%",
+    "%localappdata%",
+    "%temp%",
+    "%tmp%",
 )
 _MAX_REGISTRY_TEXT = 16_384
 _MAX_TASK_BYTES = 1 * 1024 * 1024
