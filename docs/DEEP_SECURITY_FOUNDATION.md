@@ -55,12 +55,17 @@ validated.
 
 1. **Implemented baseline:** Process inventory + persistence inventory.
    - running process PID/PPID, stable creation identity and image path;
-   - Run/RunOnce, auto/boot/system services and drivers, Startup folders;
-   - scheduled-task command inventory;
+   - Run/RunOnce and Explorer policy Run keys;
+   - Winlogon Shell/Userinit, AppInit_DLLs and BootExecute;
+   - targeted IFEO Debugger and SilentProcessExit MonitorProcess hooks;
+   - auto/boot/system services and drivers, plus Startup folders;
+   - scheduled-task action inventory;
    - WMI command/script consumers through a bounded read-only CIM query;
    - per-user COM server overrides;
    - user-writable/interpreter-based entries are review evidence, never an
-     automatic remediation decision.
+     automatic remediation decision;
+   - persistence command arguments are used only transiently for classification
+     and are not persisted in Evidence or Guard journal records.
 2. **Implemented baseline:** Process-memory inspection.
    - bounded VirtualQueryEx enumeration;
    - private executable region detection;
