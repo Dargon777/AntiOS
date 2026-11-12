@@ -4,8 +4,8 @@ The tests use fake providers so the detection policy is portable and determinist
 Native Win32 API acceptance is covered by the Windows CI smoke tests.
 """
 from antios.detection_signatures import DEFAULT_DETECTION_SIGNATURES
-from antios.security_sensors import Coverage, ScanBudget, ScanContext
-from antios.windows_security_sensors import (
+from antios.guard import Guard, GuardPolicy
+from antios.security_sensors import (\n    Coverage, ScanBudget, ScanContext, SensorReport, sensor_evidence,\n)\nfrom antios.windows_security_sensors import (
     MEM_COMMIT,
     MEM_IMAGE,
     MEM_PRIVATE,
@@ -258,3 +258,77 @@ def test_process_and_memory_evidence_feed_existing_same_subject_signature():
     )
     assert fused.attributes["pid"] == 42
     assert fused.attributes["creation_time"] == 12345
+
+
+def test_guard_background_worker_fuses_deep_evidence_without_blocking(tmp_path):
+    descriptor = WindowsMemorySensor.descriptor
+
+    class Registry:
+        def collect_all(self, context):
+            item = sensor_evidence(
+                descriptor,
+                context,
+                subject="process:77:9001",
+                kind="memory",
+                rule_id="memory.private-executable-pe",
+                detail="fixture",
+                maliciousness=.82,
+                confidence=.88,
+                severity=90,
+                attributes={
+                    "pid": 77,
+                    "creation_time": 9001,
+                    "path": r"C:\Users\alice\AppData\Local\Temp\fixture.exe",
+                    "private_executable": True,
+                    "embedded_pe": True,
+                },
+            )
+            return (
+                SensorReport(
+                    descriptor,
+                    Coverage.COMPLETE,
+                    (item,),
+                    inspected_items=1,
+                    inspected_bytes=512,
+                ),
+            )
+
+    class Store:
+        def __init__(self):
+            self.events = []
+
+        def event(self, kind, payload):
+            self.events.append((kind, payload))
+
+    guard = Guard(
+        GuardPolicy((tmp_path,)),
+        state_dir=tmp_path / "state",
+        probe=lambda: {"available": True},
+        security_registry=Registry(),
+    )
+    started = guard._start_deep_security(
+        (descriptor.surface,),
+        ScanBudget(
+            max_items=10,
+            max_bytes=4096,
+            max_seconds=5,
+            allow_privileged=True,
+        ),
+    )
+    assert started
+    guard._deep_thread.join(timeout=5)
+    assert not guard._deep_thread.is_alive()
+
+    store = Store()
+    assert guard._drain_deep_security(store)
+    status = guard.status["deep_security"]
+    assert status["state"] == "attention"
+    assert status["evidence_count"] == 1
+    assert status["signature_count"] >= 1
+    latest = guard.incidents.status()["latest"]
+    assert latest is not None
+    assert any(
+        node["id"] == "process:77:9001"
+        for node in latest["nodes"]
+    )
+    assert any(kind == "deep-security-evidence" for kind, _ in store.events)
