@@ -399,6 +399,8 @@ class Guard:
                 }
                 for report in reports
             }
+            merged_reports = dict(state.get('reports') or {})
+            merged_reports.update(report_state)
             state.update(
                 state=(
                     'attention' if highest >= 40 else
@@ -408,7 +410,7 @@ class Guard:
                 highest_score=max(int(state.get('highest_score', 0)), highest),
                 evidence_count=len(raw),
                 signature_count=len(signatures),
-                reports=report_state,
+                reports=merged_reports,
                 detail='',
             )
 
