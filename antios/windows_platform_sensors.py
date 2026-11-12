@@ -239,7 +239,9 @@ def _extract_microsoft_driver_hashes(path: Path) -> tuple[frozenset[str], str]:
     return frozenset(values), ""
 
 
-def _windows_imagehlp_sha256(file_handle: int) -> tuple[str, str]:
+def _windows_imagehlp_sha256(
+    file_handle: int, digest_level: int = _IMAGEHLP_DIGEST_LEVEL
+) -> tuple[str, str]:
     """Hash Windows' canonical ImageHlp digest stream with SHA-256.
 
     ImageHlp is documented as single-threaded. Keep the call serialized even
@@ -282,7 +284,7 @@ def _windows_imagehlp_sha256(file_handle: int) -> tuple[str, str]:
             ctypes.set_last_error(0)
             ok = imagehlp.ImageGetDigestStream(
                 wintypes.HANDLE(file_handle),
-                _IMAGEHLP_DIGEST_LEVEL,
+                digest_level,
                 consume,
                 None,
             )
