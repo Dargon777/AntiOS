@@ -121,7 +121,7 @@ def test_incident_graph_does_not_join_reused_stable_pid():
 
     second = incidents.observe_process(
         ProcessEvent(
-            pid=55, ppid=10, image="powershell.exe",
+            pid=55, ppid=11, image="powershell.exe",
             path=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
             parent_image="WINWORD.EXE", creation_time=200,
         ),
@@ -140,7 +140,7 @@ def test_incident_graph_does_not_join_reused_stable_pid():
 def test_generic_evidence_can_raise_risk_but_never_auto_enforces():
     evidence = Evidence(
         source="memory", kind="memory", subject="pid:55",
-        maliciousness=.95, confidence=.95, severity=90,
+        maliciousness=.9, confidence=.9, severity=85,
         correlation_group="private-executable-memory",
     )
     context = evaluate_risk(r"C:\Data\unknown.exe", _scan(), evidence=[evidence], now=1)
