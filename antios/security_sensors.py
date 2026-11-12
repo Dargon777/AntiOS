@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 from threading import RLock
 from time import monotonic, time
 from typing import Mapping, Protocol
@@ -425,4 +426,34 @@ def default_registry(*, evidence_bus: EvidenceBus | None = None) -> SensorRegist
     registry = SensorRegistry(evidence_bus=evidence_bus)
     for descriptor in default_descriptors():
         registry.register(PlaceholderSensor(descriptor))
+    return registry
+
+
+
+def runtime_registry(*, evidence_bus: EvidenceBus | None = None) -> SensorRegistry:
+    """Return the platform runtime registry with implemented collectors enabled.
+
+    The planning/default registry intentionally stays all-placeholder for
+    architecture tests and documentation. Runtime construction replaces only
+    surfaces that have a real collector on the current platform.
+    """
+    registry = SensorRegistry(evidence_bus=evidence_bus)
+    platform_sensors: dict[Surface, Sensor] = {}
+
+    if os.name == "nt":
+        from .windows_security_sensors import (
+            WindowsPersistenceSensor,
+            WindowsProcessSensor,
+        )
+
+        platform_sensors = {
+            Surface.PROCESS: WindowsProcessSensor(),
+            Surface.PERSISTENCE: WindowsPersistenceSensor(),
+        }
+
+    for descriptor in default_descriptors():
+        registry.register(
+            platform_sensors.get(descriptor.surface)
+            or PlaceholderSensor(descriptor)
+        )
     return registry
