@@ -133,6 +133,7 @@ def test_persistence_sensor_inventories_normal_entry_without_calling_it_malware(
     item, = report.evidence
     assert item.attributes["persistence_entry"] is True
     assert item.attributes["user_writable_target"] is False
+    assert "command" not in item.attributes
     assert item.risk_score == 0
 
 
