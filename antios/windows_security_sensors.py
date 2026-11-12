@@ -201,7 +201,15 @@ def _command_executable(command: str) -> str:
         end = value.find('"', 1)
         token = value[1:end] if end > 1 else value.strip('"')
     else:
-        token = value.split(None, 1)[0]
+        lower = value.lower()
+        token = ""
+        for suffix in (".exe", ".com", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".dll", ".sys"):
+            index = lower.find(suffix)
+            if index >= 0:
+                token = value[:index + len(suffix)]
+                break
+        if not token:
+            token = value.split(None, 1)[0]
     system_root = os.environ.get("SystemRoot") or r"C:\Windows"
     if token.lower().startswith("\\systemroot\\"):
         token = ntpath.join(system_root, token[len("\\systemroot\\"):])
