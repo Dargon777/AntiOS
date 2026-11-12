@@ -107,7 +107,7 @@ def _verify(assets, *, fail=False, commit=COMMIT):
     return proc, commands
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="Bash required by release gate")
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Release gate executes on POSIX runners")
 def test_verified_unsigned_assets_match_exact_build_source(assets):
     proc, commands = _verify(assets)
     assert proc.returncode == 0, proc.stderr
@@ -122,7 +122,7 @@ def test_verified_unsigned_assets_match_exact_build_source(assets):
         assert command[command.index("--source-ref") + 1] == "refs/heads/master"
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="Bash required by release gate")
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Release gate executes on POSIX runners")
 @pytest.mark.parametrize("failure", ["commit", "linux_version", "signature"])
 def test_modified_metadata_is_rejected_before_verification(assets, failure):
     root, _, _ = assets
@@ -137,14 +137,14 @@ def test_modified_metadata_is_rejected_before_verification(assets, failure):
     assert commands == []
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="Bash required by release gate")
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Release gate executes on POSIX runners")
 def test_attestation_failure_aborts_before_other_verifications(assets):
     proc, commands = _verify(assets, fail=True)
     assert proc.returncode != 0
     assert len(commands) == 1
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="Bash required by release gate")
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Release gate executes on POSIX runners")
 def test_invalid_commit_rejected_before_attestation(assets):
     proc, commands = _verify(assets, commit="not-a-commit")
     assert proc.returncode != 0
