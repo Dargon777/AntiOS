@@ -28,8 +28,7 @@ from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
 from .risk import evaluate_risk
 from .scan_process import run_scan_process
-from .security_sensors import CoverageSummary, ScanBudget, ScanContext, Surface
-from .windows_process import hidden_process_kwargs
+from .security_sensors import (\n    CoverageSummary, ScanBudget, ScanContext, Surface, runtime_registry,\n)\nfrom .windows_process import hidden_process_kwargs
 
 
 # Files that commonly become an execution boundary should reach the scanner
@@ -218,9 +217,8 @@ class Guard:
         elif os.name == "nt":
             try:
                 if self._security_registry_factory is None:
-                    from .windows_security_sensors import build_windows_registry
                     self._security_registry_factory = (
-                        lambda: build_windows_registry(evidence_bus=self.evidence_bus)
+                        lambda: runtime_registry(evidence_bus=self.evidence_bus)
                     )
                 self.security_registry = self._security_registry_factory()
             except OSError as exc:
