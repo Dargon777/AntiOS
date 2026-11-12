@@ -513,6 +513,9 @@ class IncidentGraph:
                 "confirmed_threat": confirmed,
                 "behavior_score": context.get("behavior_score"),
                 "behavior_rules": context.get("behavior_rules", []),
+                "evidence_score": context.get("evidence_score", 0),
+                "evidence_sources": context.get("evidence_sources", []),
+                "evidence_rules": context.get("evidence_rules", []),
                 "origin": context.get("origin"),
                 "native_pre_execution": context.get("native_pre_execution"),
                 "automatic_enforcement_eligible":
