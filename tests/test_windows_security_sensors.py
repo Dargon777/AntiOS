@@ -3,10 +3,14 @@
 The tests use fake providers so the detection policy is portable and deterministic.
 Native Win32 API acceptance is covered by the Windows CI smoke tests.
 """
+import os
+
+import pytest
+
 from antios.detection_signatures import DEFAULT_DETECTION_SIGNATURES
 from antios.guard import Guard, GuardPolicy
 from antios.security_sensors import (
-    Coverage, ScanBudget, ScanContext, SensorReport, sensor_evidence,
+    BudgetGuard, Coverage, ScanBudget, ScanContext, SensorReport, sensor_evidence,
 )
 from antios.windows_security_sensors import (
     MEM_COMMIT,
@@ -359,7 +363,7 @@ def test_native_windows_memory_provider_can_query_current_process_read_only():
     provider = WindowsMemoryProvider(header_bytes=512)
     inspection = provider.inspect(
         current,
-        __import__("antios.security_sensors", fromlist=["BudgetGuard"]).BudgetGuard(
+        BudgetGuard(
             ScanBudget(
                 max_items=20_000,
                 max_bytes=2 * 1024 * 1024,
