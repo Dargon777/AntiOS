@@ -94,7 +94,8 @@ def test_process_sensor_marks_user_writable_execution_and_stable_identity():
         user_writable_roots=(r"C:\Users\alice\AppData\Local\Temp",),
     )
     report = sensor.collect(ScanContext(run_id="process-test"))
-    assert report.coverage is Coverage.COMPLETE
+    assert report.coverage is Coverage.PARTIAL
+    assert "signer" in report.reason
     item, = report.evidence
     assert item.subject == "process:42:12345"
     assert item.attributes["pid"] == 42
@@ -202,7 +203,8 @@ def test_memory_sensor_ignores_mapped_executable_image_region():
     report = sensor.collect(
         ScanContext(budget=ScanBudget(allow_privileged=True))
     )
-    assert report.coverage is Coverage.COMPLETE
+    assert report.coverage is Coverage.PARTIAL
+    assert "thread start" in report.reason
     assert not report.evidence
 
 
@@ -228,7 +230,8 @@ def test_memory_sensor_emits_private_executable_pe_evidence_without_raw_bytes():
                               max_seconds=10, allow_privileged=True),
         )
     )
-    assert report.coverage is Coverage.COMPLETE
+    assert report.coverage is Coverage.PARTIAL
+    assert "image-vs-disk" in report.reason
     item, = report.evidence
     assert item.subject == "process:42:12345"
     assert item.attributes["private_executable"] is True
