@@ -29,6 +29,7 @@ from .security_sensors import (
     CapabilityState,
     Coverage,
     Privilege,
+    ScanBudget,
     ScanContext,
     SensorDescriptor,
     SensorReport,
@@ -77,7 +78,7 @@ class DriverSnapshot:
 
 
 class DriverProvider(Protocol):
-    def snapshot(self, budget: BudgetGuard) -> DriverSnapshot: ...
+    def snapshot(self, budget: ScanBudget) -> DriverSnapshot: ...
 
 
 @dataclass(frozen=True)
@@ -474,7 +475,7 @@ $out | ConvertTo-Json -Compress
         except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
             return {}, ["authenticode-unavailable"]
 
-    def snapshot(self, budget: BudgetGuard) -> DriverSnapshot:
+    def snapshot(self, budget: ScanBudget) -> DriverSnapshot:
         now = time.monotonic()
         if self._cache is not None and now - self._cache_at <= self.cache_seconds:
             return self._cache
@@ -506,17 +507,18 @@ $out | ConvertTo-Json -Compress
         managed, _catalog = load_managed_signatures()
         writable_roots = _user_writable_roots()
 
+        guard = BudgetGuard(budget)
         hashed: list[tuple[int, str, str, str, int, str]] = []
         inspected_bytes = 0
-        for base, name, path in list(merged.values())[:budget._budget.max_items]:
-            if budget.expired():
+        for base, name, path in list(merged.values())[:budget.max_items]:
+            if guard.expired():
                 truncated = True
                 break
             digest = ""
             size = 0
             error = ""
             if path and re.match(r"^[A-Za-z]:\\", path):
-                digest, size, error = _hash_regular_file(Path(path), budget)
+                digest, size, error = _hash_regular_file(Path(path), guard)
                 inspected_bytes += size
                 if error:
                     issues.append(f"driver:{name or ntpath.basename(path)}:{error}")
@@ -558,7 +560,7 @@ $out | ConvertTo-Json -Compress
             tuple(records),
             tuple(dict.fromkeys(issues))[:256],
             inspected_bytes=inspected_bytes,
-            truncated=truncated or len(merged) > budget._budget.max_items,
+            truncated=truncated or len(merged) > budget.max_items,
             microsoft_hash_rules=len(microsoft_hashes),
             microsoft_policy_available=bool(microsoft_hashes),
             blocklist_toggle=blocklist_toggle,
@@ -758,13 +760,20 @@ class WindowsDriverSensor:
         self.provider = provider
 
     def collect(self, context: ScanContext) -> SensorReport:
-        snapshot = self.provider.snapshot(BudgetGuard(context.budget))
+        snapshot = self.provider.snapshot(context.budget)
         evidence = []
         trust_unknown = 0
         for driver in snapshot.drivers:
             status = driver.signature_status.lower()
             signature_valid = status == "valid"
-            trust_unknown += int(not status)
+            explicit_untrusted = status in {
+                "notsigned", "hashmismatch", "nottrusted",
+            }
+            trust_unknown += int(
+                not status or status in {
+                    "error", "unknownerror", "notsupported",
+                }
+            )
             exact_block = driver.microsoft_blocked_hash
             known_malware = bool(driver.managed_label)
 
@@ -782,11 +791,11 @@ class WindowsDriverSensor:
                 maliciousness, confidence, severity = .98, .99, 95
                 rule = "driver.managed-malware-hash"
                 detail = "Loaded driver matches authenticated AntiOS malware hash"
-            elif driver.user_writable_path and status and not signature_valid:
+            elif driver.user_writable_path and explicit_untrusted:
                 maliciousness, confidence, severity = .94, .90, 92
                 rule = "driver.untrusted-user-writable"
                 detail = "Untrusted loaded driver originates from a user-writable path"
-            elif status and not signature_valid:
+            elif explicit_untrusted:
                 maliciousness, confidence, severity = .72, .82, 75
                 rule = "driver.untrusted"
                 detail = "Loaded kernel driver did not validate as Authenticode trusted"
