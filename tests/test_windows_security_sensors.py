@@ -5,7 +5,10 @@ Native Win32 API acceptance is covered by the Windows CI smoke tests.
 """
 from antios.detection_signatures import DEFAULT_DETECTION_SIGNATURES
 from antios.guard import Guard, GuardPolicy
-from antios.security_sensors import (\n    Coverage, ScanBudget, ScanContext, SensorReport, sensor_evidence,\n)\nfrom antios.windows_security_sensors import (
+from antios.security_sensors import (
+    Coverage, ScanBudget, ScanContext, SensorReport, sensor_evidence,
+)
+from antios.windows_security_sensors import (
     MEM_COMMIT,
     MEM_IMAGE,
     MEM_PRIVATE,
