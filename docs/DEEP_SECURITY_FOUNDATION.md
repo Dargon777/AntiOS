@@ -80,10 +80,10 @@ validated.
      supplement/fallback;
    - stable flat SHA-256 for the authenticated AntiOS malware catalog;
    - Authenticode trust status and signer metadata;
-   - native Windows ImageGetDigestStream + SHA-256 for exact full-hash
+   - Microsoft-documented Authenticode PE-image SHA-256 for exact full-hash
      comparison against the local Microsoft Recommended Driver Blocklist XML;
-   - the portable PE parser is retained for deterministic contract tests, not
-     as the Windows trust authority;
+   - Windows CI cross-checks the AntiOS PE-image hash directly against
+     SignTool's `Hash of file (sha256)` output;
    - VulnerableDriverBlocklistEnable is recorded as posture only because its
      absence does not prove the effective blocklist is disabled;
    - exact Microsoft full-hash matches, known-malware hashes and untrusted
