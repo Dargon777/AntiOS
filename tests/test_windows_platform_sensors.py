@@ -1,9 +1,7 @@
 """Tests for Windows driver trust and platform-posture sensors."""
-import json
 import os
 import shutil
 import struct
-import subprocess
 import sys
 
 import pytest
@@ -23,11 +21,7 @@ from antios.windows_platform_sensors import (
     WindowsUefiSensor,
     _extract_microsoft_driver_hashes,
     _pe_authenticode_sha256,
-)
-from antios.windows_process import (
-    hidden_process_kwargs,
-    system_executable,
-    windows_powershell_env,
+    _windows_imagehlp_sha256,
 )
 
 
@@ -284,61 +278,23 @@ def test_platform_posture_sensors_keep_capability_and_runtime_distinct():
     assert "remote attestation" in attestation.reason
 
 
-@pytest.mark.skipif(
-    os.name != "nt" or sys.version_info[:2] != (3, 12),
-    reason="single Windows ConfigCI cross-check matrix",
-)
-def test_authenticode_sha256_matches_windows_configci(tmp_path):
+@pytest.mark.skipif(os.name != "nt", reason="native Windows ImageHlp")
+def test_native_imagehlp_digest_matches_portable_pe_algorithm(tmp_path):
+    import msvcrt
+
     sample = tmp_path / "sample.exe"
     shutil.copyfile(sys.executable, sample)
-    expected = _pe_authenticode_sha256(sample.read_bytes())
-    assert len(expected) == 64
+    data = sample.read_bytes()
+    portable = _pe_authenticode_sha256(data)
+    assert len(portable) == 64
 
-    executable = system_executable(r"WindowsPowerShell\v1.0\powershell.exe")
-    script = r"""
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-$WarningPreference = 'SilentlyContinue'
-$InformationPreference = 'SilentlyContinue'
-if ($null -eq (Get-Command Get-SystemDriver -ErrorAction SilentlyContinue)) {
-  [Console]::Out.Write('{"available":false}')
-  exit 0
-}
-$root = [Console]::In.ReadToEnd()
-$files = @(Get-SystemDriver -ScanPath $root -UserPEs -NoScript -NoShadowCopy)
-$match = $files | Where-Object {
-  [System.IO.Path]::GetFileName([string]$_.FriendlyName) -eq 'sample.exe'
-} | Select-Object -First 1
-if ($null -eq $match) {
-  [Console]::Out.Write('{"available":true,"hash":""}')
-} else {
-  [Console]::Out.Write(([pscustomobject]@{
-    available=$true
-    hash=[string]$match.Hash256
-  } | ConvertTo-Json -Compress))
-}
-"""
-    result = subprocess.run(
-        [
-            executable, "-NoLogo", "-NoProfile", "-NonInteractive",
-            "-Command", script,
-        ],
-        input=str(tmp_path),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=90,
-        env=windows_powershell_env(executable),
-        **hidden_process_kwargs(),
-    )
-    assert result.returncode == 0, result.stderr[-1000:]
-    payload = json.loads(result.stdout.strip().lstrip("\ufeff"))
-    if payload.get("available") is not True:
-        pytest.skip("ConfigCI Get-SystemDriver is unavailable on this runner")
-    assert payload.get("hash")
-    assert str(payload["hash"]).lower() == expected
+    with sample.open("rb") as stream:
+        native, error = _windows_imagehlp_sha256(
+            msvcrt.get_osfhandle(stream.fileno())
+        )
+    assert error == ""
+    assert len(native) == 64
+    assert native == portable
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows driver APIs")
