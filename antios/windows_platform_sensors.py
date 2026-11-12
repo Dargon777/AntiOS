@@ -20,7 +20,6 @@ import stat
 import struct
 import subprocess
 import time
-from threading import RLock
 from typing import Iterable, Protocol
 import xml.etree.ElementTree as ET
 
@@ -50,12 +49,6 @@ _MAX_LOADED_DRIVERS = 4096
 _MICROSOFT_BLOCKLIST_RELATIVE = (
     r"schemas\CodeIntegrity\ExamplePolicies\RecommendedDriverBlock_Enforced.xml"
 )
-_CERT_PE_IMAGE_DIGEST_RESOURCES = 0x02
-_CERT_PE_IMAGE_DIGEST_ALL_IMPORT_INFO = 0x04
-_IMAGEHLP_DIGEST_LEVEL = (
-    _CERT_PE_IMAGE_DIGEST_RESOURCES | _CERT_PE_IMAGE_DIGEST_ALL_IMPORT_INFO
-)
-_IMAGEHLP_LOCK = RLock()
 
 
 @dataclass(frozen=True)
@@ -239,67 +232,6 @@ def _extract_microsoft_driver_hashes(path: Path) -> tuple[frozenset[str], str]:
     return frozenset(values), ""
 
 
-def _windows_imagehlp_sha256(
-    file_handle: int, digest_level: int = _IMAGEHLP_DIGEST_LEVEL
-) -> tuple[str, str]:
-    """Hash Windows' canonical ImageHlp digest stream with SHA-256.
-
-    ImageHlp is documented as single-threaded. Keep the call serialized even
-    though Guard currently uses one deep-security worker, so future callers
-    cannot corrupt ImageHlp state accidentally.
-    """
-
-    if os.name != "nt":
-        return "", "imagehlp-unsupported"
-    try:
-        imagehlp = ctypes.WinDLL("imagehlp", use_last_error=True)
-        callback_type = ctypes.WINFUNCTYPE(
-            wintypes.BOOL,
-            ctypes.c_void_p,
-            ctypes.POINTER(ctypes.c_ubyte),
-            wintypes.DWORD,
-        )
-        imagehlp.ImageGetDigestStream.argtypes = (
-            wintypes.HANDLE,
-            wintypes.DWORD,
-            callback_type,
-            ctypes.c_void_p,
-        )
-        imagehlp.ImageGetDigestStream.restype = wintypes.BOOL
-
-        digest = hashlib.sha256()
-        callback_error: list[str] = []
-
-        @callback_type
-        def consume(_reference, data, length):
-            try:
-                if length:
-                    digest.update(ctypes.string_at(data, int(length)))
-                return True
-            except Exception:
-                callback_error.append("digest-callback-failed")
-                return False
-
-        with _IMAGEHLP_LOCK:
-            ctypes.set_last_error(0)
-            ok = imagehlp.ImageGetDigestStream(
-                wintypes.HANDLE(file_handle),
-                digest_level,
-                consume,
-                None,
-            )
-            error = ctypes.get_last_error()
-        if not ok or callback_error:
-            return "", (
-                callback_error[0]
-                if callback_error
-                else f"imagegetdigeststream-failed-{error}"
-            )
-        return digest.hexdigest(), ""
-    except (AttributeError, OSError, ValueError):
-        return "", "imagehlp-unavailable"
-
-
 def _pe_authenticode_sha256(data: bytes) -> str:
     """Return the SHA-256 Authenticode/PE image hash for a PE image.
 
@@ -430,18 +362,8 @@ def _hash_driver_file(
             if len(data) != size:
                 return "", "", 0, "changed-while-reading"
 
-            if os.name == "nt":
-                import msvcrt
-
-                stream.seek(0)
-                auth_digest, auth_error = _windows_imagehlp_sha256(
-                    msvcrt.get_osfhandle(stream.fileno())
-                )
-            else:
-                # Portable parser is retained for deterministic cross-platform
-                # tests. Production Windows BYOVD matching uses ImageHlp.
-                auth_digest = _pe_authenticode_sha256(data)
-                auth_error = "" if auth_digest else "pe-image-hash-invalid"
+            auth_digest = _pe_authenticode_sha256(data)
+            auth_error = "" if auth_digest else "pe-image-hash-invalid"
 
             after = os.fstat(stream.fileno())
 
@@ -1060,9 +982,9 @@ class WindowsDriverSensor:
             ))
 
         reasons = [
-            "baseline driver trust uses Windows ImageGetDigestStream for exact "
-            "full-file Authenticode SHA-256 deny hashes but not Microsoft "
-            "page-hash, certificate/"
+            "baseline driver trust implements the Microsoft-documented "
+            "Authenticode PE-image SHA-256 algorithm for exact full-file deny "
+            "hashes but not Microsoft page-hash, certificate/"
             "publisher deny rules or manually mapped kernel code"
         ]
         if not snapshot.microsoft_policy_available:
