@@ -20,6 +20,7 @@ class EvidenceKind(StrEnum):
     PROCESS = "process"
     MEMORY = "memory"
     BEHAVIOR = "behavior"
+    PERSISTENCE = "persistence"
     NETWORK = "network"
     GPU = "gpu"
     MODEL = "model"
