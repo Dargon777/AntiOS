@@ -138,6 +138,26 @@ class DetectionSignatureEngine:
                 continue
             subjects = [item.subject for item in matched if item.subject]
             subject = subjects[0] if subjects else rule.family
+            attributes = {
+                "rule_id": rule.rule_id,
+                "family": rule.family,
+                "label": rule.label,
+                "matched_sources": [item.source for item in matched],
+                "matched_kinds": [item.kind for item in matched],
+            }
+            # Preserve stable process/file anchors when every contributing
+            # signal agrees. This lets IncidentGraph attach a fused signature
+            # to the same subject instead of creating a detached incident.
+            for key in ("pid", "creation_time", "path"):
+                values = [
+                    item.attributes.get(key)
+                    for item in matched
+                    if key in item.attributes
+                ]
+                if len(values) == len(matched) and values and all(
+                    value == values[0] for value in values
+                ):
+                    attributes[key] = values[0]
             findings.append(Evidence(
                 source=f"signature:{rule.rule_id}",
                 kind="behavior",
@@ -149,13 +169,7 @@ class DetectionSignatureEngine:
                 correlation_group=f"signature-family:{rule.family}",
                 detail=rule.label,
                 at=max((item.at for item in matched), default=0.0),
-                attributes={
-                    "rule_id": rule.rule_id,
-                    "family": rule.family,
-                    "label": rule.label,
-                    "matched_sources": [item.source for item in matched],
-                    "matched_kinds": [item.kind for item in matched],
-                },
+                attributes=attributes,
             ))
         return tuple(findings)
 
