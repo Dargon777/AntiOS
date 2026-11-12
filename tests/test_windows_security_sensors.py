@@ -10,7 +10,8 @@ import pytest
 from antios.detection_signatures import DEFAULT_DETECTION_SIGNATURES
 from antios.guard import Guard, GuardPolicy
 from antios.security_sensors import (
-    BudgetGuard, Coverage, ScanBudget, ScanContext, SensorReport, sensor_evidence,
+    BudgetGuard, Coverage, ScanBudget, ScanContext, SensorReport, Surface,
+    runtime_registry, sensor_evidence,
 )
 from antios.windows_security_sensors import (
     MEM_COMMIT,
@@ -288,6 +289,33 @@ def test_process_and_memory_evidence_feed_existing_same_subject_signature():
     )
     assert fused.attributes["pid"] == 42
     assert fused.attributes["creation_time"] == 12345
+
+
+def test_runtime_registry_keeps_one_sensor_per_planned_surface():
+    registry = runtime_registry()
+    descriptors = registry.descriptors()
+    assert len(descriptors) == len(Surface)
+    assert {item.surface for item in descriptors} == set(Surface)
+
+
+def test_targeted_persistence_hook_is_review_evidence_but_not_auto_enforcement():
+    sensor = WindowsPersistenceSensor(
+        FakePersistence([
+            PersistenceEntry(
+                "ifeo-debugger",
+                r"HKLM\Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\target.exe",
+                "Debugger",
+                r'"C:\Windows\System32\vsjitdebugger.exe"',
+                scope="machine",
+                target=r"C:\Windows\System32\vsjitdebugger.exe",
+            )
+        ]),
+        user_writable_roots=(r"C:\Users\alice",),
+    )
+    report = sensor.collect(ScanContext())
+    item, = report.evidence
+    assert item.kind == "persistence"
+    assert 0 < item.risk_score < 40
 
 
 def test_guard_background_worker_fuses_deep_evidence_without_blocking(tmp_path):
