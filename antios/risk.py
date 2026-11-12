@@ -108,9 +108,10 @@ def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[d
                   native_pre_execution: bool | None = None,
                   now: float | None = None) -> RiskContext:
     verdict, complete, confirmed, review = _scanner_summary(scan_result)
-    behavior_score, behavior_rules = _behavior_summary(behavior_findings)
+    behavior_items = tuple(behavior_findings)
+    behavior_score, behavior_rules = _behavior_summary(behavior_items)
     raw_evidence = tuple(evidence)
-    behavior_evidence = behavior_findings_to_evidence(behavior_findings)
+    behavior_evidence = behavior_findings_to_evidence(behavior_items)
     signature_evidence = DEFAULT_DETECTION_SIGNATURES.evaluate(
         (*raw_evidence, *behavior_evidence)
     )
