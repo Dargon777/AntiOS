@@ -20,8 +20,11 @@ from antios.windows_security_sensors import (
     PersistenceSnapshot,
     ProcessRecord,
     ProcessSnapshot,
+    WindowsMemoryProvider,
     WindowsMemorySensor,
+    WindowsPersistenceProvider,
     WindowsPersistenceSensor,
+    WindowsProcessProvider,
     WindowsProcessSensor,
     _command_executable,
     _looks_like_pe,
@@ -335,3 +338,44 @@ def test_guard_background_worker_fuses_deep_evidence_without_blocking(tmp_path):
         for node in latest["nodes"]
     )
     assert any(kind == "deep-security-evidence" for kind, _ in store.events)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows process APIs")
+def test_native_windows_process_provider_observes_current_process():
+    provider = WindowsProcessProvider(cache_seconds=0)
+    snapshot = provider.snapshot(10_000)
+    current = next(item for item in snapshot.processes if item.pid == os.getpid())
+    assert current.path
+    assert current.creation_time > 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows memory APIs")
+def test_native_windows_memory_provider_can_query_current_process_read_only():
+    processes = WindowsProcessProvider(cache_seconds=0)
+    current = next(
+        item for item in processes.snapshot(10_000).processes
+        if item.pid == os.getpid()
+    )
+    provider = WindowsMemoryProvider(header_bytes=512)
+    inspection = provider.inspect(
+        current,
+        __import__("antios.security_sensors", fromlist=["BudgetGuard"]).BudgetGuard(
+            ScanBudget(
+                max_items=20_000,
+                max_bytes=2 * 1024 * 1024,
+                max_seconds=3,
+                allow_privileged=True,
+            )
+        ),
+    )
+    assert not inspection.access_denied
+    assert inspection.regions
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows registry APIs")
+def test_native_windows_persistence_registry_inventory_is_bounded():
+    provider = WindowsPersistenceProvider()
+    entries, issues, truncated = provider._registry_entries(256)
+    assert len(entries) <= 256
+    assert isinstance(issues, list)
+    assert isinstance(truncated, bool)
