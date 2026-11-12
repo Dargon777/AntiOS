@@ -12,7 +12,7 @@ import ntpath
 import time
 from typing import Iterable
 
-from .detection_signatures import DEFAULT_DETECTION_SIGNATURES
+from .detection_signatures import DEFAULT_DETECTION_SIGNATURES, behavior_findings_to_evidence
 from .evidence import Evidence, summarize_evidence
 
 
@@ -110,7 +110,10 @@ def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[d
     verdict, complete, confirmed, review = _scanner_summary(scan_result)
     behavior_score, behavior_rules = _behavior_summary(behavior_findings)
     raw_evidence = tuple(evidence)
-    signature_evidence = DEFAULT_DETECTION_SIGNATURES.evaluate(raw_evidence)
+    behavior_evidence = behavior_findings_to_evidence(behavior_findings)
+    signature_evidence = DEFAULT_DETECTION_SIGNATURES.evaluate(
+        (*raw_evidence, *behavior_evidence)
+    )
     evidence_score, evidence_sources = summarize_evidence((*raw_evidence, *signature_evidence))
     evidence_rules = tuple(
         str(item.attributes.get("rule_id"))
