@@ -176,6 +176,20 @@ def _under(path: str, roots: Iterable[str]) -> bool:
     return False
 
 
+def _code_integrity_policy_present() -> bool:
+    root = _windows_root() / "System32/CodeIntegrity"
+    try:
+        if (root / "SiPolicy.p7b").is_file():
+            return True
+        active = root / "CiPolicies/Active"
+        return active.is_dir() and any(
+            item.is_file() and item.suffix.lower() == ".cip"
+            for item in active.iterdir()
+        )
+    except OSError:
+        return False
+
+
 def _bool_registry(path: str, name: str) -> bool | None:
     if os.name != "nt":
         return None
@@ -857,9 +871,7 @@ $result | ConvertTo-Json -Compress -Depth 6
                 r"SYSTEM\CurrentControlSet\Control\CI\Config",
                 "VulnerableDriverBlocklistEnable",
             ),
-            code_integrity_policy_present=(
-                _windows_root() / "System32/CodeIntegrity/SiPolicy.p7b"
-            ).is_file(),
+            code_integrity_policy_present=_code_integrity_policy_present(),
             issues=tuple(dict.fromkeys(issues))[:64],
         )
         self._cache = result
