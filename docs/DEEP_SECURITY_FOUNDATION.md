@@ -26,6 +26,25 @@ incident correlation. The sensor layer does not create a second verdict engine.
 
 This table describes planned coverage, not implemented detection claims.
 
+## Current implementation status
+
+Stage 1 now has read-only Windows collectors:
+
+- **Process:** Toolhelp32 process enumeration plus executable path and process
+  creation FILETIME where accessible. Each process is emitted with a stable
+  PID+creation-time identity into the shared EvidenceBus. Command line, signer,
+  integrity level and loaded-module integrity are deliberately still reported
+  as missing coverage.
+- **Persistence:** Run/RunOnce/policy autoruns, Startup folders, automatic
+  Win32 services, scheduled-task definitions, Winlogon/AppInit/BootExecute and
+  targeted IFEO/SilentProcessExit hooks. WMI permanent event subscriptions and
+  broad COM-hijack inspection are not yet implemented, so the sensor reports
+  PARTIAL coverage instead of a false clean result.
+
+Both collectors are inventory/correlation sensors only. They never modify
+processes, services, registry values, Startup entries or scheduled tasks.
+
+
 ## Contracts
 
 Every collector has a versioned `SensorDescriptor` and returns a
@@ -51,7 +70,7 @@ validated.
 
 ## Implementation order
 
-1. Process + persistence inventory.
+1. Process + persistence inventory. **Baseline implemented on Windows.**
 2. Process-memory inspection with explicit access/coverage reporting.
 3. Driver trust and vulnerable-driver intelligence.
 4. Boot, Secure Boot, TPM/measured-boot and DMA posture.
