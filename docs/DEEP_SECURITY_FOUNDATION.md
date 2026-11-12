@@ -1,9 +1,8 @@
 # Deep-security sensor foundation
 
-AntiOS treats deep inspection as a set of independent sensors feeding one
-correlation pipeline. The foundation is intentionally separate from OS-specific
-collectors so unsupported or privileged checks cannot silently turn into a
-"clean" result.
+AntiOS treats deep inspection as a set of independent collectors feeding the
+same shared `Evidence` / `EvidenceBus` pipeline used by detection, risk and
+incident correlation. The sensor layer does not create a second verdict engine.
 
 ## Planned surfaces
 
@@ -35,22 +34,20 @@ unsupported, permission-denied, error and not-implemented states. Any state
 other than complete requires an explicit reason.
 
 `ScanBudget` provides hard item, byte, time and depth limits. Privileged
-collection is disabled unless the caller explicitly enables it. A collector
-that fails is isolated; the registry reports a sanitized failure instead of
-propagating implementation details.
+collection is disabled unless the caller explicitly enables it. Collector
+failures are isolated and surfaced as sanitized coverage errors.
 
-Observations carry a surface, evidence kind, severity and confidence. Heuristic,
-behavioral, configuration and telemetry observations cannot mark themselves as
-eligible for automatic remediation. Exact authenticated matches and explicit
-integrity failures are the only evidence classes that may request that flag;
-the final policy engine must still decide whether action is allowed.
+Collectors emit the project's shared `Evidence` objects. The helper
+`sensor_evidence()` stamps surface, sensor version, rule ID and scan run ID so
+later signature/risk/incident stages can correlate observations without losing
+provenance. A `SensorRegistry` can publish successful reports directly into
+the existing bounded `EvidenceBus`.
 
-## Integration target
-
-The sensor layer should publish observations into the existing evidence and
-incident-correlation pipeline rather than create independent verdict engines.
-A future adapter can map `Observation` into the project's EvidenceBus without
-making the sensor package depend on internal bus implementation details.
+Generic sensor evidence never becomes an independent enforcement path. Current
+AntiOS policy continues to reserve automatic enforcement for confirmed scanner
+threats; behavioral, firmware, GPU, memory and other sensor signals remain
+review/correlation input unless a future policy is explicitly designed and
+validated.
 
 ## Implementation order
 
