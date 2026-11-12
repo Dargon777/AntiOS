@@ -1,15 +1,13 @@
-"""Safety and contract tests for the AntiOS deep-security foundation."""
+"""Safety and integration tests for the AntiOS deep-security sensor layer."""
 import pytest
 
+from antios.evidence import Evidence, EvidenceBus
 from antios.security_sensors import (
     Acquisition,
     BudgetGuard,
     CapabilityState,
     Coverage,
     CoverageSummary,
-    EvidenceKind,
-    Observation,
-    ObservationBuffer,
     PlaceholderSensor,
     Privilege,
     ScanBudget,
@@ -17,10 +15,10 @@ from antios.security_sensors import (
     SensorDescriptor,
     SensorRegistry,
     SensorReport,
-    Severity,
     Surface,
     default_descriptors,
     default_registry,
+    sensor_evidence,
 )
 
 
@@ -49,10 +47,10 @@ def test_default_registry_never_claims_a_clean_scan():
     )
     assert {r.descriptor.surface for r in reports} == set(Surface)
     assert all(r.coverage is Coverage.NOT_IMPLEMENTED for r in reports)
-    assert all(r.reason and not r.observations for r in reports)
+    assert all(r.reason and not r.evidence for r in reports)
 
 
-def test_privileged_sensors_are_denied_by_default_before_collection():
+def test_privileged_sensors_are_denied_before_collection_by_default():
     class MustNotRun:
         descriptor = _descriptor("admin", Surface.RAM, Privilege.ADMIN)
 
@@ -66,8 +64,7 @@ def test_privileged_sensors_are_denied_by_default_before_collection():
 
 
 def test_requested_surface_filtering():
-    registry = default_registry()
-    reports = registry.collect_all(
+    reports = default_registry().collect_all(
         ScanContext(
             requested_surfaces=frozenset({Surface.PROCESS, Surface.BROWSER})
         )
@@ -78,46 +75,48 @@ def test_requested_surface_filtering():
     }
 
 
-def test_invalid_confidence_rejected():
-    with pytest.raises(ValueError):
-        Observation(
-            "x",
-            Surface.RAM,
-            "pid:1",
-            "rule",
-            "summary",
-            confidence=1.2,
-        )
-
-
-def test_heuristic_evidence_cannot_request_auto_action():
-    with pytest.raises(ValueError):
-        Observation(
-            "x",
-            Surface.PROCESS,
-            "pid:1",
-            "rule",
-            "summary",
-            kind=EvidenceKind.BEHAVIOR,
-            severity=Severity.HIGH,
-            confidence=0.99,
-            auto_action_eligible=True,
-        )
-
-
-def test_exact_evidence_can_be_marked_auto_action_eligible():
-    item = Observation(
-        "x",
-        Surface.PROCESS,
-        "pid:1",
-        "rule",
-        "summary",
-        kind=EvidenceKind.EXACT_MATCH,
-        severity=Severity.CRITICAL,
-        confidence=1.0,
-        auto_action_eligible=True,
+def test_sensor_evidence_records_shared_provenance():
+    descriptor = _descriptor("sensor.process", Surface.PROCESS)
+    context = ScanContext(run_id="run-1")
+    item = sensor_evidence(
+        descriptor,
+        context,
+        subject="pid:42",
+        kind="process",
+        rule_id="process.test",
+        detail="test observation",
+        maliciousness=.5,
+        confidence=.8,
+        severity=50,
     )
-    assert item.auto_action_eligible
+    assert item.source == descriptor.name
+    assert item.attributes["surface"] == "process"
+    assert item.attributes["rule_id"] == "process.test"
+    assert item.attributes["scan_run_id"] == "run-1"
+
+
+def test_sensor_report_rejects_cross_sensor_evidence():
+    descriptor = _descriptor("sensor.process")
+    item = Evidence(
+        source="different",
+        kind="process",
+        subject="pid:1",
+        attributes={"surface": "process"},
+    )
+    with pytest.raises(ValueError):
+        SensorReport(descriptor, Coverage.COMPLETE, (item,))
+
+
+def test_sensor_report_rejects_cross_surface_evidence():
+    descriptor = _descriptor("sensor.process", Surface.PROCESS)
+    item = Evidence(
+        source="sensor.process",
+        kind="process",
+        subject="pid:1",
+        attributes={"surface": "gpu"},
+    )
+    with pytest.raises(ValueError):
+        SensorReport(descriptor, Coverage.COMPLETE, (item,))
 
 
 def test_incomplete_coverage_requires_reason():
@@ -125,11 +124,34 @@ def test_incomplete_coverage_requires_reason():
         SensorReport(_descriptor(), Coverage.PARTIAL)
 
 
-def test_cross_sensor_observations_rejected():
-    descriptor = _descriptor()
-    item = Observation("other", Surface.PROCESS, "pid:1", "rule", "summary")
-    with pytest.raises(ValueError):
-        SensorReport(descriptor, Coverage.COMPLETE, (item,))
+def test_registry_publishes_sensor_evidence_to_shared_bus():
+    descriptor = _descriptor("sensor.process", Surface.PROCESS)
+    bus = EvidenceBus(max_events=16)
+
+    class Working:
+        descriptor = descriptor
+
+        def collect(self, context):
+            item = sensor_evidence(
+                self.descriptor,
+                context,
+                subject="pid:7",
+                kind="process",
+                rule_id="process.example",
+                detail="example",
+            )
+            return SensorReport(
+                self.descriptor,
+                Coverage.COMPLETE,
+                (item,),
+                inspected_items=1,
+            )
+
+    registry = SensorRegistry(evidence_bus=bus)
+    registry.register(Working())
+    report, = registry.collect_all()
+    assert report.coverage is Coverage.COMPLETE
+    assert len(bus.recent(subject="pid:7")) == 1
 
 
 def test_collector_failures_are_isolated_and_details_not_leaked():
@@ -152,17 +174,6 @@ def test_duplicate_registration_rejected():
     registry.register(PlaceholderSensor(descriptor))
     with pytest.raises(ValueError):
         registry.register(PlaceholderSensor(descriptor))
-
-
-def test_observation_buffer_is_bounded():
-    buffer = ObservationBuffer(capacity=2)
-    descriptor = _descriptor()
-    for i in range(3):
-        obs = Observation("x", Surface.PROCESS, str(i), "r", "test")
-        buffer.publish(
-            SensorReport(descriptor, Coverage.COMPLETE, (obs,), inspected_items=1)
-        )
-    assert [x.subject for x in buffer.snapshot()] == ["1", "2"]
 
 
 def test_budget_guard_stops_at_hard_limits():
