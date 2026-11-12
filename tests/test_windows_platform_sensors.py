@@ -1,5 +1,11 @@
 """Tests for Windows driver trust and platform-posture sensors."""
+import json
 import os
+from pathlib import Path
+import shutil
+import struct
+import subprocess
+import sys
 
 import pytest
 
@@ -17,6 +23,12 @@ from antios.windows_platform_sensors import (
     WindowsPlatformProvider,
     WindowsUefiSensor,
     _extract_microsoft_driver_hashes,
+    _pe_authenticode_sha256,
+)
+from antios.windows_process import (
+    hidden_process_kwargs,
+    system_executable,
+    windows_powershell_env,
 )
 
 
@@ -34,6 +46,51 @@ class FakePlatform:
 
     def snapshot(self):
         return self.value
+
+
+def _synthetic_pe_with_certificate():
+    data = bytearray(0x500)
+    data[:2] = b"MZ"
+    struct.pack_into("<I", data, 0x3C, 0x80)
+    data[0x80:0x84] = b"PE\x00\x00"
+
+    coff = 0x84
+    struct.pack_into("<H", data, coff, 0x8664)
+    struct.pack_into("<H", data, coff + 2, 1)
+    struct.pack_into("<H", data, coff + 16, 0xF0)
+    struct.pack_into("<H", data, coff + 18, 0x2022)
+
+    optional = coff + 20
+    struct.pack_into("<H", data, optional, 0x20B)
+    struct.pack_into("<I", data, optional + 56, 0x2000)
+    struct.pack_into("<I", data, optional + 60, 0x200)
+    struct.pack_into("<I", data, optional + 64, 0x12345678)
+    struct.pack_into("<I", data, optional + 108, 16)
+    certificate_entry = optional + 112 + 8 * 4
+    struct.pack_into("<II", data, certificate_entry, 0x400, 0x100)
+
+    section = optional + 0xF0
+    data[section:section + 8] = b".text\x00\x00\x00"
+    struct.pack_into("<I", data, section + 8, 0x180)
+    struct.pack_into("<I", data, section + 12, 0x1000)
+    struct.pack_into("<I", data, section + 16, 0x200)
+    struct.pack_into("<I", data, section + 20, 0x200)
+    data[0x200:0x400] = bytes((index * 17) & 0xFF for index in range(0x200))
+    data[0x400:0x500] = b"C" * 0x100
+    return data
+
+
+def test_authenticode_sha256_excludes_checksum_and_certificate_bytes():
+    first = _synthetic_pe_with_certificate()
+    baseline = _pe_authenticode_sha256(bytes(first))
+    assert len(baseline) == 64
+
+    struct.pack_into("<I", first, 0x84 + 20 + 64, 0xDEADBEEF)
+    first[0x400:0x500] = b"D" * 0x100
+    assert _pe_authenticode_sha256(bytes(first)) == baseline
+
+    first[0x220] ^= 0x01
+    assert _pe_authenticode_sha256(bytes(first)) != baseline
 
 
 def test_microsoft_driver_policy_extracts_only_sha256_deny_hashes(tmp_path):
@@ -222,6 +279,57 @@ def test_platform_posture_sensors_keep_capability_and_runtime_distinct():
     assert attestation.evidence[0].attributes["secure_launch_running"] is True
     assert attestation.evidence[0].attributes["smm_measurement_running"] is True
     assert "remote attestation" in attestation.reason
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ConfigCI cross-check")
+def test_authenticode_sha256_matches_windows_configci(tmp_path):
+    sample = tmp_path / "sample.exe"
+    shutil.copyfile(sys.executable, sample)
+    expected = _pe_authenticode_sha256(sample.read_bytes())
+    assert len(expected) == 64
+
+    executable = system_executable(r"WindowsPowerShell\v1.0\powershell.exe")
+    script = r"""
+$ErrorActionPreference = 'Stop'
+if ($null -eq (Get-Command Get-SystemDriver -ErrorAction SilentlyContinue)) {
+  [Console]::Out.Write('{"available":false}')
+  exit 0
+}
+$root = [Console]::In.ReadToEnd()
+$files = @(Get-SystemDriver -ScanPath $root -UserPEs -NoScript -NoShadowCopy)
+$match = $files | Where-Object {
+  [System.IO.Path]::GetFileName([string]$_.FriendlyName) -eq 'sample.exe'
+} | Select-Object -First 1
+if ($null -eq $match) {
+  [Console]::Out.Write('{"available":true,"hash":""}')
+} else {
+  [Console]::Out.Write(([pscustomobject]@{
+    available=$true
+    hash=[string]$match.Hash256
+  } | ConvertTo-Json -Compress))
+}
+"""
+    result = subprocess.run(
+        [
+            executable, "-NoLogo", "-NoProfile", "-NonInteractive",
+            "-Command", script,
+        ],
+        input=str(tmp_path),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        env=windows_powershell_env(executable),
+        **hidden_process_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr[-1000:]
+    payload = json.loads(result.stdout.strip().lstrip("\ufeff"))
+    if payload.get("available") is not True:
+        pytest.skip("ConfigCI Get-SystemDriver is unavailable on this runner")
+    assert payload.get("hash")
+    assert str(payload["hash"]).lower() == expected
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows driver APIs")
