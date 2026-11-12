@@ -919,7 +919,6 @@ class WindowsPersistenceSensor:
                 "persistence_kind": entry.kind,
                 "location": entry.location,
                 "name": entry.name,
-                "command": entry.command[:4096],
                 "target": target,
                 "scope": entry.scope,
                 "user_writable_target": user_writable,
