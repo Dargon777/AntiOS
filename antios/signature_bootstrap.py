@@ -25,6 +25,29 @@ AKIRA_SUPPLEMENT = (
     "fef09b0aa37cbdb6a8f60a6bd8b473a7e5bffdc7fd2e952444f781574abccf64",
 )
 
+# CISA Code & Media Analysis reports from 2025 identify these exact artifacts
+# as malicious payloads/webshells/trojans. Keep them as exact-hash confirmations;
+# behavioral/YARA-style observations remain review-only elsewhere in AntiOS.
+# Sources:
+# - MAR-25993211.r1.v1 (RESURGE / SPAWNSLOTH)
+# - MAR-251132.c1.v1 (credential theft / webshell / PowerShell dropper artifacts)
+CISA_2025_SUPPLEMENT = {
+    "52bbc44eb451cb5e16bf98bc5b1823d2f47a18d71f14543b460395a1c1b1aeda":
+        "RESURGE malware (CISA MAR-25993211)",
+    "3526af9189533470bc0e90d54bafb0db7bda784be82a372ce112e361f7c7b104":
+        "SPAWNSLOTH malware (CISA MAR-25993211)",
+    "60a37499f9b02c203af24c2dfd7fdb3834cea707c4c56b410a7e68376938c4b7":
+        "Encoded .NET credential-theft payload (CISA MAR-251132)",
+    "92bb4ddb98eeaf11fc15bb32e71d0a63256a0ed826a03ba293ce3a8bf057a514":
+        "ASPX credential-theft payload (CISA MAR-251132)",
+    "9340bf7378234db5bca0dc5378bf764b6a24bb87a42b05fa21a996340608fbd7":
+        "Base64 PowerShell dropper artifact (CISA MAR-251132)",
+    "675a10e87c248d0f629da864ba8b7fd92b62323c406a69dec35a0e6e1552ecbc":
+        "ASPX webshell payload (CISA MAR-251132)",
+    "d9c4dd5a8317d1d83b5cc3482e95602f721d58e3ba624d131a9472f927d33b00":
+        "ASPX PowerShell webshell (CISA MAR-251132)",
+}
+
 BUNDLED_PACKAGE = b"""
 {
   "catalog": {
