@@ -252,3 +252,9 @@ def test_process_and_memory_evidence_feed_existing_same_subject_signature():
     assert "memory.private-executable-pe" in rules
     assert "temp-execution-private-memory" in rules
     assert all(item.subject == "process:42:12345" for item in findings)
+    fused = next(
+        item for item in findings
+        if item.attributes.get("rule_id") == "temp-execution-private-memory"
+    )
+    assert fused.attributes["pid"] == 42
+    assert fused.attributes["creation_time"] == 12345
