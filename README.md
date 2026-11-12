@@ -104,6 +104,6 @@ Use the portable Windows archive when installation is not desired. Linux users c
 
 ## Development
 
-The current AntiOS v2 public tree is licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+The current AntiOS public tree is licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 Contributors should keep public README files, release notes, pull requests and issues focused on user-visible behavior and reproducible public interfaces. Detailed security architecture, bypass research and other sensitive implementation discussion belongs in a private engineering or vulnerability-reporting channel.
