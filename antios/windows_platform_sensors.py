@@ -448,16 +448,14 @@ def _hash_driver_file(
             or int(after.st_mtime_ns) != int(before.st_mtime_ns)
         ):
             return "", "", 0, "changed-while-reading"
-        if auth_error:
-            return hashlib.sha256(data).hexdigest(), "", size, auth_error
 
-        budget.take(items=1, byte_count=size)
-        return (
-            hashlib.sha256(data).hexdigest(),
-            auth_digest,
-            size,
-            "",
-        )
+        flat_digest = hashlib.sha256(data).hexdigest()
+        if not budget.take(items=1, byte_count=size):
+            return flat_digest, "", size, "scan-budget"
+        if auth_error:
+            return flat_digest, "", size, auth_error
+
+        return flat_digest, auth_digest, size, ""
     except (OSError, ValueError, MemoryError):
         return "", "", 0, "driver-image-unreadable"
 
