@@ -309,6 +309,7 @@ class WindowsPersistenceProvider:
     _RUN_KEYS = (
         r"Software\Microsoft\Windows\CurrentVersion\Run",
         r"Software\Microsoft\Windows\CurrentVersion\RunOnce",
+        r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run",
     )
 
     def __init__(self):
@@ -331,8 +332,42 @@ class WindowsPersistenceProvider:
             return True
 
         views = (0, getattr(winreg, "KEY_WOW64_64KEY", 0), getattr(winreg, "KEY_WOW64_32KEY", 0))
+        views = tuple(dict.fromkeys(views))
         roots = (("HKCU", winreg.HKEY_CURRENT_USER), ("HKLM", winreg.HKEY_LOCAL_MACHINE))
         seen: set[tuple[str, str, str, str]] = set()
+
+        def query_value(hive, path: str, name: str, view: int = 0):
+            try:
+                with winreg.OpenKey(
+                    hive, path, 0, winreg.KEY_READ | view
+                ) as key:
+                    value, value_type = winreg.QueryValueEx(key, name)
+                    return value, value_type
+            except FileNotFoundError:
+                return None, None
+            except OSError as exc:
+                issues.append(f"registry:{path}:{name}:{type(exc).__name__}")
+                return None, None
+
+        def subkeys(hive, path: str, view: int = 0) -> list[str]:
+            try:
+                with winreg.OpenKey(
+                    hive, path, 0, winreg.KEY_READ | view
+                ) as key:
+                    result = []
+                    index = 0
+                    while True:
+                        try:
+                            result.append(winreg.EnumKey(key, index))
+                            index += 1
+                        except OSError:
+                            break
+                    return result
+            except FileNotFoundError:
+                return []
+            except OSError as exc:
+                issues.append(f"registry:{path}:subkeys:{type(exc).__name__}")
+                return []
 
         for scope, hive in roots:
             for key_path in self._RUN_KEYS:
@@ -357,8 +392,13 @@ class WindowsPersistenceProvider:
                                 if identity in seen:
                                     continue
                                 seen.add(identity)
+                                entry_kind = (
+                                    "policy-run"
+                                    if "\\Policies\\Explorer\\Run" in key_path
+                                    else "run-key"
+                                )
                                 if not append(PersistenceEntry(
-                                    "run-key", f"{scope}\\{key_path}", name,
+                                    entry_kind, f"{scope}\\{key_path}", name,
                                     value, scope=scope,
                                     target=_command_executable(value),
                                 )):
@@ -367,6 +407,88 @@ class WindowsPersistenceProvider:
                         continue
                     except OSError as exc:
                         issues.append(f"{scope}\\{key_path}: {type(exc).__name__}")
+
+        # Targeted registry hooks with strong persistence value. Standard
+        # defaults are inventoried neutrally; unusual targets are scored later.
+        targeted_values = (
+            ("HKLM", winreg.HKEY_LOCAL_MACHINE,
+             r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon",
+             ("Shell", "Userinit"), "winlogon"),
+            ("HKCU", winreg.HKEY_CURRENT_USER,
+             r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon",
+             ("Shell", "Userinit"), "winlogon"),
+            ("HKLM", winreg.HKEY_LOCAL_MACHINE,
+             r"Software\Microsoft\Windows NT\CurrentVersion\Windows",
+             ("AppInit_DLLs",), "appinit"),
+            ("HKLM", winreg.HKEY_LOCAL_MACHINE,
+             r"SYSTEM\CurrentControlSet\Control\Session Manager",
+             ("BootExecute",), "boot-execute"),
+        )
+        for scope, hive, path, names, kind in targeted_values:
+            for view in views:
+                for name in names:
+                    value, value_type = query_value(hive, path, name, view)
+                    if value in (None, "", []):
+                        continue
+                    if isinstance(value, (list, tuple)):
+                        command = " ".join(str(item) for item in value if item)
+                    else:
+                        command = str(value)
+                    identity = (scope, path, name, command)
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    if not append(PersistenceEntry(
+                        kind,
+                        f"{scope}\\{path}",
+                        name,
+                        command,
+                        scope=scope,
+                        target=_command_executable(command),
+                        metadata=(("registry_view", str(view)),),
+                    )):
+                        return entries, issues, truncated
+
+        # Image File Execution Options Debugger and SilentProcessExit
+        # MonitorProcess can redirect execution into another process.
+        hook_specs = (
+            (
+                r"Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+                "Debugger",
+                "ifeo-debugger",
+            ),
+            (
+                r"Software\Microsoft\Windows NT\CurrentVersion\SilentProcessExit",
+                "MonitorProcess",
+                "silent-process-exit",
+            ),
+        )
+        for base, value_name, kind in hook_specs:
+            for view in views:
+                for child in subkeys(winreg.HKEY_LOCAL_MACHINE, base, view):
+                    path = f"{base}\\{child}"
+                    value, _value_type = query_value(
+                        winreg.HKEY_LOCAL_MACHINE, path, value_name, view
+                    )
+                    if not isinstance(value, str) or not value:
+                        continue
+                    identity = ("HKLM", path, value_name, value)
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    if not append(PersistenceEntry(
+                        kind,
+                        f"HKLM\\{path}",
+                        value_name,
+                        value,
+                        scope="machine",
+                        target=_command_executable(value),
+                        metadata=(
+                            ("target_image", child),
+                            ("registry_view", str(view)),
+                        ),
+                    )):
+                        return entries, issues, truncated
 
         # Auto/boot/system-start services and drivers are persistence boundaries.
         services_path = r"SYSTEM\CurrentControlSet\Services"
@@ -896,14 +1018,21 @@ class WindowsPersistenceSensor:
             user_writable = _under(target, self.user_writable_roots)
             interpreter = _interpreter_command(entry.command)
             embedded_wmi_script = entry.kind == "wmi-script"
-            suspicious = user_writable or interpreter or embedded_wmi_script
+            targeted_hook = entry.kind in {
+                "appinit", "ifeo-debugger", "silent-process-exit",
+            }
+            suspicious = (
+                user_writable or interpreter
+                or embedded_wmi_script or targeted_hook
+            )
 
             maliciousness = 0.0
             severity = 0
             confidence = 1.0
             high_value_kind = entry.kind in {
                 "service", "driver-service", "com-override",
-                "wmi-command", "wmi-script",
+                "wmi-command", "wmi-script", "winlogon", "appinit",
+                "ifeo-debugger", "silent-process-exit",
             }
             if user_writable and high_value_kind:
                 maliciousness, severity, confidence = .66, 65, .76
@@ -914,6 +1043,8 @@ class WindowsPersistenceSensor:
                 maliciousness, severity, confidence = .40, 40, .68
             elif embedded_wmi_script:
                 maliciousness, severity, confidence = .45, 45, .70
+            elif targeted_hook:
+                maliciousness, severity, confidence = .32, 35, .68
             elif interpreter:
                 maliciousness, severity, confidence = .30, 35, .65
 
@@ -933,7 +1064,7 @@ class WindowsPersistenceSensor:
                 self.descriptor,
                 context,
                 subject=f"persistence:{entry.kind}:{entry.location}:{entry.name}",
-                kind="other",
+                kind="persistence",
                 rule_id=(
                     "persistence.review"
                     if suspicious
