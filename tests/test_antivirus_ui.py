@@ -26,7 +26,46 @@ def test_antivirus_catalog_is_complete_and_formats_in_every_locale():
 def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeypatch):
     import tkinter as tk
     import antios.antivirus_ui as antivirus_ui
+    import antios.guard_state as guard_state
+    import antios.protection as protection
     from antios.dashboard import Dashboard, _apply_theme_palette
+
+    # This scenario validates scan/result UI behavior. Keep unrelated live
+    # Defender/Guard probes deterministic so theme/language rebuilds cannot
+    # leave external Windows subprocesses alive after the assertion work ends.
+    guard_probe = {
+        "state": "not-running",
+        "running": False,
+        "detections": 0,
+        "behavior": {},
+        "risk": {},
+        "incidents": {},
+    }
+    protection_probe = {
+        "capabilities": {
+            "standalone_detection_engine": True,
+            "resident_post_write_detection": False,
+            "pre_execution_blocking": False,
+            "layered_with_defender": False,
+            "layered_with_vendor": False,
+        },
+        "engine": {},
+        "guard": guard_probe,
+        "windows_vendor_companion": {
+            "coexistence": {
+                "vendor_products_detected": [],
+                "vendor_realtime_confirmed": [],
+            }
+        },
+    }
+    monkeypatch.setattr(
+        guard_state, "read_guard_state", lambda *args, **kwargs: dict(guard_probe)
+    )
+    monkeypatch.setattr(
+        protection,
+        "collect_protection_status",
+        lambda *args, **kwargs: dict(protection_probe),
+    )
 
     root = tk.Tk()
     root.withdraw()
