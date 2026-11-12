@@ -129,7 +129,8 @@ def test_registry_publishes_sensor_evidence_to_shared_bus():
     bus = EvidenceBus(max_events=16)
 
     class Working:
-        descriptor = descriptor
+        def __init__(self, descriptor):
+            self.descriptor = descriptor
 
         def collect(self, context):
             item = sensor_evidence(
@@ -148,7 +149,7 @@ def test_registry_publishes_sensor_evidence_to_shared_bus():
             )
 
     registry = SensorRegistry(evidence_bus=bus)
-    registry.register(Working())
+    registry.register(Working(descriptor))
     report, = registry.collect_all()
     assert report.coverage is Coverage.COMPLETE
     assert len(bus.recent(subject="pid:7")) == 1
