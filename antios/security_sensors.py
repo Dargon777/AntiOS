@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 from threading import RLock
 from time import monotonic, time
 from typing import Mapping, Protocol
@@ -426,3 +427,11 @@ def default_registry(*, evidence_bus: EvidenceBus | None = None) -> SensorRegist
     for descriptor in default_descriptors():
         registry.register(PlaceholderSensor(descriptor))
     return registry
+
+
+def runtime_registry(*, evidence_bus: EvidenceBus | None = None) -> SensorRegistry:
+    """Return real platform collectors where implemented, placeholders elsewhere."""
+    if os.name == "nt":
+        from .windows_security_sensors import build_windows_registry
+        return build_windows_registry(evidence_bus=evidence_bus)
+    return default_registry(evidence_bus=evidence_bus)
