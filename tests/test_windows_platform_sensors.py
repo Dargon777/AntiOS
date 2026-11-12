@@ -24,7 +24,6 @@ from antios.windows_platform_sensors import (
     WindowsUefiSensor,
     _extract_microsoft_driver_hashes,
     _pe_authenticode_sha256,
-    _windows_imagehlp_sha256,
 )
 
 
@@ -281,24 +280,8 @@ def test_platform_posture_sensors_keep_capability_and_runtime_distinct():
     assert "remote attestation" in attestation.reason
 
 
-@pytest.mark.skipif(os.name != "nt", reason="native Windows ImageHlp")
-def test_native_imagehlp_returns_stable_sha256(tmp_path):
-    import msvcrt
-
-    sample = tmp_path / "sample.exe"
-    shutil.copyfile(sys.executable, sample)
-    with sample.open("rb") as stream:
-        native, error = _windows_imagehlp_sha256(
-            msvcrt.get_osfhandle(stream.fileno())
-        )
-    assert error == ""
-    assert re.fullmatch(r"[a-f0-9]{64}", native)
-
-
 @pytest.mark.skipif(os.name != "nt", reason="Windows SignTool cross-check")
-def test_native_imagehlp_matches_signtool_authenticode_sha256():
-    import msvcrt
-
+def test_pe_authenticode_sha256_matches_signtool():
     kits = Path(os.environ.get("ProgramFiles(x86)") or r"C:\Program Files (x86)")
     candidates = sorted(
         kits.glob(r"Windows Kits/10/bin/*/x64/signtool.exe"),
@@ -347,20 +330,11 @@ def test_native_imagehlp_matches_signtool_authenticode_sha256():
             break
 
     assert expected and target is not None, diagnostics
-
-    levels = {}
-    with target.open("rb") as stream:
-        handle = msvcrt.get_osfhandle(stream.fileno())
-        for level in (0x00, 0x02, 0x04, 0x06):
-            stream.seek(0)
-            digest, error = _windows_imagehlp_sha256(handle, level)
-            assert error == ""
-            levels[level] = digest
-
-    assert levels[0x06] == expected, {
+    actual = _pe_authenticode_sha256(target.read_bytes())
+    assert actual == expected, {
         "target": str(target),
         "signtool": expected,
-        "imagehlp_levels": levels,
+        "antios": actual,
     }
 
 
