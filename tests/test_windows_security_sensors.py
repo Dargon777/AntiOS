@@ -85,7 +85,7 @@ def test_persistence_sensor_emits_neutral_correlatable_evidence():
     assert report.coverage is Coverage.PARTIAL
     assert report.inspected_items == 1
     item, = report.evidence
-    assert item.kind == "behavior"
+    assert item.kind == "persistence"
     assert item.attributes["persistence_type"] == "run"
     assert item.attributes["interpreter_target"] is True
     assert item.attributes["user_writable_target"] is True
