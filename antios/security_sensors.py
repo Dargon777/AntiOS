@@ -1,22 +1,23 @@
-"""Unified contracts for optional AntiOS deep-security sensors.
+"""Capability-first contracts for optional AntiOS deep-security sensors.
 
-This module is intentionally capability-first. It defines how collectors report
-what they can inspect, what they actually inspected, and what evidence they
-observed. It does not itself read process memory, kernel memory, VRAM, firmware,
-or device storage.
+Collectors report both capability and actual coverage, then emit the shared
+:mod:`antios.evidence` model used by the detection, risk and incident layers.
+This module deliberately contains no OS-specific RAM, kernel, VRAM or firmware
+reader.
 
-The invariant is simple: unsupported, unavailable, permission-limited and
-not-yet-implemented checks must never be presented as a clean scan.
+Invariant: unsupported, unavailable, permission-limited and unimplemented
+surfaces must never be represented as a clean scan.
 """
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import RLock
 from time import monotonic, time
-from typing import Protocol
+from typing import Mapping, Protocol
 from uuid import uuid4
+
+from .evidence import Evidence, EvidenceBus
 
 
 class Surface(str, Enum):
@@ -71,24 +72,6 @@ class Acquisition(str, Enum):
     ATTESTATION = "attestation"
 
 
-class EvidenceKind(str, Enum):
-    EXACT_MATCH = "exact_match"
-    INTEGRITY = "integrity"
-    BEHAVIOR = "behavior"
-    PERSISTENCE = "persistence"
-    CONFIGURATION = "configuration"
-    ANOMALY = "anomaly"
-    TELEMETRY = "telemetry"
-
-
-class Severity(str, Enum):
-    INFO = "info"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
-
 @dataclass(frozen=True)
 class SensorDescriptor:
     name: str
@@ -108,12 +91,7 @@ class SensorDescriptor:
 
 @dataclass(frozen=True)
 class ScanBudget:
-    """Hard upper bounds shared by collectors.
-
-    Collectors are expected to stop before these limits and report PARTIAL
-    coverage with an explicit reason. These limits are safety controls, not
-    performance promises.
-    """
+    """Hard upper bounds shared by collectors."""
 
     max_items: int = 10_000
     max_bytes: int = 256 * 1024 * 1024
@@ -122,14 +100,20 @@ class ScanBudget:
     allow_privileged: bool = False
 
     def __post_init__(self) -> None:
-        if self.max_items < 1:
-            raise ValueError("max_items must be positive")
-        if self.max_bytes < 0:
-            raise ValueError("max_bytes must be non-negative")
-        if self.max_seconds <= 0:
+        if type(self.max_items) is not int or self.max_items < 1:
+            raise ValueError("max_items must be a positive integer")
+        if type(self.max_bytes) is not int or self.max_bytes < 0:
+            raise ValueError("max_bytes must be a non-negative integer")
+        if (
+            not isinstance(self.max_seconds, (int, float))
+            or isinstance(self.max_seconds, bool)
+            or self.max_seconds <= 0
+        ):
             raise ValueError("max_seconds must be positive")
-        if self.max_depth < 0:
-            raise ValueError("max_depth must be non-negative")
+        if type(self.max_depth) is not int or self.max_depth < 0:
+            raise ValueError("max_depth must be a non-negative integer")
+        if not isinstance(self.allow_privileged, bool):
+            raise ValueError("allow_privileged must be boolean")
 
 
 @dataclass(frozen=True)
@@ -143,10 +127,14 @@ class ScanContext:
     def __post_init__(self) -> None:
         if not self.run_id.strip():
             raise ValueError("run_id must be non-empty")
+        if not isinstance(self.requested_surfaces, frozenset):
+            raise ValueError("requested_surfaces must be a frozenset")
+        if not all(isinstance(item, Surface) for item in self.requested_surfaces):
+            raise ValueError("requested_surfaces contains an invalid surface")
 
 
 class BudgetGuard:
-    """Small helper for collectors to enforce a ScanBudget."""
+    """Small helper collectors can use to enforce a ScanBudget."""
 
     def __init__(self, budget: ScanBudget) -> None:
         self._budget = budget
@@ -166,6 +154,8 @@ class BudgetGuard:
         return monotonic() - self._started >= self._budget.max_seconds
 
     def can_take(self, *, items: int = 1, byte_count: int = 0) -> bool:
+        if type(items) is not int or type(byte_count) is not int:
+            raise ValueError("budget claims must be integers")
         if items < 0 or byte_count < 0:
             raise ValueError("budget claims must be non-negative")
         return (
@@ -182,42 +172,58 @@ class BudgetGuard:
         return True
 
 
-@dataclass(frozen=True)
-class Observation:
-    sensor: str
-    surface: Surface
-    subject: str
-    rule_id: str
-    summary: str
-    kind: EvidenceKind = EvidenceKind.ANOMALY
-    severity: Severity = Severity.INFO
-    confidence: float = 0.0
-    observed_at: float = field(default_factory=time)
-    metadata: tuple[tuple[str, str], ...] = ()
-    auto_action_eligible: bool = False
+def sensor_evidence(
+    descriptor: SensorDescriptor,
+    context: ScanContext,
+    *,
+    subject: str,
+    kind: str,
+    rule_id: str,
+    detail: str,
+    maliciousness: float = 0.0,
+    confidence: float = 1.0,
+    severity: int = 0,
+    complete: bool = True,
+    correlation_group: str = "",
+    at: float = 0.0,
+    attributes: Mapping[str, object] | None = None,
+) -> Evidence:
+    """Create shared Evidence with mandatory sensor provenance.
 
-    def __post_init__(self) -> None:
-        if not self.sensor.strip() or not self.subject.strip() or not self.rule_id.strip():
-            raise ValueError("sensor, subject and rule_id must be non-empty")
-        if not self.summary.strip():
-            raise ValueError("summary must be non-empty")
-        if not 0.0 <= self.confidence <= 1.0:
-            raise ValueError("confidence must be between 0 and 1")
-        if self.auto_action_eligible and self.kind not in {
-            EvidenceKind.EXACT_MATCH,
-            EvidenceKind.INTEGRITY,
-        }:
-            raise ValueError(
-                "heuristic, behavioral and telemetry evidence cannot enable "
-                "automatic action by itself"
-            )
+    Generic sensor evidence is context only. Current AntiOS enforcement policy
+    remains in the risk/scanner layers and does not grant automatic remediation
+    authority to this helper.
+    """
+
+    if not rule_id.strip():
+        raise ValueError("rule_id must be non-empty")
+    payload = dict(attributes or {})
+    payload.update(
+        surface=descriptor.surface.value,
+        sensor_version=descriptor.version,
+        rule_id=rule_id,
+        scan_run_id=context.run_id,
+    )
+    return Evidence(
+        source=descriptor.name,
+        kind=kind,
+        subject=subject,
+        maliciousness=maliciousness,
+        confidence=confidence,
+        severity=severity,
+        complete=complete,
+        correlation_group=correlation_group,
+        detail=detail,
+        at=at,
+        attributes=payload,
+    )
 
 
 @dataclass(frozen=True)
 class SensorReport:
     descriptor: SensorDescriptor
     coverage: Coverage
-    observations: tuple[Observation, ...] = ()
+    evidence: tuple[Evidence, ...] = ()
     reason: str = ""
     inspected_items: int = 0
     inspected_bytes: int = 0
@@ -234,14 +240,15 @@ class SensorReport:
             self.skipped_items,
             self.error_items,
         )
-        if any(value < 0 for value in counts):
-            raise ValueError("coverage counters must be non-negative")
-        if any(
-            item.surface != self.descriptor.surface
-            or item.sensor != self.descriptor.name
-            for item in self.observations
-        ):
-            raise ValueError("observation does not belong to reporting sensor")
+        if any(type(value) is not int or value < 0 for value in counts):
+            raise ValueError("coverage counters must be non-negative integers")
+        for item in self.evidence:
+            if not isinstance(item, Evidence):
+                raise ValueError("sensor evidence must use antios.evidence.Evidence")
+            if item.source != self.descriptor.name:
+                raise ValueError("evidence source does not match reporting sensor")
+            if item.attributes.get("surface") != self.descriptor.surface.value:
+                raise ValueError("evidence surface does not match reporting sensor")
 
 
 @dataclass(frozen=True)
@@ -288,7 +295,7 @@ class Sensor(Protocol):
 
 
 class PlaceholderSensor:
-    """Honest capability placeholder; never claims to inspect a device."""
+    """Honest capability placeholder; never claims to inspect a surface."""
 
     def __init__(self, descriptor: SensorDescriptor) -> None:
         self.descriptor = descriptor
@@ -311,18 +318,20 @@ class PlaceholderSensor:
 
 
 class SensorRegistry:
-    """Bounded, exception-isolated sensor registry.
+    """Bounded, exception-isolated registry publishing into one EvidenceBus."""
 
-    Registration does not execute collectors. Collection is explicit and can be
-    scoped to requested surfaces.
-    """
-
-    def __init__(self, max_sensors: int = 64) -> None:
-        if max_sensors < 1:
-            raise ValueError("max_sensors must be positive")
+    def __init__(
+        self,
+        max_sensors: int = 64,
+        *,
+        evidence_bus: EvidenceBus | None = None,
+    ) -> None:
+        if type(max_sensors) is not int or max_sensors < 1:
+            raise ValueError("max_sensors must be a positive integer")
         self._lock = RLock()
         self._sensors: dict[str, Sensor] = {}
         self._max_sensors = max_sensors
+        self._evidence_bus = evidence_bus
 
     def register(self, sensor: Sensor) -> None:
         descriptor = sensor.descriptor
@@ -366,6 +375,9 @@ class SensorRegistry:
                 if report.descriptor != descriptor:
                     raise ValueError("collector returned mismatched descriptor")
                 reports.append(report)
+                if self._evidence_bus is not None:
+                    for item in report.evidence:
+                        self._evidence_bus.publish(item)
             except Exception as exc:
                 reports.append(
                     SensorReport(
@@ -375,24 +387,6 @@ class SensorRegistry:
                     )
                 )
         return tuple(reports)
-
-
-class ObservationBuffer:
-    """Thread-safe bounded bridge for later EvidenceBus integration."""
-
-    def __init__(self, capacity: int = 4096) -> None:
-        if capacity < 1:
-            raise ValueError("capacity must be positive")
-        self._items: deque[Observation] = deque(maxlen=capacity)
-        self._lock = RLock()
-
-    def publish(self, report: SensorReport) -> None:
-        with self._lock:
-            self._items.extend(report.observations)
-
-    def snapshot(self) -> tuple[Observation, ...]:
-        with self._lock:
-            return tuple(self._items)
 
 
 _SURFACE_DEFAULTS: tuple[tuple[Surface, Acquisition, Privilege], ...] = (
@@ -427,8 +421,8 @@ def default_descriptors() -> tuple[SensorDescriptor, ...]:
     )
 
 
-def default_registry() -> SensorRegistry:
-    registry = SensorRegistry()
+def default_registry(*, evidence_bus: EvidenceBus | None = None) -> SensorRegistry:
+    registry = SensorRegistry(evidence_bus=evidence_bus)
     for descriptor in default_descriptors():
         registry.register(PlaceholderSensor(descriptor))
     return registry
