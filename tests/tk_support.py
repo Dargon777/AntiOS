@@ -34,25 +34,45 @@ def isolated_tk_test(function):
     Some bundled Windows Tcl runtimes cannot reliably reinitialize Tk after
     destroy(). Run the entire pytest case (including fixtures) in a fresh
     process; failures are propagated, never converted into skips. The Windows
-    CI runners can be substantially slower under concurrent Windows jobs, so allow the
-    isolated UI scenario enough time to finish without weakening assertions.
+    The scenario gets a bounded allowance; tests that need external Windows
+    status probes must stub them independently.
     """
     @wraps(function)
     def run(*args, **kwargs):
         node = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", 1)[0]
         if os.environ.get("ANTIOS_TK_TEST_NODE") == node:
             return function(*args, **kwargs)
+        # pytest.main() performs normal fixture/session teardown. Exit the
+        # disposable interpreter immediately afterwards so unrelated desktop
+        # worker threads or Windows runtime finalizers cannot keep the pipe
+        # open after the test result has already been produced.
+        runner = (
+            "import os, sys, pytest; "
+            "code = pytest.main(sys.argv[1:]); "
+            "sys.stdout.flush(); sys.stderr.flush(); "
+            "os._exit(int(code))"
+        )
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "pytest", node, "-ra", "-W", "error", "-o", "faulthandler_timeout=45"],
+                [
+                    sys.executable, "-c", runner, node,
+                    "-ra", "-W", "error", "-o", "faulthandler_timeout=45",
+                ],
                 env=dict(os.environ, ANTIOS_TK_TEST_NODE=node),
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace", timeout=360,
+                text=True, encoding="utf-8", errors="replace", timeout=120,
                 **hidden_process_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
-            logs = b"\n".join((exc.stdout or b"", exc.stderr or b"")).decode("utf-8", errors="replace")
-            raise AssertionError(f"Desktop scenario timed out: {node}\n{logs}") from exc
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            raise AssertionError(
+                f"Desktop scenario timed out: {node}\n{stdout}\n{stderr}"
+            ) from exc
         assert result.returncode == 0, result.stdout + result.stderr
         assert "1 passed" in result.stdout, result.stdout + result.stderr
     return run
