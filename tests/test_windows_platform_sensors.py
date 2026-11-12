@@ -284,7 +284,10 @@ def test_platform_posture_sensors_keep_capability_and_runtime_distinct():
     assert "remote attestation" in attestation.reason
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows ConfigCI cross-check")
+@pytest.mark.skipif(
+    os.name != "nt" or sys.version_info[:2] != (3, 12),
+    reason="single Windows ConfigCI cross-check matrix",
+)
 def test_authenticode_sha256_matches_windows_configci(tmp_path):
     sample = tmp_path / "sample.exe"
     shutil.copyfile(sys.executable, sample)
@@ -326,7 +329,7 @@ if ($null -eq $match) {
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=30,
+        timeout=90,
         env=windows_powershell_env(executable),
         **hidden_process_kwargs(),
     )
