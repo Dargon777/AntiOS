@@ -116,18 +116,19 @@ def test_multi_sensor_signature_enters_risk_without_auto_enforcement():
 
 
 def test_document_network_chain_is_review_only():
+    subject = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
     behavior = behavior_findings_to_evidence([{
         "rule": "document-spawns-interpreter",
         "score": 85,
         "severity": "high",
         "summary": "WINWORD started PowerShell",
-        "subject": r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        "subject": subject,
         "at": 10.0,
     }])
     network = Evidence(
         source="network-sensor",
         kind="network",
-        subject="pid:42",
+        subject=subject,
         attributes={"outbound_connection": True},
     )
     matched = DEFAULT_DETECTION_SIGNATURES.evaluate((*behavior, network))
@@ -168,3 +169,19 @@ def test_similarity_rule_requires_named_malicious_reference_family():
         attributes={"malicious_similarity": .97, "reference_family": "fixture-family"},
     )
     assert "similarity.malicious-family-near-match" in rules(strong)
+
+
+def test_multi_sensor_rule_never_combines_different_subjects():
+    rwx = Evidence(
+        source="pe-features",
+        kind="file",
+        subject="a.exe",
+        attributes={"writable_executable": True},
+    )
+    entropy = Evidence(
+        source="entropy-map",
+        kind="file",
+        subject="b.exe",
+        attributes={"high_entropy_executable": True},
+    )
+    assert "file.packed-rwx-high-entropy" not in rules(rwx, entropy)
