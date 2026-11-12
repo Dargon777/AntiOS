@@ -968,8 +968,10 @@ class WindowsProcessSensor:
                 },
             ))
 
-        incomplete = snapshot.truncated or snapshot.unresolved_paths > 0
-        reasons = []
+        reasons = [
+            "baseline process inventory does not yet verify signer, integrity "
+            "level or loaded-module integrity"
+        ]
         if snapshot.truncated:
             reasons.append("process inventory reached item budget")
         if snapshot.unresolved_paths:
@@ -978,7 +980,7 @@ class WindowsProcessSensor:
             )
         return SensorReport(
             self.descriptor,
-            Coverage.PARTIAL if incomplete else Coverage.COMPLETE,
+            Coverage.PARTIAL,
             tuple(evidence),
             reason="; ".join(reasons),
             inspected_items=len(snapshot.processes),
@@ -1200,7 +1202,10 @@ class WindowsMemorySensor:
                     },
                 ))
 
-        reasons = []
+        reasons = [
+            "baseline memory inspection does not yet validate thread start "
+            "addresses, remote-write telemetry or image-vs-disk mappings"
+        ]
         if denied:
             reasons.append(f"{denied} process(es) denied memory access")
         if errors:
@@ -1211,10 +1216,9 @@ class WindowsMemorySensor:
             reasons.append(
                 f"{snapshot.unresolved_paths} process path(s) were inaccessible"
             )
-        incomplete = bool(reasons)
         return SensorReport(
             self.descriptor,
-            Coverage.PARTIAL if incomplete else Coverage.COMPLETE,
+            Coverage.PARTIAL,
             tuple(evidence),
             reason="; ".join(reasons),
             inspected_items=inspected_regions,
