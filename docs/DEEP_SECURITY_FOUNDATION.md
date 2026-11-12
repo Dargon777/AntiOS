@@ -24,7 +24,9 @@ incident correlation. The sensor layer does not create a second verdict engine.
 | Virtualization | hypervisor/VBS/security posture | query | admin |
 | Attestation | TPM/measured boot and platform claims | attestation | admin |
 
-This table describes planned coverage, not implemented detection claims.
+This table describes the target surface map. On Windows, process inventory,
+high-value persistence inventory and bounded process-memory inspection are now
+connected to this architecture. The remaining rows are still planned coverage.
 
 ## Contracts
 
@@ -49,10 +51,24 @@ threats; behavioral, firmware, GPU, memory and other sensor signals remain
 review/correlation input unless a future policy is explicitly designed and
 validated.
 
-## Implementation order
+## Implementation status and order
 
-1. Process + persistence inventory.
-2. Process-memory inspection with explicit access/coverage reporting.
+1. **Implemented baseline:** Process inventory + persistence inventory.
+   - running process PID/PPID, stable creation identity and image path;
+   - Run/RunOnce, auto/boot/system services and drivers, Startup folders;
+   - scheduled-task command inventory;
+   - WMI command/script consumers through a bounded read-only CIM query;
+   - per-user COM server overrides;
+   - user-writable/interpreter-based entries are review evidence, never an
+     automatic remediation decision.
+2. **Implemented baseline:** Process-memory inspection.
+   - bounded VirtualQueryEx enumeration;
+   - private executable region detection;
+   - writable+executable metadata;
+   - small read-only header probes only for private executable regions;
+   - embedded PE-header classification;
+   - inaccessible/protected processes remain explicit partial coverage;
+   - raw memory bytes are never persisted in evidence or logs.
 3. Driver trust and vulnerable-driver intelligence.
 4. Boot, Secure Boot, TPM/measured-boot and DMA posture.
 5. Browser and network correlation.
@@ -62,3 +78,17 @@ validated.
 Deep firmware, SMM, management-engine/security-processor and arbitrary VRAM
 inspection must not be advertised as supported unless AntiOS has a documented,
 testable acquisition path for the specific platform.
+
+
+## Resident Guard integration
+
+On Windows the Guard schedules process+RAM inspection and persistence inventory
+in a single background deep-security worker. The worker is bounded and does not
+block the Guard heartbeat, directory notifications or ordinary file scanning.
+Raw sensor evidence is published to the shared EvidenceBus, evaluated by the
+multi-sensor signature engine and then attached to IncidentGraph on the Guard
+thread.
+
+The initial implementation remains detect/review-only. Memory metadata,
+persistence heuristics and multi-sensor signatures cannot authorize quarantine
+or process termination.
