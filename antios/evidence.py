@@ -19,6 +19,7 @@ class EvidenceKind(StrEnum):
     FILE = "file"
     PROCESS = "process"
     MEMORY = "memory"
+    PERSISTENCE = "persistence"
     BEHAVIOR = "behavior"
     NETWORK = "network"
     GPU = "gpu"

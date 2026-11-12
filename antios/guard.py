@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import errno
 import json
 import os
+import queue
 import re
 from pathlib import Path
 import sqlite3
@@ -19,12 +20,17 @@ import uuid
 from .antivirus import checked_path, fingerprint, is_link
 from .behavior import BehaviorEngine
 from .coexistence import companion_protected_roots, defender_protected_roots
+from .detection_signatures import DEFAULT_DETECTION_SIGNATURES
+from .evidence import EvidenceBus
 from .incident import IncidentGraph
 from .guard_notifications import ChangeBatch, DirectoryNotifications, PollNotifications
 from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
 from .risk import evaluate_risk
 from .scan_process import run_scan_process
+from .security_sensors import (
+    CoverageSummary, ScanBudget, ScanContext, Surface, runtime_registry,
+)
 from .windows_process import hidden_process_kwargs
 
 
@@ -41,6 +47,9 @@ _FAST_SETTLE_SECONDS = 0.20
 _MAX_TRANSIENT_SCAN_RETRIES = 3
 _DEFAULT_GUARD_INTERVAL = 15 if os.name != "nt" else 2
 _DEFAULT_GUARD_RESCAN = 1800 if os.name != "nt" else 900
+_DEEP_INITIAL_DELAY = 15.0
+_DEEP_RUNTIME_INTERVAL = 60.0
+_DEEP_PERSISTENCE_INTERVAL = 300.0
 
 
 def _transient_scan_conflict(exc: BaseException) -> bool:
@@ -148,7 +157,8 @@ class Guard:
     def __init__(self, policy, state_dir=None, *, scanner=None,
                  probe=None, quarantine_factory=Quarantine, watcher_factory=None,
                  status_observer=None, behavior_engine=None, process_sampler=None,
-                 process_sampler_factory=None, native_probe=None, incident_graph=None):
+                 process_sampler_factory=None, native_probe=None, incident_graph=None,
+                 security_registry=None, security_registry_factory=None):
         self.policy = policy
         self.roots = policy.validate()
         self.state_dir = Path(state_dir or default_guard_path()).absolute()
@@ -202,6 +212,26 @@ class Guard:
             else 'file-correlation-only'
         )
         self.incidents = incident_graph or IncidentGraph()
+        self.evidence_bus = EvidenceBus(max_events=4096)
+        self._security_registry_factory = security_registry_factory
+        self._security_registry_error = ""
+        if security_registry is not None:
+            self.security_registry = security_registry
+        elif os.name == "nt":
+            try:
+                if self._security_registry_factory is None:
+                    self._security_registry_factory = (
+                        lambda: runtime_registry(evidence_bus=self.evidence_bus)
+                    )
+                self.security_registry = self._security_registry_factory()
+            except OSError as exc:
+                self.security_registry = None
+                self._security_registry_error = f"{type(exc).__name__}: {exc}"[:500]
+        else:
+            self.security_registry = None
+        self._deep_results = queue.Queue(maxsize=2)
+        self._deep_thread = None
+        self._deep_runs = 0
         if native_probe is not None:
             self.native_probe = native_probe
         elif os.name == 'nt':
@@ -236,6 +266,20 @@ class Guard:
                        'risk': {'mode': 'fusion', 'evaluations': 0, 'highest_score': 0,
                                 'last': None, 'native_pre_execution': 'unknown',
                                 'native_probe_errors': 0},
+                       'deep_security': {
+                           'state': (
+                               'idle' if self.security_registry is not None
+                               else 'unavailable'
+                           ),
+                           'in_progress': False,
+                           'runs': 0,
+                           'last_completed_at': None,
+                           'highest_score': 0,
+                           'evidence_count': 0,
+                           'signature_count': 0,
+                           'reports': {},
+                           'detail': self._security_registry_error,
+                       },
                        'incidents': self.incidents.status()}
 
     def _refresh_behavior_status(self):
@@ -261,6 +305,125 @@ class Guard:
         self.status['incidents'] = self.incidents.status()
         for update in self.incidents.drain_updates():
             store.event('incident-update', update)
+
+    def _start_deep_security(self, surfaces, budget):
+        """Start one bounded background sensor pass without blocking Guard."""
+        if self.security_registry is None:
+            return False
+        if self._deep_thread is not None and self._deep_thread.is_alive():
+            return False
+        selected = frozenset(surfaces)
+        self.status['deep_security']['in_progress'] = True
+        self.status['deep_security']['state'] = 'scanning'
+
+        def worker():
+            try:
+                context = ScanContext(
+                    budget=budget,
+                    requested_surfaces=selected,
+                )
+                reports = self.security_registry.collect_all(context)
+                raw = tuple(
+                    item
+                    for report in reports
+                    for item in report.evidence
+                )
+                signatures = DEFAULT_DETECTION_SIGNATURES.evaluate(raw)
+                for item in signatures:
+                    self.evidence_bus.publish(item)
+                result = (selected, reports, signatures, None)
+            except Exception as exc:
+                result = (
+                    selected,
+                    (),
+                    (),
+                    f"{type(exc).__name__}: {exc}"[:500],
+                )
+            try:
+                self._deep_results.put_nowait(result)
+            except queue.Full:
+                pass
+
+        self._deep_thread = threading.Thread(
+            target=worker,
+            name="AntiOS-DeepSecurity",
+            daemon=True,
+        )
+        self._deep_thread.start()
+        return True
+
+    def _drain_deep_security(self, store: GuardState):
+        """Fuse completed background sensor evidence on the Guard thread."""
+        changed = False
+        while True:
+            try:
+                surfaces, reports, signatures, error = self._deep_results.get_nowait()
+            except queue.Empty:
+                break
+            changed = True
+            state = self.status['deep_security']
+            state['in_progress'] = False
+            state['last_completed_at'] = time.time()
+            self._deep_runs += 1
+            state['runs'] = self._deep_runs
+
+            if error:
+                state.update(state='error', detail=error)
+                store.event('deep-security-error', {
+                    'surfaces': sorted(item.value for item in surfaces),
+                    'error': error,
+                })
+                continue
+
+            raw = tuple(
+                item
+                for report in reports
+                for item in report.evidence
+            )
+            combined = (*raw, *signatures)
+            if combined:
+                self.incidents.observe_evidence(combined)
+                self._publish_incidents(store)
+
+            summary = CoverageSummary.from_reports(tuple(reports))
+            highest = max((item.risk_score for item in combined), default=0)
+            report_state = {
+                report.descriptor.surface.value: {
+                    'coverage': report.coverage.value,
+                    'reason': report.reason,
+                    'inspected_items': report.inspected_items,
+                    'inspected_bytes': report.inspected_bytes,
+                    'skipped_items': report.skipped_items,
+                    'error_items': report.error_items,
+                    'evidence': len(report.evidence),
+                }
+                for report in reports
+            }
+            merged_reports = dict(state.get('reports') or {})
+            merged_reports.update(report_state)
+            state.update(
+                state=(
+                    'attention' if highest >= 40 else
+                    'normal' if summary.fully_covered else
+                    'partial'
+                ),
+                highest_score=max(int(state.get('highest_score', 0)), highest),
+                evidence_count=len(raw),
+                signature_count=len(signatures),
+                reports=merged_reports,
+                detail='',
+            )
+
+            review = [item for item in combined if item.risk_score >= 40][:20]
+            if review:
+                store.event('deep-security-evidence', {
+                    'surfaces': sorted(item.value for item in surfaces),
+                    'evidence': [item.to_dict() for item in review],
+                    'total_review_evidence': sum(
+                        item.risk_score >= 40 for item in combined
+                    ),
+                })
+        return changed
 
     def _native_state(self, now: float) -> bool | None:
         if now - self._native_checked_at < 15:
@@ -362,6 +525,8 @@ class Guard:
         last_heartbeat, last_probe, last_inventory = 0.0, float('-inf'), float('-inf')
         last_process_poll = float('-inf')
         last_stop_poll = float('-inf')
+        next_deep_runtime = time.monotonic() + _DEEP_INITIAL_DELAY
+        next_deep_persistence = time.monotonic() + _DEEP_INITIAL_DELAY
         last_alert_loss_reported = 0
         version, changed, notification_error = None, True, False
         next_notification_retry = 0.0
@@ -443,6 +608,33 @@ class Guard:
         try:
             while not cancelled():
                 now = time.monotonic()
+
+                self._drain_deep_security(store)
+                if self.security_registry is not None:
+                    if now >= next_deep_runtime:
+                        if self._start_deep_security(
+                            (Surface.PROCESS, Surface.RAM),
+                            ScanBudget(
+                                max_items=20_000,
+                                max_bytes=16 * 1024 * 1024,
+                                max_seconds=5.0,
+                                allow_privileged=True,
+                            ),
+                        ):
+                            next_deep_runtime = now + _DEEP_RUNTIME_INTERVAL
+                    if now >= next_deep_persistence:
+                        if self._start_deep_security(
+                            (Surface.PERSISTENCE,),
+                            ScanBudget(
+                                max_items=5_000,
+                                max_bytes=0,
+                                max_seconds=12.0,
+                                allow_privileged=True,
+                            ),
+                        ):
+                            next_deep_persistence = (
+                                now + _DEEP_PERSISTENCE_INTERVAL
+                            )
 
                 while self._behavior_events:
                     store.event('behavior-alert', self._behavior_events.pop(0))
@@ -658,6 +850,7 @@ class Guard:
         finally:
             if watcher is not None:
                 watcher.close()
+            self._drain_deep_security(store)
             self.status.update(running=False, heartbeat=time.time(), pending=len(self.pending),
                                unresolved=len(self.failures), active_threats=len(self.threats))
             if self.status['state'] != 'failed':
