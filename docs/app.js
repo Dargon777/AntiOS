@@ -75,7 +75,7 @@
       "File recovery does not replace a full system backup and does not guarantee that restored content is malware-free.",
     trustKicker: "BUILT ON TRUST",
     trustTitle1: "Nothing hidden.",
-    trustTitle2: "No magic promises.",
+    trustTitle2: "Explicit limitations.",
     trustIntro:
       "Good security starts with honest expectations. AntiOS is an independent open-source project with visible capabilities and clear limitations.",
     source: "Explore the source",
@@ -83,9 +83,9 @@
     privacyBody:
       "Security and diagnostic data is processed locally by default. AntiOS does not enable automatic project telemetry. Review diagnostic exports before sharing them.",
     privacyLink: "Privacy policy ↗",
-    openTitle: "Open code. Visible progress.",
+    openTitle: "Open source.",
     openBody:
-      "The v2 source is available under Apache 2.0. Releases and automated checks are published on GitHub, so you can follow the project as it develops.",
+      "The AntiOS source is available under Apache 2.0. Releases and automated checks are published on GitHub.",
     openLink: "View automated checks ↗",
     alphaTitle: "Alpha means work in progress",
     alphaBody:
