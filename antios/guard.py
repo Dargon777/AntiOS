@@ -50,6 +50,7 @@ _DEFAULT_GUARD_RESCAN = 1800 if os.name != "nt" else 900
 _DEEP_INITIAL_DELAY = 15.0
 _DEEP_RUNTIME_INTERVAL = 60.0
 _DEEP_PERSISTENCE_INTERVAL = 300.0
+_DEEP_PLATFORM_INTERVAL = 300.0
 
 
 def _transient_scan_conflict(exc: BaseException) -> bool:
@@ -527,6 +528,7 @@ class Guard:
         last_stop_poll = float('-inf')
         next_deep_runtime = time.monotonic() + _DEEP_INITIAL_DELAY
         next_deep_persistence = time.monotonic() + _DEEP_INITIAL_DELAY
+        next_deep_platform = time.monotonic() + _DEEP_INITIAL_DELAY + 5.0
         last_alert_loss_reported = 0
         version, changed, notification_error = None, True, False
         next_notification_retry = 0.0
@@ -634,6 +636,25 @@ class Guard:
                         ):
                             next_deep_persistence = (
                                 now + _DEEP_PERSISTENCE_INTERVAL
+                            )
+                    if now >= next_deep_platform:
+                        if self._start_deep_security(
+                            (
+                                Surface.DRIVER,
+                                Surface.BOOT,
+                                Surface.UEFI,
+                                Surface.DMA,
+                                Surface.ATTESTATION,
+                            ),
+                            ScanBudget(
+                                max_items=4_096,
+                                max_bytes=256 * 1024 * 1024,
+                                max_seconds=25.0,
+                                allow_privileged=True,
+                            ),
+                        ):
+                            next_deep_platform = (
+                                now + _DEEP_PLATFORM_INTERVAL
                             )
 
                 while self._behavior_events:

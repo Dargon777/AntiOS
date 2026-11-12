@@ -24,9 +24,10 @@ incident correlation. The sensor layer does not create a second verdict engine.
 | Virtualization | hypervisor/VBS/security posture | query | admin |
 | Attestation | TPM/measured boot and platform claims | attestation | admin |
 
-This table describes the target surface map. On Windows, process inventory,
-high-value persistence inventory and bounded process-memory inspection are now
-connected to this architecture. The remaining rows are still planned coverage.
+This table describes the target surface map. On Windows, process/persistence,
+bounded process-memory inspection, loaded-driver trust and core boot/platform
+posture are now connected to this architecture. The remaining rows are still
+planned coverage.
 
 ## Contracts
 
@@ -74,8 +75,30 @@ validated.
    - embedded PE-header classification;
    - inaccessible/protected processes remain explicit partial coverage;
    - raw memory bytes are never persisted in evidence or logs.
-3. Driver trust and vulnerable-driver intelligence.
-4. Boot, Secure Boot, TPM/measured-boot and DMA posture.
+3. **Implemented baseline:** Driver trust and vulnerable-driver intelligence.
+   - loaded kernel images from EnumDeviceDrivers with a running-driver CIM
+     supplement/fallback;
+   - stable flat SHA-256 for the authenticated AntiOS malware catalog;
+   - Authenticode trust status and signer metadata;
+   - Microsoft-documented Authenticode PE-image SHA-256 for exact full-hash
+     comparison against the local Microsoft Recommended Driver Blocklist XML;
+   - Windows CI cross-checks the AntiOS PE-image hash directly against
+     SignTool's `Hash of file (sha256)` output;
+   - VulnerableDriverBlocklistEnable is recorded as posture only because its
+     absence does not prove the effective blocklist is disabled;
+   - exact Microsoft full-hash matches, known-malware hashes and untrusted
+     user-writable drivers are review evidence only;
+   - Microsoft page-hash/certificate/publisher deny rules and manually mapped
+     kernel code remain explicit coverage gaps.
+4. **Implemented baseline:** Boot / Secure Boot / TPM / DMA posture.
+   - BIOS-versus-UEFI firmware type and Secure Boot state;
+   - TPM present/ready/enabled/activated state and vendor/version metadata;
+   - VBS status, HVCI/Memory Integrity, Secure Launch and SMM firmware
+     measurement service state through Win32_DeviceGuard;
+   - Code Integrity/App Control policy presence and enforcement status;
+   - Device Guard DMA capability/requirement posture;
+   - PCR values and measured-boot event-log validation are not yet performed;
+   - UEFI PK/KEK/DB/DBX contents and SPI flash are not read or authenticated.
 5. Browser and network correlation.
 6. GPU/device-firmware inventory and telemetry.
 7. Platform-firmware and virtualization attestation where supported.
@@ -87,13 +110,15 @@ testable acquisition path for the specific platform.
 
 ## Resident Guard integration
 
-On Windows the Guard schedules process+RAM inspection and persistence inventory
-in a single background deep-security worker. The worker is bounded and does not
-block the Guard heartbeat, directory notifications or ordinary file scanning.
+On Windows the Guard schedules process+RAM inspection, persistence inventory,
+and a slower driver/platform posture cycle through one background deep-security
+worker. The worker is bounded and does not block the Guard heartbeat, directory
+notifications or ordinary file scanning.
 Raw sensor evidence is published to the shared EvidenceBus, evaluated by the
 multi-sensor signature engine and then attached to IncidentGraph on the Guard
 thread.
 
-The initial implementation remains detect/review-only. Memory metadata,
-persistence heuristics and multi-sensor signatures cannot authorize quarantine
-or process termination.
+The implementation remains detect/review-only. Memory metadata, persistence
+heuristics, driver trust/BYOVD evidence, platform-posture findings and
+multi-sensor signatures cannot authorize quarantine, driver unloading, process
+termination or firmware/security-setting changes.

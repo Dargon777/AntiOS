@@ -1229,18 +1229,35 @@ class WindowsMemorySensor:
 
 
 def build_windows_registry(*, evidence_bus=None) -> SensorRegistry:
-    """Return the deep-security registry with the first real Windows sensors."""
+    """Return implemented Windows collectors and honest placeholders elsewhere."""
 
     if os.name != "nt":
         raise OSError("Windows security sensors are only available on Windows")
+    from .windows_platform_sensors import (
+        WindowsAttestationSensor,
+        WindowsBootSensor,
+        WindowsDmaSensor,
+        WindowsDriverProvider,
+        WindowsDriverSensor,
+        WindowsPlatformProvider,
+        WindowsUefiSensor,
+    )
+
     process_provider = WindowsProcessProvider()
     persistence_provider = WindowsPersistenceProvider()
     memory_provider = WindowsMemoryProvider()
+    driver_provider = WindowsDriverProvider()
+    platform_provider = WindowsPlatformProvider()
 
     replacements = {
         Surface.PROCESS: WindowsProcessSensor(process_provider),
         Surface.PERSISTENCE: WindowsPersistenceSensor(persistence_provider),
         Surface.RAM: WindowsMemorySensor(process_provider, memory_provider),
+        Surface.DRIVER: WindowsDriverSensor(driver_provider),
+        Surface.BOOT: WindowsBootSensor(platform_provider),
+        Surface.UEFI: WindowsUefiSensor(platform_provider),
+        Surface.DMA: WindowsDmaSensor(platform_provider),
+        Surface.ATTESTATION: WindowsAttestationSensor(platform_provider),
     }
     registry = SensorRegistry(evidence_bus=evidence_bus)
     for descriptor in default_descriptors():
