@@ -1,33 +1,37 @@
-# AntiOS 3.0.02 Alpha
+# AntiOS 3.0.03 Alpha
 
-This prerelease moves the current Windows app onto the independent AntiOS Engine and refreshes the main scan workflow.
+This prerelease improves the Windows security-evidence surfaces and makes release provenance checks stricter. It builds on the AntiOS Engine and scan workflow introduced in 3.0.02 Alpha.
 
-## Changes
+## What's new
 
-- Redesigned Windows overview, scan workspace, quarantine view and tools section.
-- Added light, balanced and heavy scan profiles with a separate worker setting.
-- Expanded the local SHA-256 signature set and improved folders with many small files.
-- Added clearer scan-coverage reporting and decision replay from saved JSON reports.
-- Added an inert benchmark with known expected outcomes.
+- Expanded read-only Windows process evidence: more reliable process identity, integrity level, a bounded loaded-module inventory, and Authenticode status of on-disk images.
+- Improved persistence review and correlation of related findings in the existing risk and incident views.
+- Added bounded evidence for process memory, driver trust and known vulnerable drivers, and Windows boot/platform security posture.
+- Kept partial coverage visible. Missing evidence is **not** a clean verdict, and weak heuristic signals do not independently trigger quarantine.
+- Streamlined CI workflows, refreshed public documentation, and hardened GitHub build-provenance checks for unsigned prereleases.
 
-## Downloads
+These sensors supply review context, **not** a claim of complete memory inspection, full system persistence coverage or guaranteed malware detection.
 
-The release contains Windows x64 Setup and portable packages, a Linux x86_64 archive and Python distributions.
+## Downloads and signing
 
-The Windows binaries in this prerelease are **unsigned**. SHA-256 files verify download integrity but not publisher identity.
+The release is intended to include Windows x64 Setup and portable ZIP, Linux x86_64 archive and Python distributions.
 
-## Upgrading from 2.x
+Windows binaries in this prerelease are **unsigned**. SHA-256 checksums verify file integrity only. GitHub build attestations are checked against the release commit and `master` workflow to establish build provenance; they do **not** prove Windows publisher identity. Windows SmartScreen may warn and Smart App Control may block unsigned files. See [Signing](../docs/SIGNING.md).
 
-Current 3.x builds no longer use the retired managed third-party scan engine. If Setup reports a legacy-installation conflict, follow [docs/INSTALLER.md](../docs/INSTALLER.md) and perform a clean migration instead of deleting services or registrations manually.
+## Upgrading
+
+If upgrading from a legacy 2.x installation, follow [Installer migration](../docs/INSTALLER.md) rather than manually deleting old services or registrations.
 
 ## Русский
 
-В этом предварительном релизе Windows-приложение переведено на собственный AntiOS Engine и обновлён основной сценарий проверки.
+AntiOS 3.0.03 Alpha расширяет сбор сведений о безопасности Windows и усиливает проверку происхождения релизных сборок.
 
-- переработаны обзор, экран проверки, карантин и раздел инструментов;
-- добавлены профили Light / Balanced / Heavy и отдельный выбор числа потоков;
-- расширен локальный набор SHA-256 сигнатур;
-- отчёты лучше показывают неполное покрытие и поддерживают replay решения;
-- добавлен безопасный контрольный benchmark.
+- Улучшен сбор метаданных процессов: идентификация, уровень целостности, ограниченная проверка загруженных модулей и статуса подписи файлов на диске.
+- Улучшен анализ закрепления в системе и сопоставление связанных событий.
+- Добавлены ограниченные диагностические данные о памяти процессов, доверии к драйверам и состоянии механизмов защиты Windows.
+- Недоступные или неполные данные не выдаются за успешную проверку; слабые эвристические признаки сами по себе не приводят к карантину.
+- Упрощены CI-процессы, обновлена документация и усилена проверка происхождения неподписанных сборок.
 
-Windows-сборки этого релиза **не подписаны**. SHA-256 подтверждает целостность файла, но не личность издателя.
+Это **не** полная проверка памяти, всех механизмов закрепления или гарантия обнаружения вредоносного ПО.
+
+Сборки Windows **не имеют цифровой подписи издателя**. Контрольные суммы SHA-256 подтверждают целостность, а GitHub Attestations — происхождение сборки из определённого коммита и workflow, но не личность издателя Windows.
