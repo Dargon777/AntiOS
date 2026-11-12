@@ -119,7 +119,9 @@ jobs:
             gh api --method POST "repos/$repo/releases" --input - --jq '.id'
           )"
           test -n "$release_id"
-          test "$(gh api "repos/$repo/releases/$release_id" --jq '.draft')" = "true"
+          gh api "repos/$repo/releases/$release_id" |
+            jq -e --arg tag "$tag" --arg sha "$BUILD_SHA" \
+              '.draft and .prerelease and .tag_name == $tag and .target_commitish == $sha' >/dev/null
 
           shopt -s nullglob
           files=(
@@ -140,7 +142,11 @@ jobs:
             jq -e --arg name "$name" --arg digest "$expected"               '.name == $name and .state == "uploaded" and .digest == $digest'               "$RUNNER_TEMP/upload-result.json" >/dev/null
           done
           test "$(gh api "repos/$repo/releases/$release_id" --jq '.assets | length')" = "8"
-          printf '%s\n' '{"draft":false,"prerelease":true}' |
+          jq -n --arg tag "$tag" --arg sha "$BUILD_SHA" \
+            '{tag_name:$tag,target_commitish:$sha,draft:false,prerelease:true}' |
             gh api --method PATCH "repos/$repo/releases/$release_id" --input - >/dev/null
-          test "$(gh api "repos/$repo/releases/$release_id" --jq '.draft')" = "false"
+          gh api "repos/$repo/releases/$release_id" |
+            jq -e --arg tag "$tag" \
+              '(.draft | not) and .prerelease and .tag_name == $tag and (.assets | length) == 8' >/dev/null
+          test "$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')" = "$BUILD_SHA"
           echo "Published unsigned prerelease at https://github.com/$repo/releases/tag/$tag"

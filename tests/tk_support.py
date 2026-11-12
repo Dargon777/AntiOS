@@ -42,13 +42,17 @@ def isolated_tk_test(function):
         node = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", 1)[0]
         if os.environ.get("ANTIOS_TK_TEST_NODE") == node:
             return function(*args, **kwargs)
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", node, "-ra", "-W", "error"],
-            env=dict(os.environ, ANTIOS_TK_TEST_NODE=node),
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", timeout=360,
-            **hidden_process_kwargs(),
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", node, "-ra", "-W", "error", "-o", "faulthandler_timeout=45"],
+                env=dict(os.environ, ANTIOS_TK_TEST_NODE=node),
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", timeout=360,
+                **hidden_process_kwargs(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            logs = b"\n".join((exc.stdout or b"", exc.stderr or b"")).decode("utf-8", errors="replace")
+            raise AssertionError(f"Desktop scenario timed out: {node}\n{logs}") from exc
         assert result.returncode == 0, result.stdout + result.stderr
         assert "1 passed" in result.stdout, result.stdout + result.stderr
     return run

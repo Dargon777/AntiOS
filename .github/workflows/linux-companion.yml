@@ -42,7 +42,14 @@ jobs:
             done
             return 1
           }
-          install_apt_packages clamav-daemon python3-tk xvfb xauth
+          probe_tk() {
+            command -v xvfb-run >/dev/null && command -v xauth >/dev/null &&
+              xvfb-run -a python -c 'import tkinter as tk; root = tk.Tk(); root.withdraw(); root.destroy()'
+          }
+          if ! probe_tk; then
+            install_apt_packages python3-tk xvfb xauth
+            probe_tk
+          fi
           python -m pip install --upgrade pip
           python -m pip install pytest pyinstaller -e .
       - name: Linux companion tests

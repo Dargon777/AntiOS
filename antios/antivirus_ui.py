@@ -263,9 +263,11 @@ class AntivirusPanel:
             table, orient="horizontal", command=self.tree.xview, style="AntiOS.Horizontal.TScrollbar")
         def update_scrollbar(bar, first, last):
             bar.set(first, last)
-            if float(first) == 0.0 and float(last) == 1.0:
+            needed = float(first) > 0.0 or float(last) < 1.0
+            visible = bool(bar.winfo_manager())
+            if visible and not needed:
                 bar.grid_remove()
-            else:
+            elif needed and not visible:
                 bar.grid()
 
         self.tree.configure(
@@ -275,6 +277,10 @@ class AntivirusPanel:
         self.tree.grid(row=0, column=0, sticky="nsew")
         vertical.grid(row=0, column=1, sticky="ns")
         horizontal.grid(row=1, column=0, sticky="ew")
+        # Reserve both gutters so toggling one bar never changes the other
+        # axis's viewport or schedules a scrollbar geometry feedback loop.
+        table.grid_columnconfigure(1, minsize=vertical.winfo_reqwidth())
+        table.grid_rowconfigure(1, minsize=horizontal.winfo_reqheight())
         self.empty_result = self._label(table, "", color="muted", font=("Segoe UI", 10))
         self.tree.bind("<<TreeviewSelect>>", lambda _event: self._selection_changed())
         self.tree.bind("<Double-1>", lambda _event: self._details())

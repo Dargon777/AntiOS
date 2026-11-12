@@ -300,6 +300,9 @@ class ScrollFrame:
         self.canvas.configure(yscrollcommand=self._scroll_position)
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.scrollbar.grid(row=0, column=1, sticky="ns")
+        # Keep the canvas width fixed while the scrollbar is hidden. Its
+        # visibility must not rewrap the contents and trigger another resize.
+        self.frame.grid_columnconfigure(1, minsize=self.scrollbar.winfo_reqwidth())
 
         self.inner.bind(
             "<Configure>",
@@ -320,9 +323,11 @@ class ScrollFrame:
 
     def _scroll_position(self, first: str, last: str) -> None:
         self.scrollbar.set(first, last)
-        if float(first) == 0.0 and float(last) == 1.0:
+        needed = float(first) > 0.0 or float(last) < 1.0
+        visible = bool(self.scrollbar.winfo_manager())
+        if visible and not needed:
             self.scrollbar.grid_remove()
-        else:
+        elif needed and not visible:
             self.scrollbar.grid()
 
     def _bind_wheel(self, _event: Any) -> None:
