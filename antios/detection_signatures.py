@@ -81,6 +81,7 @@ class DetectionSignature:
     severity: int
     maliciousness: float
     confidence: float
+    same_subject: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.rule_id, str) or not self.rule_id or len(self.rule_id) > 128:
@@ -96,13 +97,22 @@ class DetectionSignature:
         for name, value in (("maliciousness", self.maliciousness), ("confidence", self.confidence)):
             if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 1:
                 raise ValueError(f"Detection signature {name} must be between 0 and 1")
+        if not isinstance(self.same_subject, bool):
+            raise ValueError("Detection signature same_subject must be boolean")
 
     def match(self, evidence: tuple[Evidence, ...]) -> tuple[Evidence, ...]:
         matched: list[Evidence] = []
+        subject: str | None = None
         for pattern in self.patterns:
-            candidate = next((item for item in evidence if pattern.matches(item)), None)
+            candidate = next((
+                item for item in evidence
+                if pattern.matches(item)
+                and (not self.same_subject or subject is None or item.subject == subject)
+            ), None)
             if candidate is None:
                 return ()
+            if self.same_subject and subject is None:
+                subject = candidate.subject
             matched.append(candidate)
         return tuple(matched)
 
