@@ -162,6 +162,52 @@ def _truthy(key: str) -> AttributeConstraint:
     return AttributeConstraint(key, "truthy")
 
 
+def behavior_findings_to_evidence(findings: Iterable[Mapping[str, object]]) -> tuple[Evidence, ...]:
+    """Translate existing BehaviorEngine findings into rule-engine inputs.
+
+    This adapter does not add new maliciousness to risk by itself. Risk fusion
+    uses it only as context for multi-sensor signatures, while the original
+    behavior score remains authoritative for behavior-only decisions.
+    """
+    translated: list[Evidence] = []
+    for finding in findings:
+        if not isinstance(finding, Mapping):
+            continue
+        rule = finding.get("rule")
+        score = finding.get("score", 0)
+        if not isinstance(rule, str) or not rule or type(score) is not int:
+            continue
+        score = min(95, max(0, score))
+        attributes: dict[str, object] = {}
+        if rule == "document-spawns-interpreter":
+            attributes.update(document_spawns_interpreter=True, interpreter_execution=True)
+        elif rule == "browser-spawns-interpreter":
+            attributes.update(browser_spawns_interpreter=True, interpreter_execution=True)
+        elif rule == "user-writable-execution":
+            attributes["user_writable_execution"] = True
+        elif rule == "changed-then-executed":
+            attributes["changed_then_executed"] = True
+        elif rule == "mass-file-changes":
+            attributes["mass_file_changes"] = True
+        elif rule == "interpreter-with-mass-file-changes":
+            attributes.update(mass_file_changes=True, interpreter_execution=True)
+        else:
+            continue
+        translated.append(Evidence(
+            source=f"behavior:{rule}",
+            kind="behavior",
+            subject=str(finding.get("subject") or ""),
+            maliciousness=min(.95, score / 100.0),
+            confidence=.90,
+            severity=score,
+            correlation_group=f"behavior-rule:{rule}",
+            detail=str(finding.get("summary") or "")[:1000],
+            at=float(finding.get("at") or 0.0),
+            attributes=attributes,
+        ))
+    return tuple(translated)
+
+
 DEFAULT_DETECTION_SIGNATURES = DetectionSignatureEngine((
     DetectionSignature(
         "file.packed-rwx-high-entropy",
