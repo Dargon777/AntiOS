@@ -153,8 +153,27 @@ def test_persistence_sensor_flags_user_writable_autorun_for_review_only():
     report = sensor.collect(ScanContext())
     item, = report.evidence
     assert item.attributes["user_writable_target"] is True
-    assert item.risk_score >= 40
+    assert 0 < item.risk_score < 40
     assert item.attributes["persistence_kind"] == "run-key"
+
+
+def test_user_writable_auto_service_is_stronger_than_common_user_autorun():
+    sensor = WindowsPersistenceSensor(
+        FakePersistence([
+            PersistenceEntry(
+                "service",
+                r"HKLM\SYSTEM\CurrentControlSet\Services\BadPath",
+                "BadPath",
+                r'"C:\Users\alice\AppData\Local\svc.exe" --service',
+                scope="machine",
+                target=r"C:\Users\alice\AppData\Local\svc.exe",
+            )
+        ]),
+        user_writable_roots=(r"C:\Users\alice\AppData",),
+    )
+    report = sensor.collect(ScanContext())
+    item, = report.evidence
+    assert item.risk_score >= 40
 
 
 def test_persistence_sensor_keeps_uncovered_sources_visible():
