@@ -28,7 +28,10 @@ from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
 from .risk import evaluate_risk
 from .scan_process import run_scan_process
-from .security_sensors import (\n    CoverageSummary, ScanBudget, ScanContext, Surface, runtime_registry,\n)\nfrom .windows_process import hidden_process_kwargs
+from .security_sensors import (
+    CoverageSummary, ScanBudget, ScanContext, Surface, runtime_registry,
+)
+from .windows_process import hidden_process_kwargs
 
 
 # Files that commonly become an execution boundary should reach the scanner
