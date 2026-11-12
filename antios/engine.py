@@ -226,10 +226,13 @@ def _pe_signal(data: bytes) -> ScanOutcome:
     for index in range(sections):
         entry = table + index * 40
         raw_size, raw_offset, flags = struct.unpack_from("<II12xI", data, entry + 16)
+        if raw_size and (raw_offset > len(data) or raw_size > len(data) - raw_offset):
+            return _inspection_gap(
+                "invalid-pe-section-bounds", "Executable section exceeds file bounds",
+                detail="PE section raw data points outside the inspected file",
+            )
         executable_writable = flags & 0x20000000 and flags & 0x80000000
         if not executable_writable or raw_size < 4096:
-            continue
-        if raw_offset > len(data) or raw_size > len(data) - raw_offset:
             continue
         if _entropy(data[raw_offset:raw_offset + min(raw_size, 32768)]) > 7.5:
             return _PE_SECTION.evaluate()

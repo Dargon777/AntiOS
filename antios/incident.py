@@ -12,6 +12,8 @@ import time
 from typing import Iterable
 
 from .behavior import ProcessEvent
+from .evidence import Evidence, coerce_evidence
+from .process_identity import process_identity
 
 
 def _path(value: str) -> str:
@@ -98,7 +100,11 @@ class IncidentGraph:
         self.recent_processes = deque(maxlen=512)
         self.incidents: dict[str, _Incident] = {}
         self.path_index: dict[str, str] = {}
+        # PID-only index is retained for collectors that cannot observe a
+        # creation stamp. Stable collectors use process_index and never fall
+        # back to a recycled PID.
         self.pid_index: dict[int, str] = {}
+        self.process_index: dict[tuple[int, int], str] = {}
         self.pending_updates = deque(maxlen=100)
         self._pending_incidents: set[str] = set()
         self.total_created = 0
@@ -123,6 +129,10 @@ class IncidentGraph:
             }
             self.pid_index = {
                 key: value for key, value in self.pid_index.items()
+                if value not in dead
+            }
+            self.process_index = {
+                key: value for key, value in self.process_index.items()
                 if value not in dead
             }
             if self.latest_id in dead:
@@ -150,6 +160,10 @@ class IncidentGraph:
                 key: value for key, value in self.pid_index.items()
                 if value != old_id
             }
+            self.process_index = {
+                key: value for key, value in self.process_index.items()
+                if value != old_id
+            }
         self._counter += 1
         incident_id = f"INC-{self._counter:06d}"
         incident = _Incident(incident_id, now)
@@ -157,6 +171,24 @@ class IncidentGraph:
         self.total_created += 1
         self.latest_id = incident_id
         return incident
+
+    def _process_incident(self, pid: int, creation_time: int = 0) -> _Incident | None:
+        if not pid:
+            return None
+        identity = process_identity(pid, creation_time)
+        if identity.stable:
+            incident_id = self.process_index.get(identity.lookup_key)
+        else:
+            incident_id = self.pid_index.get(identity.pid)
+        return self.incidents.get(incident_id or "")
+
+    def _index_process(self, pid: int, creation_time: int, incident_id: str) -> None:
+        if not pid:
+            return
+        identity = process_identity(pid, creation_time)
+        self.pid_index[identity.pid] = incident_id
+        if identity.stable:
+            self.process_index[identity.lookup_key] = incident_id
 
     def _node(self, incident: _Incident, node: IncidentNode) -> bool:
         if node.id in incident.nodes:
@@ -239,8 +271,9 @@ class IncidentGraph:
 
         incident = None
         changed_at = self._recent_change(child_path, now) if child_path else None
-        if event.ppid in self.pid_index:
-            incident = self.incidents.get(self.pid_index[event.ppid])
+        parent_incident = self._process_incident(event.ppid, event.parent_creation_time)
+        if parent_incident is not None:
+            incident = parent_incident
         if incident is None and child_path in self.path_index:
             incident = self.incidents.get(self.path_index[child_path])
         if incident is None and changed_at is not None:
@@ -251,26 +284,31 @@ class IncidentGraph:
             self.recent_processes.append((now, event))
             return []
 
-        child_id = f"process:{event.pid}"
+        child_identity = process_identity(event.pid, event.creation_time)
+        child_id = child_identity.node_id
         child_label = event.path or event.image or f"pid:{event.pid}"
         self._node(incident, IncidentNode(
             child_id, "process", child_label, now,
             {"pid": event.pid, "ppid": event.ppid, "image": event.image,
-             "path": event.path},
+             "path": event.path, "creation_time": event.creation_time,
+             "command_line": event.command_line, "signer": event.signer,
+             "integrity_level": event.integrity_level},
         ))
-        self.pid_index[event.pid] = incident.id
+        self._index_process(event.pid, event.creation_time, incident.id)
         if child_path:
             self.path_index[child_path] = incident.id
 
         if event.ppid:
-            parent_id = f"process:{event.ppid}"
+            parent_identity = process_identity(event.ppid, event.parent_creation_time)
+            parent_id = parent_identity.node_id
             parent_label = event.parent_path or event.parent_image or f"pid:{event.ppid}"
             self._node(incident, IncidentNode(
                 parent_id, "process", parent_label, now,
                 {"pid": event.ppid, "image": event.parent_image,
-                 "path": event.parent_path},
+                 "path": event.parent_path,
+                 "creation_time": event.parent_creation_time},
             ))
-            self.pid_index[event.ppid] = incident.id
+            self._index_process(event.ppid, event.parent_creation_time, incident.id)
             if parent_path:
                 self.path_index[parent_path] = incident.id
             self._edge(incident, parent_id, child_id, "spawned", now)
@@ -323,20 +361,21 @@ class IncidentGraph:
                 if now - seen_at <= self.ttl and normalized and
                 _path(event.path) == normalized
             ), None)
-            if incident is None and process is not None and process.pid in self.pid_index:
-                incident = self.incidents.get(self.pid_index[process.pid])
+            if incident is None and process is not None:
+                incident = self._process_incident(process.pid, process.creation_time)
             if incident is None:
                 incident = self._new(now)
 
             anchor_id = None
             if process is not None:
-                anchor_id = f"process:{process.pid}"
+                anchor_id = process_identity(process.pid, process.creation_time).node_id
                 self._node(incident, IncidentNode(
                     anchor_id, "process", process.path or process.image, now,
                     {"pid": process.pid, "ppid": process.ppid,
-                     "image": process.image, "path": process.path},
+                     "image": process.image, "path": process.path,
+                     "creation_time": process.creation_time},
                 ))
-                self.pid_index[process.pid] = incident.id
+                self._index_process(process.pid, process.creation_time, incident.id)
                 if normalized:
                     self.path_index[normalized] = incident.id
 
@@ -376,6 +415,70 @@ class IncidentGraph:
             updates.append(self.snapshot(incident.id))
         return updates
 
+    def observe_evidence(self, values: Iterable[Evidence | dict], *, at: float = 0.0) -> list[dict]:
+        """Attach generic sensor/model evidence without granting enforcement."""
+        now = self._now(at)
+        self._expire(now)
+        updates: list[dict] = []
+        for raw in list(values)[:32]:
+            item = coerce_evidence(raw)
+            observed_at = float(item.at or now)
+            attrs = dict(item.attributes)
+            path_value = attrs.get("path")
+            if not isinstance(path_value, str):
+                path_value = item.subject if item.kind == "file" else ""
+            normalized = _path(path_value)
+
+            pid_value = attrs.get("pid", 0)
+            pid = pid_value if type(pid_value) is int and pid_value > 0 else 0
+            creation_value = attrs.get("creation_time", 0)
+            creation_time = (
+                creation_value if type(creation_value) is int and creation_value > 0 else 0
+            )
+
+            incident = self.incidents.get(self.path_index.get(normalized, "")) if normalized else None
+            if incident is None and pid:
+                incident = self._process_incident(pid, creation_time)
+            score = item.risk_score
+            if incident is None and score >= 40:
+                incident = self._new(observed_at)
+            if incident is None:
+                continue
+
+            anchor_id = ""
+            if pid:
+                identity = process_identity(pid, creation_time)
+                anchor_id = identity.node_id
+                self._node(incident, IncidentNode(
+                    anchor_id, "process", item.subject or f"pid:{pid}", observed_at,
+                    {"pid": pid, "creation_time": creation_time},
+                ))
+                self._index_process(pid, creation_time, incident.id)
+            elif normalized:
+                anchor_id = f"file:{normalized}"
+                self._node(incident, IncidentNode(
+                    anchor_id, "file", path_value, observed_at, {"path": path_value},
+                ))
+                self.path_index[normalized] = incident.id
+
+            evidence_id = (
+                f"evidence:{incident.id}:{len(incident.nodes)}:"
+                f"{int(observed_at * 1000000)}"
+            )
+            self._node(incident, IncidentNode(
+                evidence_id, "evidence", item.source, observed_at, item.to_dict(),
+            ))
+            if anchor_id:
+                self._edge(incident, anchor_id, evidence_id, "supports-risk", observed_at)
+
+            incident.score = max(incident.score, score)
+            incident.classification = _classification_for_score(
+                incident.score, confirmed=incident.confirmed_threat
+            )
+            self._queue_update(incident, "generic-evidence")
+            updates.append(self.snapshot(incident.id))
+        return updates
+
     def observe_risk(self, context: dict, *, at: float = 0.0) -> list[dict]:
         now = self._now(at)
         self._expire(now)
@@ -410,6 +513,9 @@ class IncidentGraph:
                 "confirmed_threat": confirmed,
                 "behavior_score": context.get("behavior_score"),
                 "behavior_rules": context.get("behavior_rules", []),
+                "evidence_score": context.get("evidence_score", 0),
+                "evidence_sources": context.get("evidence_sources", []),
+                "evidence_rules": context.get("evidence_rules", []),
                 "origin": context.get("origin"),
                 "native_pre_execution": context.get("native_pre_execution"),
                 "automatic_enforcement_eligible":

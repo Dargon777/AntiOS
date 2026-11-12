@@ -50,17 +50,22 @@ def test_bundled_publisher_catalog_has_provenance():
 def test_application_supplement_is_exact_and_new_signed_catalog_supersedes_it(publisher):
     package, _ = publisher
     supplemental = set(antivirus.AKIRA_SUPPLEMENT)
+    cisa_2025 = set(antivirus.CISA_2025_SUPPLEMENT)
+    combined = supplemental | cisa_2025
     assert len(supplemental) == 13
-    assert all(len(bytes.fromhex(digest)) == 32 and digest == digest.lower() for digest in supplemental)
+    assert len(cisa_2025) == 7
+    assert all(len(bytes.fromhex(digest)) == 32 and digest == digest.lower() for digest in combined)
 
     rules, metadata = antivirus.load_managed_signatures()
-    assert supplemental <= rules.keys()
-    assert metadata["signature_bundled_supplement_entries"] == 13
+    assert combined <= rules.keys()
+    assert metadata["signature_bundled_supplement_entries"] == 20
+    assert metadata["signature_cisa_2025_entries"] == 7
 
     catalog.install_catalog(package(4))
     rules, metadata = antivirus.load_managed_signatures()
-    assert supplemental.isdisjoint(rules)
+    assert combined.isdisjoint(rules)
     assert metadata["signature_bundled_supplement_entries"] == 0
+    assert metadata["signature_cisa_2025_entries"] == 0
 
 
 def test_bad_signature_and_downgrade_preserve_active_catalog(publisher):

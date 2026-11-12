@@ -19,7 +19,7 @@ from .engine import MAX_INLINE_BYTES, AntiOSEngine, inspection_limits
 from .engine_types import ScanOutcome
 from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
 from .scan_verdict import apply_scan_verdict
-from .signature_bootstrap import AKIRA_SUPPLEMENT
+from .signature_bootstrap import AKIRA_SUPPLEMENT, CISA_2025_SUPPLEMENT
 from .signature_catalog import load_active_catalog
 
 DEFAULT_MAX_BYTES = MAX_INLINE_BYTES
@@ -103,7 +103,15 @@ def load_managed_signatures() -> tuple[dict[str, str], dict]:
     if catalog.version <= 3:
         for digest in AKIRA_SUPPLEMENT:
             rules.setdefault(digest, "Akira ransomware (CISA/FBI)")
-    metadata = dict(catalog.metadata(), signature_bundled_supplement_entries=len(rules) - len(catalog.rules))
+        for digest, label in CISA_2025_SUPPLEMENT.items():
+            rules.setdefault(digest, label)
+    metadata = dict(
+        catalog.metadata(),
+        signature_bundled_supplement_entries=len(rules) - len(catalog.rules),
+        signature_cisa_2025_entries=(
+            len(CISA_2025_SUPPLEMENT) if catalog.version <= 3 else 0
+        ),
+    )
     rules[EICAR_SHA256] = "EICAR test file (not live malware)"
     return rules, metadata
 

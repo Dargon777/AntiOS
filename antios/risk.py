@@ -12,6 +12,9 @@ import ntpath
 import time
 from typing import Iterable
 
+from .detection_signatures import DEFAULT_DETECTION_SIGNATURES, behavior_findings_to_evidence
+from .evidence import Evidence, summarize_evidence
+
 
 @dataclass(frozen=True)
 class RiskContext:
@@ -26,6 +29,9 @@ class RiskContext:
     review_signal: bool
     behavior_score: int
     behavior_rules: tuple[str, ...]
+    evidence_score: int
+    evidence_sources: tuple[str, ...]
+    evidence_rules: tuple[str, ...]
     origin: str
     origin_score: int
     native_pre_execution: str
@@ -98,10 +104,23 @@ def _scanner_summary(result: dict) -> tuple[str, bool, bool, bool]:
 
 
 def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[dict] = (),
+                  evidence: Iterable[Evidence | dict] = (),
                   native_pre_execution: bool | None = None,
                   now: float | None = None) -> RiskContext:
     verdict, complete, confirmed, review = _scanner_summary(scan_result)
-    behavior_score, behavior_rules = _behavior_summary(behavior_findings)
+    behavior_items = tuple(behavior_findings)
+    behavior_score, behavior_rules = _behavior_summary(behavior_items)
+    raw_evidence = tuple(evidence)
+    behavior_evidence = behavior_findings_to_evidence(behavior_items)
+    signature_evidence = DEFAULT_DETECTION_SIGNATURES.evaluate(
+        (*raw_evidence, *behavior_evidence)
+    )
+    evidence_score, evidence_sources = summarize_evidence((*raw_evidence, *signature_evidence))
+    evidence_rules = tuple(
+        str(item.attributes.get("rule_id"))
+        for item in signature_evidence
+        if item.attributes.get("rule_id")
+    )
     origin, origin_score = classify_origin(path)
 
     if confirmed:
@@ -121,6 +140,10 @@ def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[d
             base = max(base, 70)
         elif behavior_score > 0:
             base = max(base, min(45, behavior_score))
+
+        # Generic evidence is already confidence/severity bounded. Keep the
+        # strongest independent signal rather than adding uncalibrated points.
+        base = max(base, evidence_score)
 
         # Origin is context, never sufficient to produce a high-risk decision.
         if base > 0:
@@ -175,6 +198,9 @@ def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[d
         review_signal=review,
         behavior_score=behavior_score,
         behavior_rules=behavior_rules,
+        evidence_score=evidence_score,
+        evidence_sources=evidence_sources,
+        evidence_rules=evidence_rules,
         origin=origin,
         origin_score=origin_score,
         native_pre_execution=native_state,

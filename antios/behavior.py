@@ -40,6 +40,11 @@ class ProcessEvent:
     parent_image: str = ""
     parent_path: str = ""
     at: float = 0.0
+    creation_time: int = 0
+    parent_creation_time: int = 0
+    command_line: str = ""
+    signer: str = ""
+    integrity_level: str = ""
 
 
 @dataclass(frozen=True)
@@ -128,6 +133,8 @@ class BehaviorEngine:
         event = ProcessEvent(
             int(event.pid), int(event.ppid), event.image or "", event.path or "",
             event.parent_image or "", event.parent_path or "", now,
+            int(event.creation_time or 0), int(event.parent_creation_time or 0),
+            event.command_line or "", event.signer or "", event.integrity_level or "",
         )
         self._prune(now)
         self.processes.append(event)
