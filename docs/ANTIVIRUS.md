@@ -29,6 +29,12 @@ Example command:
 
     antios virus-scan PATH --profile heavy --workers 12 --json
 
+## Rust static core
+
+Windows desktop packages include a Rust library used by the existing scan worker. It computes SHA-256 for buffered data and checks PE and ELF headers and script indicators. The same checks also run on buffered archive members after bounded decompression. Python still handles archive traversal and budgets, file identity, streaming hashes, signed catalogs and verdicts.
+
+Scan reports show the active backend in `engine.static_core`. Builds without the library use the Python implementation. A rejected native call switches the scan to Python without changing its inspection profile. The Rust library does not change Guard's post-write monitoring model.
+
 ## GPU hashing
 
 Manual scans have a GPU mode independent of scan depth and worker count. The Windows scanner can use an NVIDIA CUDA driver to calculate exact SHA-256 hashes for groups of buffered files up to 64 KiB each. Archive and structural inspection still run on the CPU.

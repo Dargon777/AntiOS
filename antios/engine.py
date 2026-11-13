@@ -24,6 +24,7 @@ import zipfile
 import zlib
 
 from .engine_types import ScanOutcome
+from .rust_static_core import load_static_core
 
 MAX_INLINE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 48 * 1024 * 1024
@@ -254,6 +255,19 @@ def _executable_signal(data: bytes) -> ScanOutcome:
     return _pe_signal(data)
 
 
+_NATIVE_EXECUTABLE_GAPS = {
+    1: ("invalid-pe-header", "Truncated executable header", ""),
+    2: ("invalid-pe-header", "Unrecognized executable header", ""),
+    3: ("invalid-pe-header", "Invalid executable section table", ""),
+    4: ("invalid-pe-header", "Truncated executable section table", ""),
+    5: ("invalid-pe-section-bounds", "Executable section exceeds file bounds",
+        "PE section raw data points outside the inspected file"),
+    7: ("invalid-elf-header", "Invalid ELF identification header", ""),
+    8: ("invalid-elf-header", "Truncated ELF header", ""),
+    9: ("invalid-elf-header", "Invalid ELF header size", ""),
+}
+
+
 def _read_zip_member(archive: zipfile.ZipFile, item: zipfile.ZipInfo, data: bytes) -> bytes:
     # Opening through ZipFile checks the local header, name and data bounds.
     with archive.open(item) as stream:
@@ -284,21 +298,60 @@ class AntiOSEngine:
             raise ValueError("Too many local signatures")
         self._limits = inspection_limits(profile)
         self._archive_slots = BoundedSemaphore(1 if profile == "light" else 2)
+        self._native = load_static_core()
         self.metadata = {
             "version": "AntiOS Engine/0.3",
             "database_freshness": "local",
             "signature_scope": "local-sha256",
+            "static_core": "rust" if self._native is not None else "python",
             "components": {"hashes": True, "scripts": True, "pe": True, "elf": True, "zip": True,
                            "gzip": True, "tar": True, "bzip2": True, "xz": True, "office_macros": True},
         }
 
+    def hash_content(self, data: bytes) -> str:
+        native = self._native
+        if native is not None:
+            try:
+                return native.digest(data)
+            except (OSError, ValueError):
+                self._disable_native()
+        return hashlib.sha256(data).hexdigest()
+
+    def _disable_native(self) -> None:
+        self._native = None
+        self.metadata["static_core"] = "python"
+        self.metadata["static_core_fallback"] = True
+
+    def _static_signal(self, data: bytes, name: str) -> ScanOutcome:
+        native = self._native
+        if native is not None and _SCRIPT_PREVIEW_BYTES == 16 * 1024 * 1024:
+            try:
+                script, executable = native.inspect(data, name.lower().endswith(_SCRIPT_EXTENSIONS))
+            except (OSError, ValueError):
+                self._disable_native()
+            else:
+                signal = _SCRIPT_COMBINATION.evaluate(2 if script & 1 else 0)
+                if script & 2:
+                    signal = _preferred(signal, _inspection_gap(
+                        "script-preview-only", detail="Only a bounded script preview was inspected",
+                    ))
+                if executable in _NATIVE_EXECUTABLE_GAPS:
+                    code, label, detail = _NATIVE_EXECUTABLE_GAPS[executable]
+                    return _preferred(signal, _inspection_gap(code, label, detail=detail))
+                if executable == 6:
+                    return _preferred(signal, _PE_SECTION.evaluate())
+                if executable == 10:
+                    return _preferred(signal, _executable_signal(data))
+                return signal
+        return _preferred(_script_signal(data, name), _executable_signal(data))
+
     def _inspect(self, data: bytes, name: str, *, depth: int, budget: _Budget,
                  digest: str | None = None) -> ScanOutcome:
-        digest = digest if digest is not None else hashlib.sha256(data).hexdigest()
+        digest = digest if digest is not None else self.hash_content(data)
         label = self._signatures.get(digest)
         if label is not None:
             return ScanOutcome("threat", label, self.name)
-        outcome = _preferred(_script_signal(data, name), _executable_signal(data))
+        outcome = self._static_signal(data, name)
         archive_format = _archive_format(data, name)
         if archive_format is None:
             return outcome
@@ -484,7 +537,7 @@ class AntiOSEngine:
         return self._inspect(content, name, depth=0, budget=budget, digest=digest)
 
     def scan(self, content: bytes, name: str) -> ScanOutcome:
-        return self.scan_with_digest(content, name, hashlib.sha256(content).hexdigest())
+        return self.scan_with_digest(content, name, self.hash_content(content))
 
     def scan_stream(self, chunks: Iterable[bytes]) -> ScanOutcome:
         return self.scan_stream_named(chunks, "")
@@ -515,7 +568,7 @@ class AntiOSEngine:
         content = bytes(prefix)
         if size == len(content):
             return self.scan_with_digest(content, name, sha)
-        advisory = _preferred(_script_signal(content, name), _executable_signal(content))
+        advisory = self._static_signal(content, name)
         outcome = _preferred(advisory, _inspection_gap("stream-preview-only"))
         return replace(outcome, detail="Only local hash and bounded content preview were available")
 

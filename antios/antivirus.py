@@ -312,6 +312,7 @@ def scan_files(
         result["engine"].update(getattr(provider, "metadata", {}))
     except (OSError, RuntimeError) as exc:
         result["engine"]["detail"] = str(exc)
+    hash_content = provider.hash_content if type(provider) is AntiOSEngine else sha256
 
     exclusions = tuple(Path(os.path.abspath(p)) for p in excluded_paths)
     transport = frozenset(Path(os.path.abspath(p)) for p in worker_files)
@@ -476,7 +477,7 @@ def scan_files(
                 content, info = _read_checked_file(item, info, buffer_limit)
                 if stage and cached_digest is None and 0 < len(content) <= acceleration.max_item_bytes:
                     return _BufferedFile(item, info, content)
-                return scan_buffered(item, info, content, sha256(content), cached_digest)
+                return scan_buffered(item, info, content, hash_content(content), cached_digest)
         except (OSError, ValueError) as exc:
             return {"item": item, "issue": str(exc), "error": True}
 
@@ -551,7 +552,7 @@ def scan_files(
                         if isinstance(file, _BufferedFile) else file for file in group)
             contents = tuple(file.content for file in group if isinstance(file, _BufferedFile))
             digests = iter(acceleration.digests(
-                contents, signatures, lambda values: tuple(parallel(sha256, values)),
+                contents, signatures, lambda values: tuple(parallel(hash_content, values)),
                 lambda values: tuple(parallel(len, values)),
             ))
             jobs = [(file, next(digests)) if isinstance(file, _BufferedFile) else (file, None) for file in group]
@@ -615,6 +616,10 @@ def scan_files(
         if executor is not None:
             executor.shutdown(wait=True, cancel_futures=True)
         if provider is not None:
+            if type(provider) is AntiOSEngine:
+                result["engine"]["static_core"] = provider.metadata["static_core"]
+                if provider.metadata.get("static_core_fallback"):
+                    result["engine"]["static_core_fallback"] = True
             provider.close()
         result["engine"]["acceleration"] = acceleration.status()
         acceleration.close()
@@ -649,7 +654,7 @@ def render_antivirus_scan(result: dict) -> str:
     if "decision" in result:
         dimensions = result["decision"]["dimensions"]
         lines.append("Decision: " + ", ".join(f"{key}={value}" for key, value in dimensions.items()))
-    for key in ("version", "database_freshness", "signature_source", "signature_catalog_version",
+    for key in ("version", "static_core", "database_freshness", "signature_source", "signature_catalog_version",
                 "signature_catalog_status", "signature_bundled_supplement_entries",
                 "signature_catalog_warning", "detail"):
         if key in result["engine"]:
