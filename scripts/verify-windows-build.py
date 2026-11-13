@@ -55,12 +55,13 @@ for name, runtime_dir in runtime_dirs.items():
                        timeout=60, check=True)
         records = [json.loads(line) for line in events.read_text(encoding='utf-8').splitlines()]
         assert records[-1][0] == 'done', records
-        result = [value for kind, value in records if kind == 'checkpoint'][-1]
+        checkpoints = [value for kind, value in records if kind == 'checkpoint']
+        result = checkpoints[-1]
         assert result['summary']['files_scanned'] == 1, result
         assert result['summary']['threats'] == 0, result
         if rust_dll:
             assert result['engine']['static_core'] == 'rust', result
-            finding, = result['findings']
+            finding, = (item for checkpoint in checkpoints for item in checkpoint['findings'])
             assert finding['kind'] == 'review', finding
             assert 'invalid-pe-header' in finding['coverage_gaps'], finding
             assert finding['sha256'] == hashlib.sha256(b'MZ').hexdigest(), finding
