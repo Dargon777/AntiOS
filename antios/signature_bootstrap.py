@@ -71,6 +71,74 @@ CISA_2025_SUPPLEMENT = {
         "SystemBC malware executable (CISA AA23-352A)",
 }
 
+# NCSC lists these as samples or malware components. Partial-image hashes and
+# memory captures are outside the full-file catalog. See NOTICE for licensing.
+_NCSC_FAMILY_DIGESTS = {
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Spec-Com-stix.json
+    "SpecCom": (
+        "0cba1f9fc63bb139d27a99839da8ddad83a40dfd7de8b01a4f6cb516527082d4",
+        "14c9c48614e0e105e53014cdfdade738671579a226f7a1345d15662211b45a35",
+        "15633871c3630a559dd4e2c7a9b93b02d17dd64ee60a2d7ba340ebd14d13ffac",
+        "1c00fd8202a6822257fe34e481c434af58ad0e3e731005a7fec994463c0117a9",
+        "27312973aefcfa2511573a28ff42ef12ecbfcf56db42bf4d1371b0a1f1f2732c",
+        "295b987c8926399c063ff20d2484477fe31cd2188b604a919dbfa11d9c34b988",
+        "3355174b6cd213792be46ed805810acf466d32485a932804331a0dfb219048ea",
+        "37c38a857c4a30abb559b0aec5fce7aa54117f7ecddde437fa988dd3527fd6d0",
+        "3c30a2075d7ca9b825d81167b79d45ce27a1bf07a0052412359afcdc73fdf51c",
+        "4229630102f0b972e9464a48fa67b4f7b1d5def8ad16b8e258523dabb7bda9a8",
+        "42e781f5e9c00d09cb5f7697a7b2fc9b04d77cc7978dcca8098f77d57693ca6c",
+        "489fca69a622195328302e64e29b6183feac90826dce198432d603202ca4d216",
+        "52a53e7e250fa9faa823d26421ca8af42ac40c27bac1d5af65b452c8987cda72",
+        "6395c4a8495d3bff293a8a55ca3c5ebf68a616ee212b2a7284610b0a3f7bb5d4",
+        "6ffe81c2883c298a65477ba2bc7ba1063315ad6b26f0188e3361d0fa924575ae",
+        "784cf7d224974f7e2c43cf10580c42a2521556608a5dd4a11247d09a77f5c8df",
+        "78e7c41458e1ddf336f0d2e9625abbdc0b3e86db18aee7377af5711bc927da35",
+        "7c25a5a88bfcc0ea7af287921860c6ab6b88b90042738650386c334bdef5b62b",
+        "83bc8f011cba273c9c0dd2070cad429664ea5cdef05387edfad7e0cd6a389b66",
+        "96fa3b2466ab06fbaf17f0d19507fb5b6614d1648d9811904a04d017b38af74a",
+        "9a3c2ba8ddbeffcb86e53f5193fe74747d7df2ca33ba839b1b23d04d0d5869e4",
+        "ab1983217880dad9c0481aab5b06e1fe4b9caaf8d56d8a03bf794aca18f2e4c6",
+        "b66104b4eb7d9cb169707289a1a0deac7ad8e262799b42d142bb5c009dcba4b5",
+        "c0082f8f1e49c0805c4eaacf5cf5b99ae30eeea585fd77cbd50904927052a18c",
+        "d31e440e0d6f98209a9c9c7b4e332f417e41030a4bf4a4ae99d326cec24807af",
+        "e683c86fd40eac23bc6435f479518ea5d80f90da294d5ad21d024dd7acc8a6ac",
+        "e7a5205bd0d941a7b6c88d31f3b958c890a4f09a49ec8a3a45f4bedaf194afeb",
+        "e9013f35ce11fc4c5eb2c21827bdc459202d362365d6ea5b724dee4fe0088bd1",
+        "fc3cdc3932d69c05c735040245f94fafe22b79cd865bb7d23c4364a3f4e8c774",
+        "ff1055da48829a69709702f1b44f5af0aa9be013bdc7fdf14db9dc66180d476d",
+        "ff97e35aec84882611d56dc5758e7dedd4839e326e5708d6d5ae4dbd296dd62d",
+    ),
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Infinite-Second-stix.json
+    "Infinite Second / ComRAT": (
+        "27fb6e28589ddff239d2616fde8169204da3f8365b9670e68f733424ecab93fe",
+        "9a3c57b080cb7b55d56b263a0bb2de592681e78716d025b3cdc895ee2dc144a1",
+        "b93484683014aca8e909c9b5648d8f0ac21a45d0c193f6ca40f0b01d2464c1c4",
+        "d532610528ad75d80c17f0372c5af8d2e417e0e2e08a055bf9923b71c149c51c",
+        "e209d07f8992892bf4776c897a8f054849b12464d9f58bcb78602217b3fd98bc",
+    ),
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Devil-Bait-stix.json
+    "Devil Bait": (
+        "a6f9043627f8be2452153b5dbf6278e9b91763c3b5c2aea537a859e0c8c6b504",
+        "fa71eee906a7849ba3f4bab74edb577bd1f1f8397ca428591b4a9872ce1f1e9b",
+    ),
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Busy-Buzzard-indicators.csv
+    "Busy Buzzard": (
+        "6cf6d1a9caee970bcb393a085d1dbb1f01a81fa684f6faf7ddbf0253302e1a4e",
+        "bd6992029c879b74b255aeb3549b8da487aff75d3f614832c23b4cd3717a067b",
+    ),
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Cyclops-Blink-indicators.csv
+    "Cyclops Blink": (
+        "4e69bbb61329ace36fbe62f9fb6ca49c37e2e5a5293545c44d155641934e39d1",
+        "ff17ccd8c96059461710711fcc8372cfea5f0f9eb566ceb6ab709ea871190dc6",
+    ),
+}
+NCSC_SUPPLEMENT = {
+    digest: f"{family} (NCSC)"
+    for family, digests in _NCSC_FAMILY_DIGESTS.items()
+    for digest in digests
+}
+
+
 BUNDLED_PACKAGE = b"""
 {
   "catalog": {

@@ -555,17 +555,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "signatures":
-            from .signature_catalog import install_catalog, load_active_catalog
-            catalog = (install_catalog(args.package) if args.signatures_command == "install"
-                       else load_active_catalog())
+            from .antivirus import load_managed_signatures
+            from .signature_catalog import install_catalog
+            if args.signatures_command == "install":
+                install_catalog(args.package)
+            rules, metadata = load_managed_signatures()
+            metadata["active_signatures"] = len(rules)
             if args.json:
-                _print_json(catalog.metadata())
+                _print_json(metadata)
             else:
-                print(f"AntiOS signature catalog v{catalog.version} ({catalog.published}) · "
-                      f"{len(catalog.rules)} hashes · {catalog.source}")
-                if catalog.warning:
-                    print(catalog.warning)
-            return 3 if catalog.warning else 0
+                print(f"AntiOS signature catalog v{metadata['signature_catalog_version']} · "
+                      f"{len(rules)} active hashes")
+                if metadata.get("signature_catalog_warning"):
+                    print(metadata["signature_catalog_warning"])
+            return 3 if metadata.get("signature_catalog_warning") else 0
 
         if args.command == "virus-scan":
             result = scan_files(args.path, signature_path=args.signatures,

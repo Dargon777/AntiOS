@@ -16,6 +16,7 @@ import lzma
 import math
 from pathlib import PurePosixPath
 import re
+import stat
 import struct
 import tarfile
 from threading import BoundedSemaphore
@@ -23,7 +24,18 @@ from typing import Callable, Iterable
 import zipfile
 import zlib
 
+from .document_inspection import inspect_document
 from .engine_types import ScanOutcome
+from .linear_archives import (
+    AR_MAGIC,
+    CPIO_MAGICS,
+    RPM_MAGIC,
+    THIN_AR_MAGIC,
+    ArchiveEntry,
+    ar_entries,
+    cpio_entries,
+    rpm_payload_start,
+)
 from .rust_static_core import load_static_core
 
 MAX_INLINE_BYTES = 64 * 1024 * 1024
@@ -36,10 +48,28 @@ STREAM_PREVIEW_BYTES = 1024 * 1024
 _SCRIPT_PREVIEW_BYTES = 16 * 1024 * 1024
 _SCRIPT_EXTENSIONS = (".ps1", ".psm1", ".bat", ".cmd", ".vbs", ".vbe", ".js", ".jse", ".mjs", ".cjs", ".hta", ".wsf")
 _IEX_CALL = re.compile(rb"\biex\s*\(")
-_ZIP_METHODS = {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2}
+_ZIP_ZSTD_METHODS = {20, 93}
+_ZIP_BOUNDED_METHODS = {zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA, *_ZIP_ZSTD_METHODS}
+_ZIP_METHODS = {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED, *_ZIP_BOUNDED_METHODS}
+_ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+_ZSTD_WINDOW_LOG = 26  # Limit decompressor windows to 64 MiB.
+_ZIP_EXTENSIONS = (
+    ".zip", ".jar", ".war", ".ear", ".apk", ".xapk", ".aab", ".ipa", ".whl", ".epub",
+    ".docx", ".docm", ".dotx", ".dotm", ".xlsx", ".xlsm", ".xltx", ".xltm", ".xlam",
+    ".pptx", ".pptm", ".potx", ".potm", ".ppsx", ".ppsm", ".odt", ".ods", ".odp",
+    ".appx", ".appxbundle", ".msix", ".msixbundle",
+)
+try:
+    from compression import zstd
+except ImportError:
+    try:
+        from backports import zstd
+    except ImportError:
+        zstd = None
+_ZSTD_ERRORS = (zstd.ZstdError,) if zstd is not None else ()
 _OFFICE_MACROS = {"word/vbaproject.bin", "xl/vbaproject.bin", "ppt/vbaproject.bin"}
 _ARCHIVE_ERRORS = (zipfile.BadZipFile, RuntimeError, OSError, EOFError, ValueError,
-                   NotImplementedError, zlib.error, struct.error, lzma.LZMAError)
+                   NotImplementedError, zlib.error, struct.error, lzma.LZMAError, *_ZSTD_ERRORS)
 
 
 @dataclass(frozen=True)
@@ -121,10 +151,19 @@ def _archive_format(data: bytes, name: str) -> str | None:
         return "bzip2"
     if data.startswith(b"\xfd7zXZ\x00"):
         return "xz"
-    if data.startswith((b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07")):
+    if data.startswith(_ZSTD_MAGIC) or _zstd_skippable(data):
+        return "zstd"
+    if data.startswith(AR_MAGIC):
+        return "ar"
+    if data.startswith(CPIO_MAGICS):
+        return "cpio"
+    if data.startswith(RPM_MAGIC):
+        return "rpm"
+    if data.startswith((b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07", THIN_AR_MAGIC, b"MSCF",
+                        b"070707", b"07070X", b"\xc7\x71", b"\x71\xc7")):
         return "unsupported"
     name = name.lower()
-    if name.endswith(".zip"):
+    if name.endswith(_ZIP_EXTENSIONS):
         return "zip"
     if name.endswith((".gz", ".tgz")):
         return "gzip"
@@ -134,9 +173,23 @@ def _archive_format(data: bytes, name: str) -> str | None:
         return "bzip2"
     if name.endswith((".xz", ".txz")):
         return "xz"
-    if name.endswith((".7z", ".rar")):
+    if name.endswith((".lzma", ".tlz")):
+        return "lzma"
+    if name.endswith((".zst", ".tzst")):
+        return "zstd"
+    if name.endswith((".ar", ".deb", ".udeb")):
+        return "ar"
+    if name.endswith(".cpio"):
+        return "cpio"
+    if name.endswith(".rpm"):
+        return "rpm"
+    if name.endswith((".7z", ".rar", ".cab", ".iso", ".dmg", ".wim", ".lz4", ".lz", ".lzo", ".ace")):
         return "unsupported"
     return None
+
+
+def _zstd_skippable(data: bytes | memoryview) -> bool:
+    return data[1:4] == b"\x2a\x4d\x18" and 0x50 <= data[0] <= 0x5F
 
 
 def _zip_entry_count(data: bytes, max_directory_bytes: int) -> int | None:
@@ -268,23 +321,64 @@ _NATIVE_EXECUTABLE_GAPS = {
 }
 
 
+def _zstd_decoder():
+    if zstd is None:
+        raise NotImplementedError("Zstandard decoder is unavailable")
+    return zstd.ZstdDecompressor(options={zstd.DecompressionParameter.window_log_max: _ZSTD_WINDOW_LOG})
+
+
+def _zip_encoded_member(item: zipfile.ZipInfo, data: bytes) -> memoryview:
+    offset = item.header_offset
+    if offset < 0:
+        raise ValueError("Invalid ZIP header offset")
+    (magic, _version, flags, method, _time, _date, _crc, _compressed, _expanded,
+     name_size, extra_size) = struct.unpack_from("<4s5H3I2H", data, offset)
+    name_start = offset + 30
+    start = name_start + name_size + extra_size
+    end = start + item.compress_size
+    raw_name = data[name_start:name_start + name_size]
+    encoding = "utf-8" if flags & 0x800 else "cp437"
+    if (magic != b"PK\x03\x04" or flags != item.flag_bits or flags & 0x61
+            or method != item.compress_type or raw_name.decode(encoding) != item.orig_filename
+            or end > min(len(data), item._end_offset)):
+        raise ValueError("Inconsistent or overlapping ZIP member")
+    return memoryview(data)[start:end]
+
+
+def _zip_lzma_decoder(content: memoryview):
+    if len(content) < 9 or content[2:4] != b"\x05\x00":
+        raise ValueError("Invalid ZIP LZMA properties")
+    properties = content[4]
+    dictionary_size, = struct.unpack_from("<I", content, 5)
+    if properties >= 225 or dictionary_size > 64 * 1024 * 1024:
+        raise ValueError("ZIP LZMA properties exceed the decoder limit")
+    lc = properties % 9
+    lp = (properties // 9) % 5
+    pb = properties // 45
+    return lzma.LZMADecompressor(format=lzma.FORMAT_RAW, filters=[{
+        "id": lzma.FILTER_LZMA1, "dict_size": max(4096, dictionary_size), "lc": lc, "lp": lp, "pb": pb,
+    }])
+
+
 def _read_zip_member(archive: zipfile.ZipFile, item: zipfile.ZipInfo, data: bytes) -> bytes:
-    # Opening through ZipFile checks the local header, name and data bounds.
-    with archive.open(item) as stream:
-        if item.compress_type != zipfile.ZIP_BZIP2:
+    if item.compress_type not in _ZIP_BOUNDED_METHODS:
+        with archive.open(item) as stream:
             return stream.read(item.file_size + 1)
-        # ZipExtFile's BZIP2 path does not limit a single decompression call.
-        method = struct.unpack_from("<H", data, item.header_offset + 8)[0]
-        name_size, extra_size = struct.unpack_from("<HH", data, item.header_offset + 26)
-        start = item.header_offset + 30 + name_size + extra_size
-        end = start + item.compress_size
-        if method != zipfile.ZIP_BZIP2 or end > len(data):
-            raise ValueError("Invalid BZIP2 member")
+    # ZipExtFile does not limit the output of every decoder call.
+    encoded = _zip_encoded_member(item, data)
+    if item.compress_type == zipfile.ZIP_LZMA:
+        decoder = _zip_lzma_decoder(encoded)
+        encoded = encoded[9:]
+    elif item.compress_type == zipfile.ZIP_BZIP2:
         decoder = bz2.BZ2Decompressor()
-        payload = decoder.decompress(memoryview(data)[start:end], item.file_size + 1)
-        if not decoder.eof or decoder.unused_data or zlib.crc32(payload) != item.CRC:
-            raise ValueError("Incomplete or corrupt BZIP2 member")
-        return payload
+    else:
+        if _zstd_skippable(encoded):
+            raise ValueError("Skipped Zstandard data cannot be inspected")
+        decoder = _zstd_decoder()
+    payload = decoder.decompress(encoded, item.file_size + 1)
+    if not decoder.eof or decoder.unused_data or zlib.crc32(payload) != item.CRC:
+        raise ValueError("Incomplete or corrupt ZIP member")
+    return payload
 
 
 class AntiOSEngine:
@@ -300,12 +394,14 @@ class AntiOSEngine:
         self._archive_slots = BoundedSemaphore(1 if profile == "light" else 2)
         self._native = load_static_core()
         self.metadata = {
-            "version": "AntiOS Engine/0.3",
+            "version": "AntiOS Engine/0.4",
             "database_freshness": "local",
             "signature_scope": "local-sha256",
             "static_core": "rust" if self._native is not None else "python",
             "components": {"hashes": True, "scripts": True, "pe": True, "elf": True, "zip": True,
-                           "gzip": True, "tar": True, "bzip2": True, "xz": True, "office_macros": True},
+                           "gzip": True, "tar": True, "bzip2": True, "xz": True, "lzma": True,
+                           "ar": True, "cpio": True, "rpm_payload": True,
+                           "zstd": zstd is not None, "office_macros": True},
         }
 
     def hash_content(self, data: bytes) -> str:
@@ -352,6 +448,7 @@ class AntiOSEngine:
         if label is not None:
             return ScanOutcome("threat", label, self.name)
         outcome = self._static_signal(data, name)
+        outcome = _preferred(outcome, inspect_document(data, name))
         archive_format = _archive_format(data, name)
         if archive_format is None:
             return outcome
@@ -376,6 +473,11 @@ class AntiOSEngine:
             return self._inspect_zip(data, depth, budget)
         if archive_format == "tar":
             return self._inspect_tar(data, depth, budget)
+        if archive_format in {"ar", "cpio"}:
+            entries = ar_entries(data, self._limits.archive_directory_bytes) if archive_format == "ar" else cpio_entries(data)
+            return self._inspect_linear_archive(data, entries, depth, budget)
+        if archive_format == "rpm":
+            return self._inspect_rpm_payload(data, depth, budget)
         return self._inspect_compressed(data, name, archive_format, depth, budget)
 
     def _inspect_compressed(self, data: bytes, name: str, archive_format: str,
@@ -390,32 +492,101 @@ class AntiOSEngine:
             decompressor = zlib.decompressobj(wbits=31)
         elif archive_format == "bzip2":
             decompressor = bz2.BZ2Decompressor()
+        elif archive_format == "zstd":
+            if zstd is None:
+                return _inspection_gap("unsupported-archive-compression", "Zstandard decoder is unavailable")
+            if _zstd_skippable(data):
+                return _inspection_gap("uninspected-compressed-data", "Zstandard skippable frame was not inspected")
+            decompressor = _zstd_decoder()
         else:
-            decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_XZ, memlimit=64 * 1024 * 1024)
+            encoding = lzma.FORMAT_ALONE if archive_format == "lzma" else lzma.FORMAT_XZ
+            decompressor = lzma.LZMADecompressor(format=encoding, memlimit=64 * 1024 * 1024)
         try:
             payload = decompressor.decompress(data, limit + 1)
-        except (OSError, EOFError, zlib.error, lzma.LZMAError):
+        except (OSError, EOFError, zlib.error, lzma.LZMAError, *_ZSTD_ERRORS):
             return _inspection_gap("unreadable-archive", "Unreadable compressed archive")
         if len(payload) > limit:
             return _inspection_gap("archive-budget-exceeded", "Archive inspection budget exceeded")
         if not decompressor.eof:
             return _inspection_gap("unreadable-archive", "Truncated compressed archive")
         trailing = decompressor.unused_data
-        unread = bool(trailing and (archive_format == "bzip2" or trailing.strip(b"\x00")
+        unread = bool(trailing and (archive_format in {"bzip2", "zstd", "lzma"} or trailing.strip(b"\x00")
                                     or (archive_format == "xz" and len(trailing) % 4)))
         del decompressor, trailing
         budget.bytes_left += limit - len(payload)
         lower = name.lower()
         extension = lower.rpartition(".")[2]
         inner_name = ""
-        if extension in {"gz", "bz2", "xz"}:
+        if extension in {"gz", "bz2", "xz", "zst", "lzma"}:
             inner_name = name[:-(len(extension) + 1)]
-        elif extension in {"tgz", "tbz2", "txz"}:
+        elif extension in {"tgz", "tbz2", "txz", "tzst", "tlz"}:
             inner_name = name[:-(len(extension) + 1)] + ".tar"
         outcome = self._inspect(payload, inner_name, depth=depth + 1, budget=budget)
         if unread:
             outcome = _preferred(outcome, _inspection_gap(
                 "uninspected-compressed-data", "Additional compressed data was not inspected"))
+        return outcome
+
+    def _inspect_rpm_payload(self, data: bytes, depth: int, budget: _Budget) -> ScanOutcome:
+        try:
+            start = rpm_payload_start(data, self._limits.archive_directory_bytes)
+        except (ValueError, struct.error):
+            return _inspection_gap("unreadable-archive", "Unreadable RPM package")
+        size = len(data) - start
+        if budget.members <= 0 or size > min(self._limits.archive_member_bytes, budget.bytes_left):
+            return _inspection_gap("archive-budget-exceeded", "Archive inspection budget exceeded")
+        budget.members -= 1
+        budget.bytes_left -= size
+        payload = data[start:]
+        encoding = _archive_format(payload, "")
+        suffixes = {"cpio": "", "gzip": ".gz", "bzip2": ".bz2", "xz": ".xz", "zstd": ".zst"}
+        if encoding not in suffixes:
+            return _inspection_gap("unsupported-archive-entry", "RPM payload format was not inspected")
+        # Header tags may carry scriptlets. Payload inspection cannot establish
+        # package authenticity or cover code in those tags.
+        metadata = _inspection_gap(
+            "rpm-metadata-not-inspected", detail="RPM header metadata and scriptlets were not inspected",
+        )
+        name = "payload.cpio" + suffixes[encoding]
+        return _preferred(self._inspect(payload, name, depth=depth + 1, budget=budget), metadata)
+
+    def _inspect_linear_archive(self, data: bytes, entries: Iterable[ArchiveEntry],
+                                depth: int, budget: _Budget) -> ScanOutcome:
+        outcome = ScanOutcome()
+        try:
+            for entry in entries:
+                if budget.members <= 0:
+                    return _preferred(outcome, _inspection_gap(
+                        "archive-budget-exceeded", "Archive entry limit reached"))
+                budget.members -= 1
+                if entry.kind == "metadata":
+                    continue
+                name = entry.name.replace("\\", "/")
+                if entry.kind == "directory" and name == ".":
+                    continue
+                outcome = _preferred(outcome, _archive_path_signal(name))
+                if entry.kind == "directory":
+                    continue
+                if entry.kind != "file":
+                    gap = "archive-link-skipped" if entry.kind == "link" else "unsupported-archive-entry"
+                    outcome = _preferred(outcome, _inspection_gap(gap, "Archive member was not inspected"))
+                    continue
+                size = entry.end - entry.start
+                if size > min(self._limits.archive_member_bytes, budget.bytes_left):
+                    outcome = _preferred(outcome, _inspection_gap(
+                        "archive-budget-exceeded", "Archive inspection budget exceeded"))
+                    continue
+                budget.bytes_left -= size
+                payload = data[entry.start:entry.end]
+                if entry.checksum is not None and (sum(payload) & 0xffffffff) != entry.checksum:
+                    outcome = _preferred(outcome, _inspection_gap(
+                        "unreadable-archive-entry", "CPIO member checksum mismatch"))
+                    continue
+                outcome = _preferred(outcome, self._inspect(payload, name, depth=depth + 1, budget=budget))
+                if outcome.kind == "threat":
+                    break
+        except ValueError:
+            return _preferred(outcome, _inspection_gap("unreadable-archive", "Unreadable archive"))
         return outcome
 
     def _inspect_tar(self, data: bytes, depth: int, budget: _Budget) -> ScanOutcome:
@@ -480,6 +651,9 @@ class AntiOSEngine:
                     return _inspection_gap("archive-directory-unavailable", "Invalid archive directory")
                 budget.members -= len(members)
                 for item in members:
+                    if item.create_system == 3 and stat.S_ISLNK(item.external_attr >> 16):
+                        outcome = _preferred(outcome, _inspection_gap("archive-link-skipped", "Archive link was not followed"))
+                        continue
                     if item.is_dir():
                         if item.file_size:
                             outcome = _preferred(outcome, _inspection_gap(
@@ -492,7 +666,7 @@ class AntiOSEngine:
                             "encrypted-archive-entry", "Encrypted archive entry",
                             detail="Encrypted archive member could not be inspected"))
                         continue
-                    if item.compress_type not in _ZIP_METHODS:
+                    if item.compress_type not in _ZIP_METHODS or (item.compress_type in _ZIP_ZSTD_METHODS and zstd is None):
                         outcome = _preferred(outcome, _inspection_gap(
                             "unsupported-archive-compression", "Unsupported archive compression"))
                         continue
@@ -569,6 +743,7 @@ class AntiOSEngine:
         if size == len(content):
             return self.scan_with_digest(content, name, sha)
         advisory = self._static_signal(content, name)
+        advisory = _preferred(advisory, inspect_document(content, name))
         outcome = _preferred(advisory, _inspection_gap("stream-preview-only"))
         return replace(outcome, detail="Only local hash and bounded content preview were available")
 

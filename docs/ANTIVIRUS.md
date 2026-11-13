@@ -9,11 +9,23 @@ The engine can:
 - calculate full-file SHA-256 hashes for readable files;
 - match the bundled and installed AntiOS signature catalog;
 - inspect supported PE, ELF and script structures;
-- inspect supported ZIP, GZIP, TAR, BZIP2 and XZ contents within configured limits;
+- inspect supported ZIP (including BZIP2, LZMA and Zstandard members), GZIP, TAR, BZIP2, XZ, LZMA, Zstandard, ar and newc/CRC CPIO contents within configured limits;
 - flag selected structural indicators for review;
 - report unreadable, truncated or unsupported content as incomplete coverage rather than clean.
 
 Quarantine and restore are explicit operations. Structural or behavioral review findings are not treated as confirmed malware by themselves.
+
+## Format coverage
+
+| Formats | Inspection |
+| --- | --- |
+| DOCX, XLSX, PPTX, ODF, JAR, APK, EPUB, WHL, MSIX and other supported ZIP containers | Bounded inspection of ZIP members. Recognized VBA projects are flagged for review. |
+| DEB and RPM | Recursive inspection of supported package payloads. RPM header metadata and scriptlets are reported as a gap. |
+| PDF, RTF and SVG | Advisory checks for visible PDF action and attachment declarations, RTF objects and SVG active elements. Uninspected streams and embedded objects are reported as coverage gaps. |
+| Legacy Office OLE, Outlook MSG and MSI | Exact hash matching and explicit reporting that compound file streams remain uninspected. |
+| 7z, RAR, CAB, ISO, DMG and WIM | Exact hash matching and explicit reporting of unsupported container contents. |
+
+Formats without a dedicated parser still receive full SHA-256 hashing when readable. Signature matches and archive members are reported without executing or extracting files to disk.
 
 ## Scan profiles
 
@@ -65,7 +77,7 @@ The built-in benchmark runs inert controls with known expected outcomes:
 
     antios virus-scan-benchmark --json
 
-It is a functional regression check, not a measurement of real-world malware detection rate.
+The benchmark reports confirmed signature hits and misses, benign controls flagged for review, and limited coverage per profile. Its synthetic signatures measure whether the scanner reaches and identifies the expected bytes. Real-world malware detection needs a separate representative evaluation.
 
 ## Signature updates
 

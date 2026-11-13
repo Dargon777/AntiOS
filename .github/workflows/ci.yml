@@ -175,8 +175,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pyinstaller --clean --noconfirm --onedir --contents-directory _linux --console --name AntiOS antios_entry.py
-          pyinstaller --clean --noconfirm --onedir --contents-directory _linux_gui --windowed --name AntiOS-GUI antios_gui_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _linux --console --name AntiOS antios_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _linux_gui --windowed --name AntiOS-GUI antios_gui_entry.py
           ./dist/AntiOS/AntiOS --version
           ./dist/AntiOS/AntiOS coexistence-status --json
           ./dist/AntiOS-GUI/AntiOS-GUI --self-test

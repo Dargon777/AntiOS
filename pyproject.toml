@@ -7,6 +7,7 @@ name = "antios"
 dynamic = ["version"]
 description = "Antivirus companion scanning, storage intelligence and Windows/Linux diagnostics"
 dependencies = [
+  "backports.zstd>=1.2,<2; python_version < \"3.14\"",
   "cryptography>=44",
   "Pillow>=10.4; platform_system == \"Windows\"",
   "pystray>=0.19.5; platform_system == \"Windows\"",

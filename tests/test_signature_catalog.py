@@ -45,30 +45,38 @@ def test_bundled_publisher_catalog_has_provenance():
     assert baseline.rules
     assert len(baseline.rules) == len(body["sha256"])
     assert all(rule["source"].startswith("https://www.ncsc.gov.uk/") for rule in body["sha256"].values())
+    assert set(antivirus.NCSC_SUPPLEMENT).isdisjoint(baseline.rules)
 
 
 def test_application_supplement_is_exact_and_new_signed_catalog_supersedes_it(publisher):
     package, _ = publisher
     supplemental = set(antivirus.AKIRA_SUPPLEMENT)
     cisa_2025 = set(antivirus.CISA_2025_SUPPLEMENT)
-    combined = supplemental | cisa_2025
+    ncsc = set(antivirus.NCSC_SUPPLEMENT)
+    combined = supplemental | cisa_2025 | ncsc
     assert len(supplemental) == 13
     assert len(cisa_2025) == 16
+    assert len(ncsc) == 42
     assert all(len(bytes.fromhex(digest)) == 32 and digest == digest.lower() for digest in combined)
 
     rules, metadata = antivirus.load_managed_signatures()
     assert combined <= rules.keys()
-    assert metadata["signature_bundled_supplement_entries"] == 29
+    assert metadata["signature_bundled_supplement_entries"] == 71
     assert metadata["signature_cisa_2025_entries"] == 16
+    assert metadata["signature_ncsc_supplement_entries"] == 42
     # CISA campaign reports also list legitimate tooling. The published PsExec
     # hash must not enter the bundled confirmed-threat rules.
     assert "078163d5c16f64caa5a14784323fd51451b8c831c73396b967b4e35e6879937b" not in rules
+    # The NCSC also lists segment-only hashes for Cyclops Blink, which do
+    # not describe complete artifacts and do not belong in this catalog.
+    assert "50df5734dd0c6c5983c21278f119527f9fdf6ef1d7e808a29754ebc5253e9a86" not in rules
 
     catalog.install_catalog(package(4))
     rules, metadata = antivirus.load_managed_signatures()
     assert combined.isdisjoint(rules)
     assert metadata["signature_bundled_supplement_entries"] == 0
     assert metadata["signature_cisa_2025_entries"] == 0
+    assert metadata["signature_ncsc_supplement_entries"] == 0
 
 
 def test_bad_signature_and_downgrade_preserve_active_catalog(publisher):
