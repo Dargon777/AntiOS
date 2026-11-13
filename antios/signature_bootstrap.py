@@ -25,9 +25,8 @@ AKIRA_SUPPLEMENT = (
     "fef09b0aa37cbdb6a8f60a6bd8b473a7e5bffdc7fd2e952444f781574abccf64",
 )
 
-# CISA Code & Media Analysis reports from 2025 identify these exact artifacts
-# as malicious payloads/webshells/trojans. Keep them as exact-hash confirmations;
-# behavioral/YARA-style observations remain review-only elsewhere in AntiOS.
+# CISA reports and advisories published or updated in 2025 identify these exact
+# artifacts as malicious. Keep them as exact-hash confirmations.
 # Sources:
 # - MAR-25993211.r1.v1 (RESURGE / SPAWNSLOTH)
 # - MAR-251132.c1.v1 (credential theft / webshell / PowerShell dropper artifacts)
@@ -46,7 +45,99 @@ CISA_2025_SUPPLEMENT = {
         "ASPX webshell payload (CISA MAR-251132)",
     "d9c4dd5a8317d1d83b5cc3482e95602f721d58e3ba624d131a9472f927d33b00":
         "ASPX PowerShell webshell (CISA MAR-251132)",
+    # AA25-203A, Table 3: rows explicitly identified as encryptors.
+    # https://www.cisa.gov/sites/default/files/2025-07/aa25-203a-stopransomware-interlock-072225.pdf
+    "e86bb8361c436be94b0901e5b39db9b6666134f23cce1e5581421c2981405cb1":
+        "Interlock ransomware encryptor (CISA AA25-203A)",
+    "c733d85f445004c9d6918f7c09a1e0d38a8f3b37ad825cd544b865dba36a1ba6":
+        "Interlock ransomware encryptor (CISA AA25-203A)",
+    "28c3c50d115d2b8ffc7ba0a8de9572fbe307907aaae3a486aabd8c0266e9426f":
+        "Interlock ransomware encryptor (CISA AA25-203A)",
+    # AA23-319A, 2025 update, Tables 2 and 3: encryptor and deployment scripts.
+    # https://www.cisa.gov/sites/default/files/2025-04/aa23-319a-stopransomware-rhysida-ransomware_2.pdf
+    "6633fa85bb234a75927b23417313e51a4c155e12f71da3959e168851a600b010":
+        "Rhysida ransomware encryptor (CISA AA23-319A)",
+    "97766464d0f2f91b82b557ac656ab82e15cae7896b1d8c98632ca53c15cf06c4":
+        "Rhysida ransomware deployment script (CISA AA23-319A)",
+    "918784e25bd24192ce4e999538be96898558660659e3c624a5f27857784cd7e1":
+        "Rhysida ransomware execution script (CISA AA23-319A)",
+    # AA23-352A, 2025 update, Table 2: malware and custom collection tool.
+    # https://www.cisa.gov/sites/default/files/2025-06/aa23-352a-stopransomware-play-ransomware_2.pdf
+    "47b7b2dd88959cd7224a5542ae8d5bce928bfc986bf0d0321532a7515c244a1e":
+        "Play ransomware campaign backdoor (CISA AA23-352A)",
+    "453257c3494addafb39cb6815862403e827947a1e7737eb8168cd10522465deb":
+        "Play ransomware campaign custom data collector (CISA AA23-352A)",
+    "75404543de25513b376f097ceb383e8efb9c9b95da8945fd4aa37c7b2f226212":
+        "SystemBC malware executable (CISA AA23-352A)",
 }
+
+# NCSC lists these as samples or malware components. Partial-image hashes and
+# memory captures are outside the full-file catalog. See NOTICE for licensing.
+_NCSC_FAMILY_DIGESTS = {
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Spec-Com-stix.json
+    "SpecCom": (
+        "0cba1f9fc63bb139d27a99839da8ddad83a40dfd7de8b01a4f6cb516527082d4",
+        "14c9c48614e0e105e53014cdfdade738671579a226f7a1345d15662211b45a35",
+        "15633871c3630a559dd4e2c7a9b93b02d17dd64ee60a2d7ba340ebd14d13ffac",
+        "1c00fd8202a6822257fe34e481c434af58ad0e3e731005a7fec994463c0117a9",
+        "27312973aefcfa2511573a28ff42ef12ecbfcf56db42bf4d1371b0a1f1f2732c",
+        "295b987c8926399c063ff20d2484477fe31cd2188b604a919dbfa11d9c34b988",
+        "3355174b6cd213792be46ed805810acf466d32485a932804331a0dfb219048ea",
+        "37c38a857c4a30abb559b0aec5fce7aa54117f7ecddde437fa988dd3527fd6d0",
+        "3c30a2075d7ca9b825d81167b79d45ce27a1bf07a0052412359afcdc73fdf51c",
+        "4229630102f0b972e9464a48fa67b4f7b1d5def8ad16b8e258523dabb7bda9a8",
+        "42e781f5e9c00d09cb5f7697a7b2fc9b04d77cc7978dcca8098f77d57693ca6c",
+        "489fca69a622195328302e64e29b6183feac90826dce198432d603202ca4d216",
+        "52a53e7e250fa9faa823d26421ca8af42ac40c27bac1d5af65b452c8987cda72",
+        "6395c4a8495d3bff293a8a55ca3c5ebf68a616ee212b2a7284610b0a3f7bb5d4",
+        "6ffe81c2883c298a65477ba2bc7ba1063315ad6b26f0188e3361d0fa924575ae",
+        "784cf7d224974f7e2c43cf10580c42a2521556608a5dd4a11247d09a77f5c8df",
+        "78e7c41458e1ddf336f0d2e9625abbdc0b3e86db18aee7377af5711bc927da35",
+        "7c25a5a88bfcc0ea7af287921860c6ab6b88b90042738650386c334bdef5b62b",
+        "83bc8f011cba273c9c0dd2070cad429664ea5cdef05387edfad7e0cd6a389b66",
+        "96fa3b2466ab06fbaf17f0d19507fb5b6614d1648d9811904a04d017b38af74a",
+        "9a3c2ba8ddbeffcb86e53f5193fe74747d7df2ca33ba839b1b23d04d0d5869e4",
+        "ab1983217880dad9c0481aab5b06e1fe4b9caaf8d56d8a03bf794aca18f2e4c6",
+        "b66104b4eb7d9cb169707289a1a0deac7ad8e262799b42d142bb5c009dcba4b5",
+        "c0082f8f1e49c0805c4eaacf5cf5b99ae30eeea585fd77cbd50904927052a18c",
+        "d31e440e0d6f98209a9c9c7b4e332f417e41030a4bf4a4ae99d326cec24807af",
+        "e683c86fd40eac23bc6435f479518ea5d80f90da294d5ad21d024dd7acc8a6ac",
+        "e7a5205bd0d941a7b6c88d31f3b958c890a4f09a49ec8a3a45f4bedaf194afeb",
+        "e9013f35ce11fc4c5eb2c21827bdc459202d362365d6ea5b724dee4fe0088bd1",
+        "fc3cdc3932d69c05c735040245f94fafe22b79cd865bb7d23c4364a3f4e8c774",
+        "ff1055da48829a69709702f1b44f5af0aa9be013bdc7fdf14db9dc66180d476d",
+        "ff97e35aec84882611d56dc5758e7dedd4839e326e5708d6d5ae4dbd296dd62d",
+    ),
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Infinite-Second-stix.json
+    "Infinite Second / ComRAT": (
+        "27fb6e28589ddff239d2616fde8169204da3f8365b9670e68f733424ecab93fe",
+        "9a3c57b080cb7b55d56b263a0bb2de592681e78716d025b3cdc895ee2dc144a1",
+        "b93484683014aca8e909c9b5648d8f0ac21a45d0c193f6ca40f0b01d2464c1c4",
+        "d532610528ad75d80c17f0372c5af8d2e417e0e2e08a055bf9923b71c149c51c",
+        "e209d07f8992892bf4776c897a8f054849b12464d9f58bcb78602217b3fd98bc",
+    ),
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Devil-Bait-stix.json
+    "Devil Bait": (
+        "a6f9043627f8be2452153b5dbf6278e9b91763c3b5c2aea537a859e0c8c6b504",
+        "fa71eee906a7849ba3f4bab74edb577bd1f1f8397ca428591b4a9872ce1f1e9b",
+    ),
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Busy-Buzzard-indicators.csv
+    "Busy Buzzard": (
+        "6cf6d1a9caee970bcb393a085d1dbb1f01a81fa684f6faf7ddbf0253302e1a4e",
+        "bd6992029c879b74b255aeb3549b8da487aff75d3f614832c23b4cd3717a067b",
+    ),
+    # https://www.ncsc.gov.uk/sites/default/files/documents/NCSC-MAR-Cyclops-Blink-indicators.csv
+    "Cyclops Blink": (
+        "4e69bbb61329ace36fbe62f9fb6ca49c37e2e5a5293545c44d155641934e39d1",
+        "ff17ccd8c96059461710711fcc8372cfea5f0f9eb566ceb6ab709ea871190dc6",
+    ),
+}
+NCSC_SUPPLEMENT = {
+    digest: f"{family} (NCSC)"
+    for family, digests in _NCSC_FAMILY_DIGESTS.items()
+    for digest in digests
+}
+
 
 BUNDLED_PACKAGE = b"""
 {

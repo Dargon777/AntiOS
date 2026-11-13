@@ -13,13 +13,14 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, NamedTuple
 
 from .engine import MAX_INLINE_BYTES, AntiOSEngine, inspection_limits
 from .engine_types import ScanOutcome
+from .scan_acceleration import DEFAULT_GPU_MODE, ScanAcceleration, sha256
 from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
 from .scan_verdict import apply_scan_verdict
-from .signature_bootstrap import AKIRA_SUPPLEMENT, CISA_2025_SUPPLEMENT
+from .signature_bootstrap import AKIRA_SUPPLEMENT, CISA_2025_SUPPLEMENT, NCSC_SUPPLEMENT
 from .signature_catalog import load_active_catalog
 
 DEFAULT_MAX_BYTES = MAX_INLINE_BYTES
@@ -32,6 +33,12 @@ DEFAULT_MAX_FILES = 100_000
 MAX_DETAILS = 1000
 # Hash only: do not embed the EICAR test payload in packaged executables.
 EICAR_SHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+
+
+class _BufferedFile(NamedTuple):
+    path: Path
+    info: os.stat_result
+    content: bytes
 
 
 def utc_now() -> str:
@@ -105,11 +112,16 @@ def load_managed_signatures() -> tuple[dict[str, str], dict]:
             rules.setdefault(digest, "Akira ransomware (CISA/FBI)")
         for digest, label in CISA_2025_SUPPLEMENT.items():
             rules.setdefault(digest, label)
+        for digest, label in NCSC_SUPPLEMENT.items():
+            rules.setdefault(digest, label)
     metadata = dict(
         catalog.metadata(),
         signature_bundled_supplement_entries=len(rules) - len(catalog.rules),
         signature_cisa_2025_entries=(
             len(CISA_2025_SUPPLEMENT) if catalog.version <= 3 else 0
+        ),
+        signature_ncsc_supplement_entries=(
+            len(NCSC_SUPPLEMENT) if catalog.version <= 3 else 0
         ),
     )
     rules[EICAR_SHA256] = "EICAR test file (not live malware)"
@@ -245,14 +257,17 @@ def scan_files(
     engine_service: str | None = None,
     require_verified_peer: bool = False,
     excluded_paths: tuple[Path, ...] = (),
+    worker_files: tuple[Path, ...] = (),
     checkpoint: Callable[[dict], None] | None = None,
     workers: int | None = None,
     profile: str = DEFAULT_SCAN_PROFILE,
+    gpu_mode: str = DEFAULT_GPU_MODE,
     cache_path: str | Path | None = None,
     use_cache: bool = True,
 ) -> dict[str, Any]:
     if engine != "antios":
         raise ValueError("Unsupported scan engine: only independent AntiOS Engine is supported")
+    acceleration = ScanAcceleration(gpu_mode)
     depth_limits = inspection_limits(profile)
     if provider_factory is None:
         provider_factory = lambda: AntiOSEngine(signatures=signatures, profile=profile)
@@ -277,7 +292,8 @@ def scan_files(
         "started_at": utc_now(), "finished_at": None,
         "limits": {"max_file_bytes": max_bytes, "max_files": max_files,
                    "max_entries": max_files * 2 if max_files is not None else None, "workers": workers,
-                   "profile": profile, "inspection": {**asdict(depth_limits), "inline_bytes": buffer_limit}},
+                   "profile": profile,
+                   "inspection": {**asdict(depth_limits), "inline_bytes": buffer_limit}},
         "engine": {"provider": "AntiOS Engine", "available": False,
                    "signatures": len(signatures), "signature_path": str(signature_path or ""),
                    "signature_source": "local-file" if signature_path is not None else "signed-catalog",
@@ -301,8 +317,10 @@ def scan_files(
         result["engine"].update(getattr(provider, "metadata", {}))
     except (OSError, RuntimeError) as exc:
         result["engine"]["detail"] = str(exc)
+    hash_content = provider.hash_content if type(provider) is AntiOSEngine else sha256
 
     exclusions = tuple(Path(os.path.abspath(p)) for p in excluded_paths)
+    transport = frozenset(Path(os.path.abspath(p)) for p in worker_files)
     stopped = cancelled or (lambda: False)
 
     def issue(item: Path, reason: str, *, error: bool = False) -> None:
@@ -339,11 +357,14 @@ def scan_files(
                     stack.pop()
                     entries.close()
                     continue
+                item = Path(entry.path)
+                # The worker creates these exact files after the scan is requested.
+                if item in transport:
+                    continue
                 if max_files is not None and summary["entries_seen"] >= max_files * 2:
                     summary["limit_reached"] = True
                     return
                 summary["entries_seen"] += 1
-                item = Path(entry.path)
                 if exclude(item):
                     issue(item, "quarantine-excluded")
                     continue
@@ -441,7 +462,7 @@ def scan_files(
             except (OSError, sqlite3.Error):
                 pass
 
-    def scan_one(candidate: tuple[Path, tuple[Path, ...], str | None]) -> dict:
+    def scan_one(candidate: tuple[Path, tuple[Path, ...], str | None], *, stage=False):
         item, ancestors, cached_digest = candidate
         try:
             if stopped():
@@ -458,13 +479,14 @@ def scan_files(
                     return {"item": item, "issue": "cancelled"}
                 if info.st_size > inline_limit:
                     return _scan_large_file(item, info, provider, signatures, stopped)
-                return scan_buffered(item, info, cached_digest)
+                content, info = _read_checked_file(item, info, buffer_limit)
+                if stage and cached_digest is None and 0 < len(content) <= acceleration.max_item_bytes:
+                    return _BufferedFile(item, info, content)
+                return scan_buffered(item, info, content, hash_content(content), cached_digest)
         except (OSError, ValueError) as exc:
             return {"item": item, "issue": str(exc), "error": True}
 
-    def scan_buffered(item, info, cached_digest) -> dict:
-        content, info = _read_checked_file(item, info, buffer_limit)
-        digest = hashlib.sha256(content).hexdigest()
+    def scan_buffered(item, info, content, digest, cached_digest=None) -> dict:
         # A cache hint only applies to the exact bytes of this verified snapshot.
         if digest == cached_digest:
             return {"item": item, "size": len(content), "provider_scanned": True, "cached": True}
@@ -519,15 +541,60 @@ def scan_files(
 
     pending: list[tuple[Path, tuple[Path, ...], str | None]] = []
     executor = ThreadPoolExecutor(max_workers=effective_workers) if effective_workers > 1 else None
+
+    def parallel(function, items):
+        if executor is None or provider_failed.is_set():
+            return map(function, items)
+        return executor.map(function, items)
+
+    def scan_staged(outcomes):
+        group = []
+        group_bytes = 0
+
+        def inspect_group():
+            if stopped():
+                return ({"item": file.path, "issue": "cancelled"}
+                        if isinstance(file, _BufferedFile) else file for file in group)
+            contents = tuple(file.content for file in group if isinstance(file, _BufferedFile))
+            digests = iter(acceleration.digests(
+                contents, signatures, lambda values: tuple(parallel(hash_content, values)),
+                lambda values: tuple(parallel(len, values)),
+            ))
+            jobs = [(file, next(digests)) if isinstance(file, _BufferedFile) else (file, None) for file in group]
+
+            def inspect(job):
+                file, digest = job
+                if digest is None:
+                    return file
+                if stopped():
+                    return {"item": file.path, "issue": "cancelled"}
+                return scan_buffered(*file, digest)
+
+            return parallel(inspect, jobs)
+
+        for outcome in outcomes:
+            size = len(outcome.content) if isinstance(outcome, _BufferedFile) else 0
+            if group_bytes + size > acceleration.batch_bytes:
+                yield from inspect_group()
+                group.clear()
+                group_bytes = 0
+            group.append(outcome)
+            group_bytes += size
+        if group:
+            yield from inspect_group()
+
     try:
         def flush_pending() -> None:
             nonlocal pending
             if not pending:
                 return
-            if executor is None or provider_failed.is_set():
-                outcomes = map(scan_one, pending)
+            if acceleration.enabled and len(pending) >= acceleration.minimum_items:
+                # Resolve the reads before dispatching more tasks to the same
+                # pool. Only bounded file snapshots are retained for CUDA.
+                staged = list(parallel(lambda item: scan_one(item, stage=True), pending))
+                outcomes = scan_staged(staged)
             else:
-                outcomes = executor.map(scan_one, pending)
+                outcomes = parallel(scan_one, pending)
             for outcome in outcomes:
                 apply_outcome(outcome)
                 after_item()
@@ -545,7 +612,8 @@ def scan_files(
                 after_item()
                 continue
             pending.append((item, ancestors, cache_hint(item)))
-            if len(pending) >= effective_workers * 4:
+            batch_items = acceleration.batch_items if acceleration.enabled else effective_workers * 4
+            if len(pending) >= batch_items:
                 flush_pending()
         flush_pending()
         summary["cancelled"] = stopped()
@@ -553,7 +621,13 @@ def scan_files(
         if executor is not None:
             executor.shutdown(wait=True, cancel_futures=True)
         if provider is not None:
+            if type(provider) is AntiOSEngine:
+                result["engine"]["static_core"] = provider.metadata["static_core"]
+                if provider.metadata.get("static_core_fallback"):
+                    result["engine"]["static_core_fallback"] = True
             provider.close()
+        result["engine"]["acceleration"] = acceleration.status()
+        acceleration.close()
         if cache is not None:
             try:
                 cache.close()
@@ -577,10 +651,15 @@ def render_antivirus_scan(result: dict) -> str:
     limits = result.get("limits", {})
     if "profile" in limits and "effective_workers" in limits:
         lines.append(f"Profile: {limits['profile']}; workers: {limits['effective_workers']}")
+    acceleration = result["engine"].get("acceleration", {})
+    if acceleration.get("mode") not in (None, "cpu"):
+        lines.append(f"GPU mode {acceleration['mode']} · CUDA files {acceleration['gpu_files']}")
+        if acceleration.get("fallback"):
+            lines.append(f"CUDA fallback: {acceleration['fallback']}")
     if "decision" in result:
         dimensions = result["decision"]["dimensions"]
         lines.append("Decision: " + ", ".join(f"{key}={value}" for key, value in dimensions.items()))
-    for key in ("version", "database_freshness", "signature_source", "signature_catalog_version",
+    for key in ("version", "static_core", "database_freshness", "signature_source", "signature_catalog_version",
                 "signature_catalog_status", "signature_bundled_supplement_entries",
                 "signature_catalog_warning", "detail"):
         if key in result["engine"]:

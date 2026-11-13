@@ -131,10 +131,11 @@ def test_tar_requires_a_complete_header_and_payload():
 
 
 def test_unsupported_archive_and_zip_method_are_reported_incomplete():
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_LZMA) as archive:
-        archive.writestr("benign.txt", b"inert")
-    for sample, name in ((b"inert", "example.rar"), (buffer.getvalue(), "example.zip")):
+    data = bytearray(zipped({"benign.txt": b"inert"}))
+    # ZIP method 98 (PPMd) is unsupported by AntiOS.
+    struct.pack_into("<H", data, 8, 98)
+    struct.pack_into("<H", data, data.index(b"PK\x01\x02") + 10, 98)
+    for sample, name in ((b"inert", "example.rar"), (bytes(data), "example.zip")):
         result = AntiOSEngine().scan(sample, name)
         assert result.kind == "review"
         assert not result.complete

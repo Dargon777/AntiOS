@@ -95,6 +95,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pytest
           python -m pip install -e .
+      - name: Verify Rust static core
+        shell: pwsh
+        run: |
+          cargo test --locked --manifest-path native-engine/Cargo.toml --target x86_64-pc-windows-msvc --target-dir native-engine/target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --locked --release --manifest-path native-engine/Cargo.toml --target x86_64-pc-windows-msvc --target-dir native-engine/target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:ANTIOS_TEST_RUST_LIBRARY = (Resolve-Path native-engine/target/x86_64-pc-windows-msvc/release/antios_static_core.dll).Path
+          python -m pytest -rs tests/test_rust_static_core.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Parse tracked PowerShell
         shell: pwsh
         run: |
@@ -165,8 +175,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pyinstaller --clean --noconfirm --onedir --contents-directory _linux --console --name AntiOS antios_entry.py
-          pyinstaller --clean --noconfirm --onedir --contents-directory _linux_gui --windowed --name AntiOS-GUI antios_gui_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _linux --console --name AntiOS antios_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _linux_gui --windowed --name AntiOS-GUI antios_gui_entry.py
           ./dist/AntiOS/AntiOS --version
           ./dist/AntiOS/AntiOS coexistence-status --json
           ./dist/AntiOS-GUI/AntiOS-GUI --self-test

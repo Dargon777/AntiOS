@@ -89,8 +89,20 @@ jobs:
             throw "Version mismatch: package=$packageVersion release=$releaseVersion"
           }
 
+      - name: Build Windows Rust static core
+        shell: pwsh
+        run: |
+          cargo build --locked --release --manifest-path native-engine/Cargo.toml --target x86_64-pc-windows-msvc --target-dir native-engine/target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/collect-rust-licenses.py --manifest native-engine/Cargo.toml --target x86_64-pc-windows-msvc build/rust-licenses
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run tests
-        run: python -m pytest -rs
+        shell: pwsh
+        run: |
+          $env:ANTIOS_TEST_RUST_LIBRARY = (Resolve-Path native-engine/target/x86_64-pc-windows-msvc/release/antios_static_core.dll).Path
+          python -m pytest -rs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Validate protection PowerShell syntax
         shell: pwsh
@@ -163,23 +175,25 @@ jobs:
       - name: Build CLI executable
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onedir --contents-directory _cli --uac-admin --icon .\build\icons\app_main.ico --version-file release/windows-cli-version.txt --console --name AntiOS antios_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _cli --uac-admin --icon .\build\icons\app_main.ico --version-file release/windows-cli-version.txt --add-binary "native-engine/target/x86_64-pc-windows-msvc/release/antios_static_core.dll:antios/_native" --upx-exclude antios_static_core.dll --add-data "build/rust-licenses:antios/_native/licenses" --console --name AntiOS antios_entry.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build GUI executable
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onedir --contents-directory _gui --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _gui --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --add-binary "native-engine/target/x86_64-pc-windows-msvc/release/antios_static_core.dll:antios/_native" --upx-exclude antios_static_core.dll --add-data "build/rust-licenses:antios/_native/licenses" --version-file release/windows-gui-version.txt --windowed --name AntiOS-GUI antios_gui_entry.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build resident guard executable
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onedir --contents-directory _guard --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --hidden-import pystray._win32 --version-file release/windows-guard-version.txt --console --name AntiOS-Guard antios_guard_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _guard --icon .\build\icons\app_main.ico --add-data "antios/assets/icons;antios/assets/icons" --add-binary "native-engine/target/x86_64-pc-windows-msvc/release/antios_static_core.dll:antios/_native" --upx-exclude antios_static_core.dll --add-data "build/rust-licenses:antios/_native/licenses" --hidden-import pystray._win32 --version-file release/windows-guard-version.txt --console --name AntiOS-Guard antios_guard_entry.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify Windows resources and scan worker
         shell: pwsh
         run: |
-          python scripts/verify-windows-build.py
+          python scripts/verify-windows-build.py --rust-dll native-engine/target/x86_64-pc-windows-msvc/release/antios_static_core.dll
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Azure login for Artifact Signing
@@ -581,8 +595,8 @@ jobs:
 
       - name: Build Linux CLI and GUI
         run: |
-          pyinstaller --clean --noconfirm --onedir --contents-directory _linux --console --name AntiOS antios_entry.py
-          pyinstaller --clean --noconfirm --onedir --contents-directory _linux_gui --windowed --name AntiOS-GUI antios_gui_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _linux --console --name AntiOS antios_entry.py
+          pyinstaller --clean --noconfirm --onedir --copy-metadata backports.zstd --contents-directory _linux_gui --windowed --name AntiOS-GUI antios_gui_entry.py
           ./dist/AntiOS/AntiOS --version
           ./dist/AntiOS/AntiOS coexistence-status --json
 

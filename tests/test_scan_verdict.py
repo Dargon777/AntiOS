@@ -82,5 +82,7 @@ def test_benchmark_cli_checks_all_control_cases_and_stable_replay(capsys):
     assert cli.main(["virus-scan-benchmark", "--repeat", "2", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert set(result["profiles"]) == {"light", "balanced", "heavy"}
-    assert all(item["passed"] == item["total"] == 10 and item["stable_replay"]
+    assert all(item["passed"] == item["total"] >= 24 and item["stable_replay"]
                for item in result["profiles"].values())
+    assert result["profiles"]["heavy"]["metrics"]["signature_misses"] == 0
+    assert result["profiles"]["heavy"]["metrics"]["benign_confirmed"] == 0

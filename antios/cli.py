@@ -29,6 +29,7 @@ from .logging_utils import configure_logging
 from .registry import WindowsRegistryBackend, is_windows
 from .quarantine import Quarantine, default_quarantine_path
 from .scan_cache import default_scan_cache_path
+from .scan_acceleration import DEFAULT_GPU_MODE, GPU_MODES
 from .scan_verdict import MAX_REPLAY_BYTES, replay_scan_json
 from .windows_defender import defender_action
 from .report import render_doctor_human, render_operations_human, render_scan_human
@@ -42,6 +43,9 @@ from .storage_cleanup import (
 )
 from .system_name import WindowsComputerNameBackend
 from .terminal import color_enabled
+
+
+_INSPECTABLE_SENSORS = ("browser", "network", "gpu", "device_firmware")
 
 
 def _print_json(data: object) -> None:
@@ -110,6 +114,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show read-only coexistence state (Defender on Windows; Kaspersky/Dr.Web on Linux).",
     )
     coexist_cmd.add_argument("--json", action="store_true")
+
+    sensors = sub.add_parser("sensors", help="Inspect local browser, TCP and hardware sensor coverage.")
+    sensors.add_argument("--surface", choices=_INSPECTABLE_SENSORS, action="append")
+    sensors.add_argument("--json", action="store_true")
 
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
     version_cmd.add_argument("--json", action="store_true")
@@ -214,6 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Inspection depth and default workers (default: balanced).")
     av.add_argument("--workers", type=int, metavar="N",
                     help=f"Override the profile's workers, 1..{MAX_SCAN_WORKERS}, subject to CPU limits.")
+    av.add_argument("--gpu-mode", choices=GPU_MODES, default=DEFAULT_GPU_MODE,
+                    help="GPU hashing policy (default: cpu). Scan depth is selected separately.")
     av.add_argument("--no-cache", action="store_true",
                     help="Do not reuse clean results for unchanged files.")
     av.add_argument("--json", action="store_true")
@@ -225,6 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark = sub.add_parser("virus-scan-benchmark", help="Check scan profiles on a labeled, inert control corpus.")
     benchmark.add_argument("--profile", choices=tuple(SCAN_PROFILE_WORKERS), help="Default: run all profiles.")
     benchmark.add_argument("--repeat", type=int, choices=range(1, 6), default=3)
+    benchmark.add_argument("--gpu", action="store_true", help="Compare CPU and CUDA on the same inert files.")
     benchmark.add_argument("--json", action="store_true")
 
     catalog = sub.add_parser("signatures", help="Inspect or install a signed AntiOS signature catalog.")
@@ -348,6 +359,34 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "guard":
             from .guard import main as guard_main
             return guard_main(args.guard_args)
+        if args.command == "sensors":
+            from .security_sensors import ScanBudget, ScanContext, Surface, runtime_registry
+            context = ScanContext(
+                requested_surfaces=frozenset(Surface(name) for name in (args.surface or _INSPECTABLE_SENSORS)),
+                budget=ScanBudget(max_items=4096, max_bytes=8 * 1024 * 1024, max_seconds=10, max_depth=5),
+            )
+            reports = runtime_registry().collect_all(context)
+            if args.json:
+                _print_json({
+                    "schema": 1,
+                    "reports": [{
+                        "surface": report.descriptor.surface.value,
+                        "coverage": report.coverage.value,
+                        "reason": report.reason,
+                        "inspected_items": report.inspected_items,
+                        "inspected_bytes": report.inspected_bytes,
+                        "skipped_items": report.skipped_items,
+                        "error_items": report.error_items,
+                        "evidence": [item.to_dict() for item in report.evidence],
+                    } for report in reports],
+                })
+            else:
+                for report in reports:
+                    print(f"{report.descriptor.surface.value}: {report.coverage.value}, "
+                          f"{len(report.evidence)} observations")
+                    if report.reason:
+                        print(f"  {report.reason}")
+            return 0
         if args.command == "config" and args.config_command == "init":
             created = write_default_config(config_path, overwrite=args.force)
             print(f"Created configuration: {created}")
@@ -516,17 +555,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "signatures":
-            from .signature_catalog import install_catalog, load_active_catalog
-            catalog = (install_catalog(args.package) if args.signatures_command == "install"
-                       else load_active_catalog())
+            from .antivirus import load_managed_signatures
+            from .signature_catalog import install_catalog
+            if args.signatures_command == "install":
+                install_catalog(args.package)
+            rules, metadata = load_managed_signatures()
+            metadata["active_signatures"] = len(rules)
             if args.json:
-                _print_json(catalog.metadata())
+                _print_json(metadata)
             else:
-                print(f"AntiOS signature catalog v{catalog.version} ({catalog.published}) · "
-                      f"{len(catalog.rules)} hashes · {catalog.source}")
-                if catalog.warning:
-                    print(catalog.warning)
-            return 3 if catalog.warning else 0
+                print(f"AntiOS signature catalog v{metadata['signature_catalog_version']} · "
+                      f"{len(rules)} active hashes")
+                if metadata.get("signature_catalog_warning"):
+                    print(metadata["signature_catalog_warning"])
+            return 3 if metadata.get("signature_catalog_warning") else 0
 
         if args.command == "virus-scan":
             result = scan_files(args.path, signature_path=args.signatures,
@@ -537,6 +579,7 @@ def main(argv: list[str] | None = None) -> int:
                                 max_files=args.max_files,
                                 workers=args.workers,
                                 profile=args.profile,
+                                gpu_mode=args.gpu_mode,
                                 cache_path=default_scan_cache_path(),
                                 use_cache=not args.no_cache,
                                 excluded_paths=(default_quarantine_path(),))
@@ -564,7 +607,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "virus-scan-benchmark":
-            from .scan_benchmark import run_detection_benchmark
+            from .scan_benchmark import run_detection_benchmark, run_gpu_benchmark
+
+            if args.gpu:
+                benchmark = run_gpu_benchmark(profile=args.profile or DEFAULT_SCAN_PROFILE, repeat=args.repeat)
+                if args.json:
+                    _print_json(benchmark)
+                else:
+                    for mode, measurement in benchmark["modes"].items():
+                        print(f"{mode}: median {measurement['median_seconds']:.3f} s, "
+                              f"{measurement['gpu_files']} CUDA hashes per scan")
+                    print("Verdicts and coverage match." if benchmark["passed"] else "GPU benchmark mismatch.")
+                return 0 if benchmark["passed"] else 1
 
             benchmark = run_detection_benchmark(profile=args.profile, repeat=args.repeat)
             if args.json:
