@@ -8,6 +8,11 @@ on:
         type: boolean
         required: true
         default: false
+      unsigned_prerelease:
+        description: "Attach verified UNSIGNED builds to the existing release draft (master only)"
+        type: boolean
+        required: true
+        default: false
       hardened_build:
         description: "Also build the hardened Windows package"
         type: boolean
@@ -35,6 +40,11 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && (github.ref != 'refs/heads/master' || vars.ENABLE_ARTIFACT_SIGNING != 'true')
         shell: pwsh
         run: throw 'Signed release requires master and configured Artifact Signing'
+
+      - name: Refuse conflicting or off-master unsigned prerelease
+        if: github.event_name == 'workflow_dispatch' && inputs.unsigned_prerelease == true && (inputs.signed_release == true || github.ref != 'refs/heads/master')
+        shell: pwsh
+        run: throw 'Unsigned prerelease requires master and signed_release=false'
 
       - uses: actions/setup-python@v5
         with:
@@ -506,7 +516,7 @@ jobs:
           "$setupHash  AntiOS-Setup.exe" | Set-Content -NoNewline ./AntiOS-Setup.exe.sha256
 
       - name: Attest Windows archive provenance
-        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.signed_release == true || inputs.unsigned_prerelease == true))) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: |
@@ -514,7 +524,7 @@ jobs:
             AntiOS-Setup.exe
 
       - name: Attest Python distribution provenance
-        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.signed_release == true || inputs.unsigned_prerelease == true))) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: python-dist/*
@@ -615,7 +625,7 @@ jobs:
           xvfb-run -a "$smoke_root/AntiOS-GUI/AntiOS-GUI" --ui-self-test
 
       - name: Attest Linux archive provenance
-        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.signed_release == true)) && github.ref == 'refs/heads/master'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.signed_release == true || inputs.unsigned_prerelease == true))) && github.ref == 'refs/heads/master'
         uses: actions/attest@v4
         with:
           subject-path: AntiOS-linux-x64.tar.gz
@@ -629,11 +639,12 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    if: github.event_name == 'workflow_dispatch' && inputs.signed_release == true && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_SIGNING == 'true'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && ((inputs.signed_release == true && vars.ENABLE_ARTIFACT_SIGNING == 'true') || (inputs.unsigned_prerelease == true && inputs.signed_release != true))
     needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      attestations: read
 
     steps:
       - uses: actions/checkout@v4
@@ -651,9 +662,12 @@ jobs:
       - name: Publish combined alpha release
         env:
           GH_TOKEN: ${{ github.token }}
+          UNSIGNED_PRERELEASE: ${{ inputs.unsigned_prerelease }}
         run: |
           set -euo pipefail
           tag="$(tr -d '\r\n' < release/TAG)"
+          version="$(tr -d '\r\n' < release/VERSION)"
+          unsigned="${UNSIGNED_PRERELEASE:-false}"
           # Signed master artifacts may be attached only to the existing draft.
           # A human must complete acceptance and explicitly publish the release.
           # Draft releases do not necessarily have an actual git tag yet.
@@ -669,7 +683,7 @@ jobs:
                 end
               '
           )"
-          echo "Signed release target: draft ID $release_id"
+          echo "Release target ($unsigned): draft ID $release_id"
           # Only the eight reviewed deliverables can enter the release draft.
           # Refuse missing, duplicate, or unexpected files before editing the draft.
           shopt -s nullglob
@@ -708,6 +722,12 @@ jobs:
              sha256sum --check AntiOS-linux-x64.tar.gz.sha256)
           test -s release/RELEASE_NOTES.md
 
+          # Check every unsigned executable/archive against the current build
+          # before altering release metadata or uploading any assets.
+          if [[ "$unsigned" == "true" ]]; then
+            bash scripts/verify-release-provenance.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$version" "release-artifacts"
+          fi
+
           # An existing tag takes precedence over target_commitish on release.
           # Refuse any tag whose peeled commit differs from this signed build.
           tag_refs="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")"
@@ -729,8 +749,17 @@ jobs:
           }
 
           # GitHub can clear an unpublished tag when a draft update omits tag_name.
-          jq -n --arg tag "$tag" --arg title "AntiOS $tag" \
-                --arg body "$(cat release/RELEASE_NOTES.md)" \
+          title="AntiOS $tag"
+          body="$(cat release/RELEASE_NOTES.md)"
+          if [[ "$unsigned" == "true" ]]; then
+            title="AntiOS $tag (UNSIGNED)"
+            body="$(printf '%s\n\n%s\n\n%s\n' \
+              "**Windows binaries are NOT digitally signed. SmartScreen may warn and Smart App Control may block them. SHA-256 checks verify integrity, not publisher identity.**" \
+              "$body" \
+              "Build provenance: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (commit $GITHUB_SHA). Verify the files with GitHub CLI attestation verification as described in docs/SIGNING.md.")"
+          fi
+          jq -n --arg tag "$tag" --arg title "$title" \
+                --arg body "$body" \
                 --arg target "$GITHUB_SHA" \
                 '{tag_name:$tag,name:$title,body:$body,target_commitish:$target,draft:true,prerelease:true}' |
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" --input - >/dev/null
