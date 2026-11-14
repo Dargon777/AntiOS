@@ -27,6 +27,7 @@ from antios.windows_security_sensors import (
     PersistenceSnapshot,
     ProcessRecord,
     ProcessSnapshot,
+    ThreadSnapshot,
     WindowsMemoryProvider,
     WindowsMemorySensor,
     WindowsPersistenceProvider,
@@ -316,6 +317,34 @@ def test_memory_access_denial_is_partial_coverage_not_no_threats():
     assert "denied" in report.reason
 
 
+def test_thread_starts_are_review_evidence_with_stable_process_identity():
+    process = ProcessRecord(42, 4, "agent.exe", r"C:\Temp\agent.exe", 12345)
+    region = MemoryRegion(0x1000, 0x2000, MEM_COMMIT, PAGE_EXECUTE_READ, MEM_PRIVATE)
+
+    class Memory:
+        def snapshot_threads(self, budget):
+            return ThreadSnapshot({42: (101, 102)})
+
+        def inspect(self, process, budget, *, threads):
+            assert threads == (101, 102)
+            return MemoryInspection(
+                private_thread_starts=((101, region),),
+                threads_checked=1, thread_errors=1, threads_truncated=True,
+            )
+
+    report = WindowsMemorySensor(FakeProcesses([process]), Memory()).collect(ScanContext())
+    item, = report.evidence
+    assert item.subject == "process:42:12345"
+    assert item.attributes["rule_id"] == "memory.thread-start-private-executable"
+    assert item.attributes["thread_id"] == 101
+    assert {"prefix", "base_address"}.isdisjoint(item.attributes)
+    assert not item.complete
+    assert report.coverage is Coverage.PARTIAL
+    assert report.error_items == 1
+    assert "1 thread start address(es) checked" in report.reason
+    assert "reached an observation limit" in report.reason
+
+
 def test_process_and_memory_evidence_feed_existing_same_subject_signature():
     process = ProcessRecord(
         42, 4, "agent.exe", r"C:\Users\alice\AppData\Local\Temp\agent.exe",
@@ -473,19 +502,24 @@ def test_native_windows_memory_provider_can_query_current_process_read_only():
         if item.pid == os.getpid()
     )
     provider = WindowsMemoryProvider(header_bytes=512)
+    budget = BudgetGuard(ScanBudget(
+        max_items=20_000, max_bytes=2 * 1024 * 1024,
+        max_seconds=3, allow_privileged=True,
+    ))
+    threads = provider.snapshot_threads(budget)
+    assert not threads.errors
     inspection = provider.inspect(
-        current,
-        BudgetGuard(
-            ScanBudget(
-                max_items=20_000,
-                max_bytes=2 * 1024 * 1024,
-                max_seconds=3,
-                allow_privileged=True,
-            )
-        ),
+        current, budget, threads=threads.by_pid[current.pid],
     )
     assert not inspection.access_denied
     assert inspection.regions
+    assert inspection.threads_checked
+
+    stale = ProcessRecord(current.pid, current.ppid, current.image, current.path,
+                          current.creation_time + 1)
+    stale_result = provider.inspect(stale, budget)
+    assert stale_result.identity_unverified
+    assert not stale_result.regions
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows registry APIs")

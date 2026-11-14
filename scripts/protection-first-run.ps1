@@ -58,10 +58,7 @@ if (-not $interactive) {
     } elseif ($roots.Count -eq 0) {
         $result.deferred_reason = 'no-monitorable-user-roots'
     } else {
-        & $guardScript -Executable $guardExe -Roots $roots -Mode notify -AllowManagedUnsigned -Apply
-        if ($LASTEXITCODE -ne 0) {
-            throw "Guard startup configuration failed with exit code $LASTEXITCODE"
-        }
+        & $guardScript -Executable $guardExe -Roots $roots -Mode notify -AllowManagedUnsigned -ReuseExisting -Apply
         $result.configured = $true
     }
 }

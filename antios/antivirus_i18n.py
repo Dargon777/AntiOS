@@ -256,6 +256,17 @@ for _locale, _states in {
     MESSAGES[_locale].update(('guard_state_' + key, text) for key, text in zip(
         ('starting', 'scanning', 'monitoring', 'degraded', 'attention', 'stopped', 'failed', 'not-running', 'unresponsive', 'unavailable'), _states))
 
+for _locale, _texts in {
+    "en": ("Awaiting scan: {count}", "File inventory limit reached", "Tracking entries lost: {count}"),
+    "ru": ("Ожидают проверки: {count}", "Достигнут предел учёта файлов", "Утрачено записей учёта: {count}"),
+    "es": ("Pendientes de análisis: {count}", "Límite de inventario alcanzado", "Registros de seguimiento perdidos: {count}"),
+    "zh-CN": ("等待扫描：{count}", "已达到文件清单上限", "丢失的跟踪记录：{count}"),
+    "fi": ("Odottaa tarkistusta: {count}", "Tiedostoluettelon raja saavutettu", "Seurantatietoja menetetty: {count}"),
+    "pl": ("Oczekuje na skanowanie: {count}", "Osiągnięto limit spisu plików", "Utracone wpisy śledzenia: {count}"),
+    "mn": ("Шалгалт хүлээж буй: {count}", "Файлын жагсаалтын хязгаарт хүрсэн", "Алдагдсан хяналтын бичлэг: {count}"),
+}.items():
+    MESSAGES[_locale].update(zip(("guard_scan_backlog", "guard_inventory_limit", "guard_lost_records"), _texts))
+
 
 # Consumer-facing Antivirus layout introduced in alpha 19. Technical provider
 # controls stay under the collapsed advanced section.

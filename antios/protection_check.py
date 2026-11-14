@@ -9,7 +9,7 @@ import tempfile
 
 from . import recovery
 from .engine import AntiOSEngine
-from .antivirus import load_signatures
+from .antivirus import load_managed_signatures
 from .guard_state import read_guard_state
 
 _CHECKS = {
@@ -41,7 +41,10 @@ def describe_check(item: dict, language="ru") -> tuple[str, str, str]:
     state = item.get("state")
     detail = (("Проверка завершилась успешно.", "The check completed successfully.")[index]
               if state == "passed" else advice[index])
-    if item.get("id") == "guard-status" and state == "passed":
+    if item.get("id") == "database" and item.get("detail"):
+        detail = ("Установленная база не прошла проверку. Движок использует проверенную резервную базу.",
+                  "The installed catalog did not pass validation. The engine uses a verified fallback catalog.")[index]
+    elif item.get("id") == "guard-status" and state == "passed":
         detail = ("Guard сообщает о работе. Это проверка состояния; перехват новых файлов этим тестом не проверяется.",
                   "Guard reports that it is running. This status check does not exercise new-file detection.")[index]
     elif item.get("id") == "guard-status" and item.get("detail"):
@@ -80,12 +83,18 @@ def run_checks(*, scanner_factory=None, guard_reader=None,
     try:
         if not cancelled():
             try:
-                factory = scanner_factory or (lambda: AntiOSEngine(signatures=load_signatures()))
-                engine = factory()
+                catalog = {}
+                if scanner_factory is None:
+                    rules, catalog = load_managed_signatures()
+                    engine = AntiOSEngine(signatures=rules)
+                else:
+                    engine = scanner_factory()
                 metadata = dict(engine.metadata)
                 verified = metadata.get("database_freshness") in {"local", "current"}
                 record("engine", "passed" if verified else "failed")
-                record("database", "passed" if metadata.get("database_freshness") in {"local", "current"} else "warning")
+                fallback = catalog.get("signature_catalog_status") == "fallback"
+                record("database", "passed" if verified and not fallback else "warning",
+                       catalog.get("signature_catalog_warning", "") if fallback else "")
                 if not verified:
                     engine.close()
                     engine = None
@@ -119,7 +128,8 @@ def run_checks(*, scanner_factory=None, guard_reader=None,
         try:
             guard = (guard_reader or read_guard_state)()
             ready = (guard.get("running") is True and guard.get("state") in {"monitoring", "scanning", "attention"}
-                     and not guard.get("capacity_exceeded") and not guard.get("inventory_issues"))
+                     and not guard.get("capacity_exceeded") and not guard.get("inventory_issues")
+                     and not guard.get("behavior_alerts_dropped") and not guard.get("incident_tracking_dropped"))
             record("guard-status", "passed" if ready else "warning")
         except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             record("guard-status", "warning", exc)

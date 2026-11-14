@@ -97,6 +97,8 @@ def test_dashboard_startup_task_is_separate_elevated_logon_task():
     assert "-RunLevel Limited" in source
     assert "-RunLevel Highest" not in source
     assert "run_level" in source
+    assert "guard-trust.ps1" in source
+    assert "clamav-trust.ps1" not in source
 
 
 

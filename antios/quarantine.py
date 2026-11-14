@@ -97,7 +97,7 @@ def _current_windows_sid() -> str:
 
 
 def _harden_windows_directory(path: Path) -> None:
-    """Remove inherited access and restrict the vault to user/SYSTEM/admins."""
+    """Restrict the vault root and let its descendants inherit those grants."""
     if os.name != "nt":
         return
     sid = _current_windows_sid()
@@ -108,7 +108,7 @@ def _harden_windows_directory(path: Path) -> None:
         "*S-1-5-32-544:(OI)(CI)F",
     )
     result = subprocess.run(
-        [str(icacls), str(path), "/inheritance:r", "/grant:r", *grants, "/t", "/c"],
+        [str(icacls), str(path), "/inheritance:r", "/grant:r", *grants, "/L"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -144,10 +144,11 @@ class Quarantine:
         checked_path(ancestor)
         if create:
             self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-            _harden_windows_directory(self.root)
         root = checked_path(self.root)
         if not root.is_dir():
             raise ValueError("Quarantine location must be a directory")
+        if create:
+            _harden_windows_directory(root)
         return root
 
     def _item_path(self, item_id: str) -> Path:

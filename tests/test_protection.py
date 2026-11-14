@@ -69,6 +69,7 @@ def test_engine_failure_never_reports_full_protection(monkeypatch):
     ("monitoring", {"capacity_exceeded": True}),
     ("monitoring", {"inventory_issues": ["incomplete scan"]}),
     ("monitoring", {"behavior_alerts_dropped": 1}),
+    ("monitoring", {"incident_tracking_dropped": 1}),
 ])
 def test_unhealthy_guard_not_counted_as_full_resident_detection(monkeypatch, state, extra):
     monkeypatch.setattr(protection, "read_guard_state", lambda: _guard(state=state, **extra))

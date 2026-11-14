@@ -5,6 +5,7 @@ from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import date
 from functools import lru_cache
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from .signature_bootstrap import BUNDLED_PACKAGE, PUBLIC_KEY
 
 MAX_PACKAGE_BYTES = 8 * 1024 * 1024
+MAX_TRUSTED_FILES = 4096
+_MAX_TRUSTED_FILE_BYTES = 64 * 1024 * 1024
 _SIGNING_CONTEXT = b"AntiOS.SignatureCatalog.v1\0"
 
 
@@ -141,6 +144,12 @@ def _versions(db):
     ).fetchall()
 
 
+def _has_table(db, name: str) -> bool:
+    return db.execute(
+        "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (name,),
+    ).fetchone() is not None
+
+
 def load_active_catalog() -> Catalog:
     from .antivirus import checked_path
 
@@ -154,6 +163,9 @@ def load_active_catalog() -> Catalog:
     try:
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=2)) as db:
             db.execute("PRAGMA trusted_schema=OFF")
+            db.execute("BEGIN")
+            if not _has_table(db, "catalogs") and _has_table(db, "trusted_files"):
+                return baseline
             versions = _versions(db)
     except sqlite3.Error:
         return replace(baseline, warning="Installed signature catalog cannot be read")
@@ -176,22 +188,123 @@ def load_active_catalog() -> Catalog:
     return replace(baseline, warning=warning)
 
 
-def install_catalog(path: str | Path) -> Catalog:
-    from .antivirus import checked_path, read_regular
+def _read_candidate(path: str | Path) -> tuple[bytes, Catalog]:
+    from .antivirus import read_regular
 
     package, _ = read_regular(Path(path), MAX_PACKAGE_BYTES)
-    catalog = verify_catalog(package)
+    return package, verify_catalog(package)
+
+
+def _checked_catalog_store():
+    from .antivirus import checked_path
+
+    target = default_catalog_path()
+    try:
+        return checked_path(target)
+    except FileNotFoundError:
+        return None
+
+
+def _prepare_catalog_store():
+    from .antivirus import checked_path
+
+    target = default_catalog_path()
+    ancestor = target.parent
+    while not ancestor.exists() and not ancestor.is_symlink():
+        ancestor = ancestor.parent
+    checked_path(ancestor)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    checked_path(target.parent)
+    _checked_catalog_store()
+    return target
+
+
+def _trusted_hashes(db) -> tuple[str, ...]:
+    if not _has_table(db, "trusted_files"):
+        return ()
+    rows = db.execute("SELECT sha256 FROM trusted_files ORDER BY sha256 LIMIT ?", (
+        MAX_TRUSTED_FILES + 1,
+    )).fetchall()
+    if len(rows) > MAX_TRUSTED_FILES or any(
+        not isinstance(row[0], str) or re.fullmatch(r"[a-f0-9]{64}", row[0]) is None
+        for row in rows
+    ):
+        raise ValueError("Invalid trusted-file baseline")
+    return tuple(row[0] for row in rows)
+
+
+def _preflight(catalog: Catalog, trusted: tuple[str, ...]) -> dict:
+    trusted_hashes = set(trusted)
+    conflicts = [{"sha256": digest, "label": catalog.rules[digest]}
+                 for digest in sorted(catalog.rules) if digest in trusted_hashes]
+    return {
+        "schema": 1, "kind": "signature-catalog-preflight", "version": catalog.version,
+        "trusted_hashes_checked": len(trusted), "conflicts": conflicts,
+        "status": "blocked" if conflicts else "passed" if trusted else "no-baseline",
+    }
+
+
+def catalog_preflight(path: str | Path) -> dict:
+    """Verify a candidate and compare it with the explicitly curated local baseline."""
+    _, candidate = _read_candidate(path)
+    target = _checked_catalog_store()
+    if target is None:
+        return _preflight(candidate, ())
+    try:
+        with closing(sqlite3.connect(target.as_uri() + "?mode=ro", uri=True, timeout=5)) as db, db:
+            db.execute("PRAGMA trusted_schema=OFF")
+            db.execute("BEGIN")
+            return _preflight(candidate, _trusted_hashes(db))
+    except sqlite3.Error as exc:
+        raise OSError("Trusted-file baseline could not be checked") from exc
+
+
+def trust_file(path: str | Path) -> str:
+    """Remember an explicitly selected trusted file by content, without storing its path."""
+    from .antivirus import read_regular
+
+    content, _ = read_regular(Path(path), _MAX_TRUSTED_FILE_BYTES)
+    digest = hashlib.sha256(content).hexdigest()
+    target = _prepare_catalog_store()
+    try:
+        with closing(sqlite3.connect(target, timeout=5)) as db, db:
+            db.execute("PRAGMA trusted_schema=OFF")
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("CREATE TABLE IF NOT EXISTS trusted_files (sha256 TEXT PRIMARY KEY)")
+            trusted = _trusted_hashes(db)
+            if digest not in trusted and len(trusted) == MAX_TRUSTED_FILES:
+                raise ValueError("Trusted-file baseline is full")
+            db.execute("INSERT OR IGNORE INTO trusted_files VALUES (?)", (digest,))
+    except sqlite3.Error as exc:
+        raise OSError("Trusted-file baseline could not be saved") from exc
+    return digest
+
+
+def untrust_hash(digest: str) -> bool:
+    if re.fullmatch(r"[a-f0-9]{64}", digest) is None:
+        raise ValueError("Expected a lowercase SHA-256 hash")
+    target = _checked_catalog_store()
+    if target is None:
+        return False
+    try:
+        with closing(sqlite3.connect(target, timeout=5)) as db, db:
+            db.execute("PRAGMA trusted_schema=OFF")
+            db.execute("BEGIN IMMEDIATE")
+            if digest not in _trusted_hashes(db):
+                return False
+            db.execute("DELETE FROM trusted_files WHERE sha256=?", (digest,))
+            return True
+    except sqlite3.Error as exc:
+        raise OSError("Trusted-file baseline could not be saved") from exc
+
+
+def install_catalog(path: str | Path) -> Catalog:
+    package, catalog = _read_candidate(path)
     baseline = bundled_catalog()
     if catalog.version <= baseline.version:
         raise ValueError("Update must be newer than the bundled signature catalog")
 
-    target = default_catalog_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    checked_path(target.parent)
-    try:
-        checked_path(target)
-    except FileNotFoundError:
-        pass
+    target = _prepare_catalog_store()
     try:
         with closing(sqlite3.connect(target, timeout=5)) as db, db:
             db.execute("PRAGMA trusted_schema=OFF")
@@ -204,6 +317,12 @@ def install_catalog(path: str | Path) -> Catalog:
                 if (catalog.version, package) == versions[0]:
                     return replace(catalog, source="installed")
                 raise ValueError("Update must be newer than the installed signature catalog")
+            preflight = _preflight(catalog, _trusted_hashes(db))
+            if preflight["conflicts"]:
+                raise ValueError(
+                    f"Signature update blocked by {len(preflight['conflicts'])} trusted-file "
+                    "conflict(s). Run signatures preflight for details"
+                )
             db.execute("INSERT INTO catalogs VALUES (?, ?)", (catalog.version, package))
             # Keep the latest older *verified* package as a fallback.
             keep = baseline.version

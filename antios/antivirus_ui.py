@@ -931,6 +931,13 @@ class AntivirusPanel:
             if incident_state in {"normal", "attention", "alert"}
             else "incident_unavailable"
         )
+        coverage_notes = []
+        if value.get("scan_backlog"):
+            coverage_notes.append(self.t("guard_scan_backlog", count=value["scan_backlog"]))
+        if value.get("inventory_limited"):
+            coverage_notes.append(self.t("guard_inventory_limit"))
+        if value.get("incident_tracking_dropped"):
+            coverage_notes.append(self.t("guard_lost_records", count=value["incident_tracking_dropped"]))
         self.guard_status.configure(
             text=self.t(
                 "guard_status",
@@ -952,7 +959,7 @@ class AntivirusPanel:
                 score=incidents.get("highest_score", 0),
                 nodes=latest_incident.get("node_count", 0),
                 edges=latest_incident.get("edge_count", 0),
-            )
+            ) + ("\n" + " · ".join(coverage_notes) if coverage_notes else "")
         )
 
         running = state in _ACTIVE_GUARD_STATES

@@ -69,6 +69,18 @@ CISA_2025_SUPPLEMENT = {
         "Play ransomware campaign custom data collector (CISA AA23-352A)",
     "75404543de25513b376f097ceb383e8efb9c9b95da8945fd4aa37c7b2f226212":
         "SystemBC malware executable (CISA AA23-352A)",
+    # AR25-261A Tables 1-5: exact hashes of the two loaders and three Java classes.
+    # https://www.cisa.gov/sites/default/files/2025-09/AR25-261A_MAR_Malicious_Listener_for_Ivanti_EPMM_Systems_2.pdf
+    "c1f60ca5a5f7b94ab7122718a44b46de16c69d22c2eb62ce2948cab14bc78d50":
+        "Ivanti EPMM malicious JAR loader (CISA AR25-261A)",
+    "065c1c2fb17ba1c3f882bead409215df612673cd455698768ed71412f9190ba3":
+        "Ivanti EPMM malicious Java injector (CISA AR25-261A)",
+    "b1b1cf33b8d3da35293d6b74c378f0cd9452a4351e26d07c896c4d9a8257ef89":
+        "Ivanti EPMM malicious Java listener (CISA AR25-261A)",
+    "b618057de9a8bba95440f23b9cf6374cc66f2acd127b3d478684b22d8f11e00b":
+        "Ivanti EPMM malicious JAR loader (CISA AR25-261A)",
+    "df501b238854d6579cafebeba82581a728e89ed1f6cd0da54c79ef4eb6f4f9fd":
+        "Ivanti EPMM malicious Java listener (CISA AR25-261A)",
 }
 
 # NCSC lists these as samples or malware components. Partial-image hashes and

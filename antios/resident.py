@@ -111,9 +111,9 @@ def repair_guard_state_access() -> None:
 
 
 def configure_resident_guard(*, roots: tuple[Path, ...] | None = None) -> dict:
-    """Persist the per-user Guard task and start it immediately."""
+    """Start the installed task, or configure it for explicit or default roots."""
     selected = tuple(roots or default_resident_roots())
-    if not selected:
+    if roots is not None and not selected:
         raise RuntimeError("No monitorable current-user folders were found")
     executable = _guard_executable()
     args = [
@@ -126,7 +126,9 @@ def configure_resident_guard(*, roots: tuple[Path, ...] | None = None) -> dict:
         "-AllowManagedUnsigned",
         "-Apply",
     ]
-    result = _run_startup_script(*args)
+    if roots is None:
+        args.append("-ReuseExisting")
+    result = _run_startup_script(*args, timeout=65)
     return dict(result, configured=True, roots=[str(path) for path in selected])
 
 
@@ -191,5 +193,5 @@ def ensure_resident_guard(*, wait_seconds: float = 6.0) -> dict:
         latest,
         startup_configured=True,
         changed=True,
-        configured_roots=configured.get("roots", []),
+        configured_roots=latest.get("roots", configured.get("roots", [])),
     )

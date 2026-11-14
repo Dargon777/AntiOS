@@ -4,7 +4,14 @@ This file summarizes user-visible changes. Detailed commit history remains avail
 
 ## Unreleased
 
-No changes recorded yet.
+## 3.0.4a1 — 2026-11-14
+
+- Keep earlier Windows quarantine records readable across consecutive isolations.
+- Check signed catalog updates against a local baseline of trusted file hashes and block conflicting updates.
+- Keep Guard notifications active during scans, report capacity limits and recheck files that change during inspection.
+- Add bounded Windows thread-start inspection and report coverage gaps.
+- Inspect TAR and TGZ members using extended PAX or GNU path headers.
+- Add five exact file indicators from CISA AR25-261A.
 
 ## 3.0.3a1 — 2026-11-12
 

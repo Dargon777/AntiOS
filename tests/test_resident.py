@@ -46,11 +46,28 @@ def test_configure_resident_guard_uses_persistent_task(monkeypatch, tmp_path):
     assert result["configured"] is True
     args = captured["args"]
     assert "-Apply" in args
+    assert "-ReuseExisting" not in args
     assert "-EngineServiceName" not in args
     assert "clamd" not in args
     assert "-RootsJson" in args
     payload = json.loads(args[args.index("-RootsJson") + 1])
     assert payload == [str(root)]
+
+
+def test_default_guard_start_preserves_existing_task_and_policy(monkeypatch, tmp_path):
+    calls = []
+    default_root = tmp_path / "Downloads"
+    previous_root = str(tmp_path / "existing")
+    monkeypatch.setattr(resident, "default_resident_roots", lambda: (default_root,))
+    monkeypatch.setattr(resident, "_guard_executable", lambda: tmp_path / "AntiOS-Guard.exe")
+    monkeypatch.setattr(resident, "_run_startup_script", lambda *args, **kwargs: calls.append(args) or {})
+    states = iter([
+        {"state": "unresponsive", "running": False},
+        {"state": "monitoring", "running": True, "roots": [previous_root], "mode": "quarantine"},
+    ])
+    monkeypatch.setattr(resident, "read_guard_state", lambda: next(states))
+    assert resident.ensure_resident_guard(wait_seconds=0)["configured_roots"] == [previous_root]
+    assert "-ReuseExisting" in calls[0]
 
 
 def test_ensure_resident_guard_repairs_stopped_state(monkeypatch):

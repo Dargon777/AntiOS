@@ -35,16 +35,17 @@ from .windows_process import hidden_process_kwargs
 
 
 # Files that commonly become an execution boundary should reach the scanner
-# sooner than ordinary documents. This is still post-write protection: the
-# signed native minifilter remains the only AntiOS pre-execution enforcement
-# path. Early scans are revalidated and rescanned when bytes keep changing.
+# sooner than ordinary documents. Early post-write scans are revalidated and
+# repeated when bytes keep changing.
 _FAST_SCAN_SUFFIXES = frozenset({
     ".exe", ".dll", ".com", ".scr", ".sys", ".msi", ".msp",
     ".ps1", ".psm1", ".psd1", ".bat", ".cmd", ".vbs", ".vbe",
     ".js", ".jse", ".wsf", ".wsh", ".hta", ".jar", ".lnk", ".url",
 })
 _FAST_SETTLE_SECONDS = 0.20
+_FAST_SCAN_BURST = 3
 _MAX_TRANSIENT_SCAN_RETRIES = 3
+_NOTIFICATION_DRAIN_BATCHES = 4
 _DEFAULT_GUARD_INTERVAL = 15 if os.name != "nt" else 2
 _DEFAULT_GUARD_RESCAN = 1800 if os.name != "nt" else 900
 _DEEP_INITIAL_DELAY = 15.0
@@ -100,12 +101,14 @@ def file_identity(info):
 def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
     """Reconcile notifications against disk, with bounded traversal and no links."""
     files, issues, stack = {}, [], list(roots)
+    visited = set()
     entries = 0
     limited = False
     while stack and not cancelled():
         folder = stack.pop()
-        if any(folder == root or root in folder.parents for root in excluded):
+        if folder in visited or any(folder == root or root in folder.parents for root in excluded):
             continue
+        visited.add(folder)
         try:
             checked_path(folder)
             with os.scandir(folder) as children:
@@ -113,7 +116,7 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
                     if cancelled():
                         return files, issues, True
                     entries += 1
-                    if entries > max_files * 2 or len(files) >= max_files:
+                    if entries > max_files * 2:
                         return files, issues, True
                     path = Path(child.path)
                     if any(path == root or root in path.parents for root in excluded):
@@ -127,6 +130,8 @@ def inventory(roots, *, excluded=(), max_files=50000, cancelled=lambda: False):
                         if stat.S_ISDIR(info.st_mode):
                             stack.append(path)
                         elif stat.S_ISREG(info.st_mode):
+                            if len(files) >= max_files:
+                                return files, issues, True
                             files[path] = file_identity(info)
                         else:
                             raise ValueError('not-a-regular-file')
@@ -245,9 +250,12 @@ class Guard:
         self._native_probe_errors = 0
         self._last_observed_state = None
         self.pending = OrderedDict()
+        self.priority_changes = OrderedDict()
         self.queue_cursor = None
         self.known, self.failures, self.threats = {}, {}, {}
         self.transient_retries = {}
+        self._active_scan_path = None
+        self._active_scan_changed = False
         self.status = {'schema': 1, 'kind': 'antivirus-guard', 'run_id': uuid.uuid4().hex,
                        'state': 'starting', 'running': True, 'pid': os.getpid(),
                        'started_at': time.time(), 'heartbeat': time.time(),
@@ -257,7 +265,9 @@ class Guard:
                        'pre_execution_blocking': False, 'coverage': 'selected-directories-after-change',
                        'engine': {}, 'scanned': 0, 'detections': 0, 'quarantined': 0,
                        'errors': 0, 'pending': 0, 'unresolved': 0, 'inventory_issues': [],
-                       'capacity_exceeded': False, 'notifications': 'starting',
+                       'capacity_exceeded': False, 'inventory_limited': False,
+                       'scan_backlog': 0, 'incident_tracking_dropped': 0,
+                       'notifications': 'starting', 'scans_invalidated': 0,
                        'notification_resyncs': 0, 'fast_path_seconds': _FAST_SETTLE_SECONDS,
                        'transient_deferrals': 0, 'behavior_alerts_dropped': 0,
                        'behavior': dict(self.behavior.status(), collector=self._behavior_collector,
@@ -511,12 +521,23 @@ class Guard:
             )
         def matches(path):
             return path in affected or not affected.isdisjoint(path.parents)
+        if self._active_scan_path is not None and matches(self._active_scan_path):
+            self._active_scan_changed = True
         for path in list(self.known):
             if matches(path):
                 del self.known[path]
+        # A root reset invalidates cached scan results, but does not imply that
+        # every pending file was rewritten. Reconciliation checks its identity.
+        explicit_changes = set(changed_paths)
         changed_at = time.monotonic()
+        for path in changed_paths:
+            if path.suffix.lower() in _FAST_SCAN_SUFFIXES:
+                self.priority_changes[path] = changed_at + self._settle_delay(path)
+                self.priority_changes.move_to_end(path)
+                if len(self.priority_changes) > self.policy.max_queue:
+                    self.priority_changes.popitem(last=False)
         for path, (identity, _) in list(self.pending.items()):
-            if matches(path):
+            if path in explicit_changes or not explicit_changes.isdisjoint(path.parents):
                 self.pending[path] = (identity, changed_at + self._settle_delay(path))
         return True
 
@@ -538,6 +559,30 @@ class Guard:
         last_alert_loss_reported = 0
         version, changed, notification_error = None, True, False
         next_notification_retry = 0.0
+        next_scan_notification_poll = 0.0
+        priority_streak = 0
+
+        def read_notifications(wait, batches=1):
+            nonlocal watcher, changed, notification_error, last_inventory, next_notification_retry
+            try:
+                for _ in range(batches):
+                    batch = watcher.wait(wait)
+                    if not batch:
+                        break
+                    wait = 0
+                    changed = self.invalidate_changes(batch) or changed
+                    if batch.reset_roots:
+                        self.status['notification_resyncs'] += 1
+                        store.event('notification-resync', {'roots': [str(p) for p in batch.reset_roots]})
+            except OSError as exc:
+                watcher.close()
+                watcher = None
+                notification_error = True
+                next_notification_retry = time.monotonic() + 30
+                self.status['notifications'] = 'failed; periodic reconciliation continues'
+                self.invalidate_changes(ChangeBatch(reset_roots=self.roots))
+                last_inventory = float('-inf')
+                store.event('notification-error', {'error': str(exc)[:500]})
 
         def cancelled():
             nonlocal last_heartbeat, last_process_poll, last_stop_poll
@@ -608,6 +653,16 @@ class Guard:
                                    unresolved=len(self.failures), active_threats=len(self.threats))
                 self._publish_incidents(store)
                 store.publish(self.status)
+            return stop.is_set()
+
+        def scan_cancelled():
+            nonlocal next_scan_notification_poll
+            if cancelled():
+                return True
+            now = time.monotonic()
+            if watcher is not None and watcher.native and now >= next_scan_notification_poll:
+                next_scan_notification_poll = now + 0.05
+                read_notifications(0, _NOTIFICATION_DRAIN_BATCHES)
             return stop.is_set()
 
         store.publish(self.status)
@@ -705,14 +760,15 @@ class Guard:
                     except (OSError, RuntimeError) as exc:
                         self.status['engine'] = {'available': False, 'detail': str(exc)[:500]}
                         store.event('engine-error', self.status['engine'])
-                if now - last_inventory >= self.policy.interval:
+                inventory_age = now - last_inventory
+                if inventory_age >= self.policy.interval or (changed and inventory_age >= 0.5):
                     last_inventory = now
                     files, issues, limited = inventory(self.roots, max_files=self.policy.max_files,
                         excluded=self.excluded, cancelled=cancelled)
                     self.status['inventory_issues'] = issues
-                    self.status['capacity_exceeded'] = limited
+                    self.status['inventory_limited'] = limited
                     for mapping in (self.pending, self.known, self.failures,
-                                    self.threats, self.transient_retries):
+                                    self.threats, self.transient_retries, self.priority_changes):
                         for path in list(mapping):
                             if path not in files and not limited and not issues:
                                 del mapping[path]
@@ -724,29 +780,68 @@ class Guard:
                             # A new file version gets its own transient retry budget.
                             self.transient_retries.pop(path, None)
                             self.pending[path] = (current, now + self._settle_delay(path))
-                    # Continue after the last admission. Repeated writes/cache
-                    # resets in the first entries must not starve the backlog.
-                    entries = list(files.items())
-                    start = next((index + 1 for index, (path, _) in enumerate(entries)
+                    # Continue after the last normal admission to prevent
+                    # repeated writes in the first entries from starving the rest.
+                    entries = tuple(files)
+                    start = next((index + 1 for index, path in enumerate(entries)
                                   if path == self.queue_cursor), 0)
-                    for offset in range(len(entries)):
-                        path, identity = entries[(start + offset) % len(entries)]
+                    ordered = entries[start:] + entries[:start]
+
+                    def needs_scan(path):
                         known = self.known.get(path)
-                        if known and known[0] == identity and now - known[1] < known[2]:
-                            continue
-                        pending = self.pending.get(path)
-                        if pending is not None:
+                        return not (known and known[0] == files[path] and now - known[1] < known[2])
+
+                    if priority_streak >= _FAST_SCAN_BURST and not any(
+                        path not in self.priority_changes for path in self.pending
+                    ):
+                        ordinary = next((path for path in ordered
+                                         if path not in self.priority_changes and needs_scan(path)), None)
+                        if ordinary is not None:
+                            if len(self.pending) >= self.policy.max_queue:
+                                self.pending.popitem(last=True)
+                            self.pending[ordinary] = (files[ordinary], now + self._settle_delay(ordinary))
+                            self.queue_cursor = ordinary
+                    elif priority_streak < _FAST_SCAN_BURST:
+                        # Reserve at most one slot for a settled new executable.
+                        # Other entries return through ordinary inventory order.
+                        priority = next(((path, deadline) for path, deadline in self.priority_changes.items()
+                                         if path in files and path not in self.pending and deadline <= now), None)
+                        if priority:
+                            path, deadline = priority
+                            if len(self.pending) >= self.policy.max_queue:
+                                replace = next((p for p in reversed(self.pending)
+                                                if p not in self.priority_changes), None)
+                                if replace is not None:
+                                    del self.pending[replace]
+                            if len(self.pending) < self.policy.max_queue:
+                                self.pending[path] = (files[path], deadline)
+                    backlog = 0
+                    for path in ordered:
+                        if path in self.pending or not needs_scan(path):
                             continue
                         if len(self.pending) >= self.policy.max_queue:
-                            self.status['capacity_exceeded'] = True
-                            break
-                        self.pending[path] = (identity, now + self._settle_delay(path))
+                            backlog += 1
+                            continue
+                        self.pending[path] = (files[path], now + self._settle_delay(path))
                         self.queue_cursor = path
+                    self.status['scan_backlog'] = backlog
+                    self.status['capacity_exceeded'] = bool(
+                        limited or backlog or self.status['incident_tracking_dropped']
+                    )
                     changed = False
+                ready = None
+                prefer_priority = priority_streak < _FAST_SCAN_BURST
                 ready = next(((path, item) for path, item in self.pending.items()
-                              if now >= item[1]), None)
+                              if now >= item[1] and (path in self.priority_changes) == prefer_priority), None)
+                if ready is None and (prefer_priority or all(
+                    path in self.priority_changes for path in self.pending
+                )):
+                    ready = next(((path, item) for path, item in self.pending.items()
+                                  if now >= item[1]), None)
                 if ready and self.status['engine'].get('available') and not cancelled():
                     path, (identity, _) = ready
+                    priority = self.priority_changes.pop(path, None)
+                    priority_streak = priority_streak + 1 if priority is not None else 0
                     del self.pending[path]
                     # A degraded Guard must not look fully healthy merely because
                     # it entered a scanning phase.
@@ -754,10 +849,14 @@ class Guard:
                     self.status.update(state=scan_state, current_path=str(path))
                     store.publish(self.status)
                     self._notify_status()
+                    self._active_scan_path = path
+                    self._active_scan_changed = False
                     try:
-                        result = self.scanner(path, engine=self.policy.scan_engine, timeout=45, cancelled=cancelled)
+                        result = self.scanner(path, engine=self.policy.scan_engine, timeout=45, cancelled=scan_cancelled)
                         if cancelled():
                             break
+                        if watcher is not None and watcher.native:
+                            read_notifications(0, _NOTIFICATION_DRAIN_BATCHES)
                         self.transient_retries.pop(path, None)
                         self.status['scanned'] += result['summary']['files_scanned']
                         if not result['engine'].get('available') or result['engine'].get('failed_during_scan'):
@@ -780,7 +879,8 @@ class Guard:
                                 continue
                             self.threats[path] = finding['name']
                             self.status['detections'] += 1
-                            if self.policy.auto_quarantine and risk_context['automatic_enforcement_eligible']:
+                            if (self.policy.auto_quarantine and not self._active_scan_changed
+                                    and risk_context['automatic_enforcement_eligible']):
                                 item = self.quarantine_factory().add(finding, dry_run=False)
                                 store.event('quarantined', {'path': str(path), 'id': item['id'], 'name': finding['name']})
                                 self.status['quarantined'] += 1
@@ -791,12 +891,15 @@ class Guard:
                         except FileNotFoundError:
                             current = None
                         # A scan result never covers bytes written during detection.
-                        if current == identity:
+                        if current == identity and not self._active_scan_changed:
                             if not incomplete and not any(f['kind'] == 'threat' for f in findings):
                                 self.threats.pop(path, None)
                             if len(self.known) >= self.policy.max_files and path not in self.known:
                                 self.known.pop(next(iter(self.known)))
                             self.known[path] = (identity, time.monotonic(), 30 if incomplete else self.policy.rescan)
+                        elif current is not None:
+                            self.status['scans_invalidated'] += 1
+                            changed = True
                     except (OSError, RuntimeError, ValueError) as exc:
                         if isinstance(exc, FileNotFoundError):
                             # Another protection/remediation layer may have removed or
@@ -805,6 +908,11 @@ class Guard:
                             self.failures.pop(path, None)
                             self.known.pop(path, None)
                             store.event('scan-vanished', {'path': str(path)})
+                        elif self._active_scan_changed:
+                            self.status['scans_invalidated'] += 1
+                            self.transient_retries.pop(path, None)
+                            changed = True
+                            store.event('scan-invalidated', {'path': str(path), 'error': str(exc)[:500]})
                         elif _transient_scan_conflict(exc):
                             retries = self.transient_retries.get(path, 0) + 1
                             if retries <= _MAX_TRANSIENT_SCAN_RETRIES:
@@ -832,9 +940,20 @@ class Guard:
                                 self.known.pop(next(iter(self.known)))
                             self.known[path] = (identity, time.monotonic(), 30)
                             store.event('scan-error', {'path': str(path), 'error': str(exc)[:500]})
-                    self.status.pop('current_path', None)
-                if len(self.failures) > self.policy.max_files or len(self.threats) > self.policy.max_files:
-                    raise RuntimeError('Guard incident capacity exceeded; review history and reduce watched scope')
+                    finally:
+                        self._active_scan_path = None
+                        self.status.pop('current_path', None)
+                dropped = 0
+                for mapping in (self.failures, self.threats, self.transient_retries):
+                    while len(mapping) > self.policy.max_files:
+                        del mapping[next(iter(mapping))]
+                        dropped += 1
+                if dropped:
+                    self.status['capacity_exceeded'] = True
+                    self.status['incident_tracking_dropped'] += dropped
+                    store.event('incident-tracking-limit', {
+                        'dropped': dropped, 'dropped_total': self.status['incident_tracking_dropped'],
+                    })
                 degraded = (notification_error or self.failures or self.status['inventory_issues'] or
                             self.status['capacity_exceeded'] or not self.status['engine'].get('available') or
                             self.status['engine'].get('signature_catalog_status') == 'fallback' or
@@ -851,23 +970,7 @@ class Guard:
                 )
                 self._notify_status()
                 if watcher is not None:
-                    try:
-                        batch = watcher.wait(0.05 if ready else 0.25)
-                        changed = self.invalidate_changes(batch) or changed
-                        if batch.reset_roots:
-                            self.status['notification_resyncs'] += 1
-                            store.event('notification-resync', {'roots': [str(p) for p in batch.reset_roots]})
-                        # A timed sweep remains even when no event was received.
-                        if changed and time.monotonic() - last_inventory >= 0.5:
-                            last_inventory = float('-inf')
-                    except OSError as exc:
-                        watcher.close()
-                        watcher = None
-                        notification_error = True
-                        self.status['notifications'] = 'failed; periodic reconciliation continues'
-                        self.invalidate_changes(ChangeBatch(reset_roots=self.roots))
-                        last_inventory = float('-inf')
-                        store.event('notification-error', {'error': str(exc)[:500]})
+                    read_notifications(0.05 if ready else 0.25, _NOTIFICATION_DRAIN_BATCHES)
                 else:
                     stop.wait(0.25)
         except KeyboardInterrupt:
@@ -983,7 +1086,7 @@ def main(argv=None):
     try:
         if args.command != 'run':
             status = read_guard_state(args.state_dir, history=args.command == 'history', stop=args.command == 'stop')
-            print(json.dumps(status, indent=2, ensure_ascii=False))
+            print(json.dumps(status, indent=2, ensure_ascii=True))
             return 0
         if args.policy:
             if args.roots or args.auto_quarantine or args.engine is not None:

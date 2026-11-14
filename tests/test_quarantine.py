@@ -195,6 +195,28 @@ def test_native_dpapi_authenticated_roundtrip_and_tamper_detection():
         protector.unprotect(bytes(changed))
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI and inherited ACL integration")
+def test_native_quarantine_keeps_earlier_records_readable(tmp_path):
+    vault = Quarantine(tmp_path / "vault")
+    expected = {}
+    for index in range(3):
+        source = tmp_path / f"control-{index}.txt"
+        content = f"Harmless native control {index}\n".encode()
+        source.write_bytes(content)
+        finding, = scan_files(
+            source, provider_factory=lambda: Provider(
+                ScanOutcome("threat", "Inert quarantine fixture", "AntiOS Engine")
+            )
+        )["findings"]
+        item = vault.add(finding, dry_run=False)
+        expected[item["id"]] = (source, content)
+        assert not source.exists()
+    assert {item["id"] for item in vault.list_items() if item.get("state") == "isolated"} == set(expected)
+    for item_id, (path, content) in expected.items():
+        vault.restore(item_id, dry_run=False)
+        assert path.read_bytes() == content
+
+
 def test_verify_all_reports_valid_and_corrupt_items(fixture):
     source, finding, vault = fixture
     item = vault.add(finding, dry_run=False)

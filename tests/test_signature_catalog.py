@@ -55,15 +55,19 @@ def test_application_supplement_is_exact_and_new_signed_catalog_supersedes_it(pu
     ncsc = set(antivirus.NCSC_SUPPLEMENT)
     combined = supplemental | cisa_2025 | ncsc
     assert len(supplemental) == 13
-    assert len(cisa_2025) == 16
+    assert len(cisa_2025) == 21
     assert len(ncsc) == 42
     assert all(len(bytes.fromhex(digest)) == 32 and digest == digest.lower() for digest in combined)
+    assert len(combined) == len(supplemental) + len(cisa_2025) + len(ncsc)
 
     rules, metadata = antivirus.load_managed_signatures()
     assert combined <= rules.keys()
-    assert metadata["signature_bundled_supplement_entries"] == 71
-    assert metadata["signature_cisa_2025_entries"] == 16
+    assert metadata["signature_bundled_supplement_entries"] == 76
+    assert metadata["signature_cisa_2025_entries"] == 21
     assert metadata["signature_ncsc_supplement_entries"] == 42
+    assert rules["b1b1cf33b8d3da35293d6b74c378f0cd9452a4351e26d07c896c4d9a8257ef89"].endswith(
+        "(CISA AR25-261A)"
+    )
     # CISA campaign reports also list legitimate tooling. The published PsExec
     # hash must not enter the bundled confirmed-threat rules.
     assert "078163d5c16f64caa5a14784323fd51451b8c831c73396b967b4e35e6879937b" not in rules
@@ -94,6 +98,44 @@ def test_bad_signature_and_downgrade_preserve_active_catalog(publisher):
         catalog.install_catalog(bad)
     assert store.read_bytes() == before
     assert catalog.load_active_catalog().version == 3
+
+
+def test_preflight_blocks_activation_without_exempting_live_scans(publisher, tmp_path, capsys):
+    package, store = publisher
+    sample = tmp_path / "known-good.txt"
+    sample.write_bytes(b"known-good local test file")
+    conflicting = package(3, "Regression fixture", sample.read_bytes())
+    assert catalog.catalog_preflight(conflicting)["status"] == "no-baseline"
+    assert not store.exists()
+
+    catalog.install_catalog(package(2))
+    digest = catalog.trust_file(sample)
+    assert catalog.trust_file(sample) == digest
+    assert cli.main(["signatures", "preflight", str(conflicting), "--json"]) == 3
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "blocked"
+    assert report["trusted_hashes_checked"] == 1
+    assert report["conflicts"] == [{"sha256": digest, "label": "Regression fixture"}]
+    assert str(sample) not in store.read_bytes().decode("utf-8", errors="ignore")
+    with pytest.raises(ValueError, match="trusted-file"):
+        catalog.install_catalog(conflicting)
+    assert catalog.load_active_catalog().version == 2
+
+    assert catalog.untrust_hash(digest)
+    assert not catalog.untrust_hash(digest)
+    assert catalog.install_catalog(conflicting).version == 3
+    catalog.trust_file(sample)
+    assert antivirus.scan_files(sample)["verdict"] == "threats-found"
+
+
+def test_trusted_baseline_before_first_update_preserves_bundled_status(publisher, tmp_path):
+    package, _ = publisher
+    sample = tmp_path / "clean-file"
+    sample.write_bytes(b"another inert file")
+    catalog.trust_file(sample)
+    assert catalog.load_active_catalog().metadata()["signature_catalog_status"] == "bundled"
+    assert catalog.catalog_preflight(package(2))["status"] == "passed"
+    assert catalog.install_catalog(package(2)).version == 2
 
 
 def test_bad_update_creates_no_user_store(publisher):
