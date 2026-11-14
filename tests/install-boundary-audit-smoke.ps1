@@ -151,7 +151,7 @@ try {
 
     Restore-GuardUserAccess $stateDir
     $rootRules = (Get-Acl -LiteralPath $stateDir).GetAccessRules(
-        $true, $false, [Security.Principal.SecurityIdentifier]
+        $true, $true, [Security.Principal.SecurityIdentifier]
     )
     $expectedFlags = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
         [Security.AccessControl.InheritanceFlags]::ObjectInherit
@@ -159,7 +159,7 @@ try {
         $_.IdentityReference.Value -eq $identity.User.Value -and
         $_.AccessControlType -eq 'Allow' -and $_.InheritanceFlags -eq $expectedFlags
     })) {
-        throw 'Guard repair must install an explicit inheritable current-user grant.'
+        throw 'Guard repair must provide an inheritable current-user grant.'
     }
     $recreated = Join-Path $stateDir 'guard.sqlite3-shm'
     [IO.File]::WriteAllText($recreated, 'new-sqlite-sidecar')

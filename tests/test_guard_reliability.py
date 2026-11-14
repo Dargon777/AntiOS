@@ -199,14 +199,17 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
     $failure = ''
     try { Restore-GuardUserAccess $env:ANTIOS_TEST_FOLDER } catch { $rejected = $true; $failure = $_.Exception.ToString() }
     $acl = Get-Acl -LiteralPath $env:ANTIOS_TEST_FOLDER
-    $rules = @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]) | Where-Object {
+    $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
         $_.IdentityReference -eq $identity.User -and $_.AccessControlType -eq 'Allow' -and
+        $_.InheritanceFlags -eq $inherit -and
         ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq [Security.AccessControl.FileSystemRights]::FullControl
     })
     $ruleDetails = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {
         '{0}:{1}:inherited={2}' -f $_.IdentityReference.Value,$_.FileSystemRights,$_.IsInherited
     })
-    @{rejected=$rejected; failure=$failure; explicit_user=($rules.Count -gt 0); folder_rules=$ruleDetails; folder_sddl=$acl.Sddl; outside_unchanged=($before -eq (Get-Acl -LiteralPath $env:ANTIOS_TEST_OUTSIDE).Sddl)} | ConvertTo-Json -Compress
+    @{rejected=$rejected; failure=$failure; inheritable_user=($rules.Count -gt 0); folder_rules=$ruleDetails; folder_sddl=$acl.Sddl; outside_unchanged=($before -eq (Get-Acl -LiteralPath $env:ANTIOS_TEST_OUTSIDE).Sddl)} | ConvertTo-Json -Compress
     '''
     env = dict(os.environ, ANTIOS_TEST_SCRIPT=str(Path("scripts/guard-startup.ps1").absolute()),
                ANTIOS_TEST_FOLDER=str(folder), ANTIOS_TEST_OUTSIDE=str(outside),
@@ -223,7 +226,7 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
     assert data["rejected"] is linked, data["failure"]
     assert data["outside_unchanged"] is True
     if not linked:
-        assert data["explicit_user"] is True, data
+        assert data["inheritable_user"] is True, data
     assert state_file.read_bytes() == before_bytes
     if not linked:
         with sqlite3.connect(state_file) as db:
