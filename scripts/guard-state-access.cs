@@ -104,11 +104,14 @@ namespace AntiOS {
             // Do not short-circuit on the ACL returned by the native handle:
             // its inherited ACE flags can be normalized differently from Get-Acl.
             // An inherited grant is NOT proof of an explicit grant on this file.
-            // Set only the current user's explicit allow rule, preserving other SIDs.
+            // SQLite recreates WAL/SHM files after startup. A directory-only
+            // rule gives the filtered token no access when the writer is elevated.
+            var inheritance = directory
+                ? InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit
+                : InheritanceFlags.None;
             acl.SetAccessRule(new FileSystemAccessRule(
-                user, FileSystemRights.FullControl, InheritanceFlags.None,
+                user, FileSystemRights.FullControl, inheritance,
                 PropagationFlags.None, AccessControlType.Allow));
-            // Set only this handle's DACL, without propagating into unrelated children.
             if (!SetKernelObjectSecurity(handle, dacl, acl.GetSecurityDescriptorBinaryForm())) throw new Win32Exception();
         }
 
@@ -122,8 +125,10 @@ namespace AntiOS {
                         var handle = Open(Path.Combine(directory, file), false);
                         if (handle != null) opened.Add(handle);
                     }
-                    foreach (var handle in opened) Grant(handle, user, false);
+                    // Apply the inheritable grant first, then repair existing
+                    // state files even if their DACLs are protected.
                     Grant(root, user, true);
+                    foreach (var handle in opened) Grant(handle, user, false);
                 } finally { foreach (var handle in opened) handle.Dispose(); }
             }
         }

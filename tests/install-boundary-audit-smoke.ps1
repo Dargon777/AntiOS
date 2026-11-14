@@ -150,9 +150,34 @@ try {
     } | Sort-Object) -join ';'
 
     Restore-GuardUserAccess $stateDir
+    $rootRules = (Get-Acl -LiteralPath $stateDir).GetAccessRules(
+        $true, $false, [Security.Principal.SecurityIdentifier]
+    )
+    $expectedFlags = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    if (-not ($rootRules | Where-Object {
+        $_.IdentityReference.Value -eq $identity.User.Value -and
+        $_.AccessControlType -eq 'Allow' -and $_.InheritanceFlags -eq $expectedFlags
+    })) {
+        throw 'Guard repair must install an explicit inheritable current-user grant.'
+    }
+    $recreated = Join-Path $stateDir 'guard.sqlite3-shm'
+    [IO.File]::WriteAllText($recreated, 'new-sqlite-sidecar')
+    $inheritedRules = (Get-Acl -LiteralPath $recreated).GetAccessRules(
+        $false, $true, [Security.Principal.SecurityIdentifier]
+    )
+    $inheritedUser = @($inheritedRules | Where-Object {
+        $_.IdentityReference.Value -eq $identity.User.Value -and
+        $_.AccessControlType -eq 'Allow' -and
+        ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq
+            [Security.AccessControl.FileSystemRights]::FullControl
+    })
+    if ($inheritedUser.Count -lt 1) {
+        throw 'Recreated Guard sidecars must inherit explicit current-user access from the directory.'
+    }
     foreach ($path in @($database, $wal)) {
         $rules = (Get-Acl -LiteralPath $path).GetAccessRules(
-            $true, $false, [Security.Principal.SecurityIdentifier]
+            $true, ($path -ne $database), [Security.Principal.SecurityIdentifier]
         )
         $owned = @($rules | Where-Object {
             $_.IdentityReference.Value -eq $identity.User.Value -and
@@ -161,7 +186,7 @@ try {
                 [Security.AccessControl.FileSystemRights]::FullControl
         })
         if ($owned.Count -lt 1) {
-            throw "Guard repair did not restore explicit current-user access: $path"
+            throw "Guard repair did not restore current-user access: $path"
         }
     }
     if ([IO.File]::ReadAllText($database) -cne 'keep-guard-history' -or

@@ -117,6 +117,36 @@ def test_directory_helper_timeout_is_a_reportable_startup_error(tmp_path, monkey
         guard_state._grant_creator_access(tmp_path)
 
 
+@pytest.mark.parametrize(("args", "detached", "output"), [
+    (["run", "--policy", "policy.json"], True, ""),
+    (["run", "--help"], False, "guard output"),
+    (["status"], False, "guard output"),
+    (["stop"], False, "guard output"),
+    (["history"], False, "guard output"),
+])
+def test_frozen_guard_only_detaches_when_running(args, detached, output, monkeypatch, capsys):
+    import sys
+
+    import antios_guard_entry as entry
+    from antios import guard
+
+    calls = []
+    monkeypatch.setattr(entry, "os", SimpleNamespace(name="nt", devnull=os.devnull))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "argv", ["AntiOS-Guard.exe", *args])
+    monkeypatch.setattr(entry, "_detach_console", lambda: calls.append("detach"))
+
+    def main():
+        calls.append("run")
+        print("guard output")
+        return 7
+
+    monkeypatch.setattr(guard, "main", main)
+    assert entry.run_entry() == 7
+    assert calls == (["detach", "run"] if detached else ["run"])
+    assert capsys.readouterr().out.strip() == output
+
+
 @pytest.mark.parametrize("text,expected", [
     ("[WinError 5] Zugriff verweigert", "ACCESS_DENIED"),
     ("[WinError 50] unsupported", "OPERATION_FAILED"),
