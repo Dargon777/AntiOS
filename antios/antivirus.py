@@ -19,7 +19,7 @@ from .engine import MAX_INLINE_BYTES, AntiOSEngine, inspection_limits
 from .engine_types import ScanOutcome
 from .scan_acceleration import DEFAULT_GPU_MODE, ScanAcceleration, sha256
 from .scan_cache import ScanCache, engine_key as make_engine_key, signature_key as make_signature_key
-from .scan_verdict import apply_scan_verdict
+from .scan_verdict import MAX_FILE_HASH_HISTORY, apply_scan_verdict
 from .signature_bootstrap import AKIRA_SUPPLEMENT, CISA_2025_SUPPLEMENT, NCSC_SUPPLEMENT
 from .signature_catalog import load_active_catalog
 
@@ -264,6 +264,7 @@ def scan_files(
     gpu_mode: str = DEFAULT_GPU_MODE,
     cache_path: str | Path | None = None,
     use_cache: bool = True,
+    include_hash_history: bool = False,
 ) -> dict[str, Any]:
     if engine != "antios":
         raise ValueError("Unsupported scan engine: only independent AntiOS Engine is supported")
@@ -307,6 +308,9 @@ def scan_files(
         "coverage": "limited", "verdict": "incomplete",
         "coverage_contract": {"status": "limited", "file_gaps": {}},
     }
+    history = {"scope": "whole-file-sha256", "entries": [], "omitted": 0} if include_hash_history else None
+    if history is not None:
+        result["file_hash_history"] = history
     if checkpoint:
         checkpoint(result)
     summary = result["summary"]
@@ -419,6 +423,12 @@ def scan_files(
             return
         summary["files_scanned"] += 1
         summary["bytes_scanned"] += outcome["size"]
+        if history is not None:
+            digest = outcome.get("sha256")
+            if digest and len(history["entries"]) < MAX_FILE_HASH_HISTORY:
+                history["entries"].append(digest)
+            else:
+                history["omitted"] += 1
         if outcome.get("provider_scanned"):
             summary["provider_scanned"] += 1
         if outcome.get("cached"):
@@ -489,7 +499,8 @@ def scan_files(
     def scan_buffered(item, info, content, digest, cached_digest=None) -> dict:
         # A cache hint only applies to the exact bytes of this verified snapshot.
         if digest == cached_digest:
-            return {"item": item, "size": len(content), "provider_scanned": True, "cached": True}
+            return {"item": item, "size": len(content), "sha256": digest,
+                    "provider_scanned": True, "cached": True}
         label = signatures.get(digest)
         if label is None and 68 <= len(content) <= 128:
             if hashlib.sha256(content.rstrip(b" \t\r\n\x1a")).hexdigest() == EICAR_SHA256:

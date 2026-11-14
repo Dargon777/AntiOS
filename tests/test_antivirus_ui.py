@@ -20,6 +20,27 @@ def test_antivirus_catalog_is_complete_and_formats_in_every_locale():
         assert "sample.txt" in tr.t("av.restore_confirm", path="sample.txt")
 
 
+def test_coverage_groups_retain_total_when_detail_is_capped():
+    from antios.antivirus_ui import _coverage_rows
+
+    report = {
+        "coverage_contract": {
+            "file_gaps": {"unsupported-archive-format": 4},
+            "reasons": ["partial-file-inspection", "entries-skipped"],
+        },
+        "summary": {"skipped": 2},
+        "issues": [
+            {"path": "archive.7z", "error": False, "coverage_gaps": ["unsupported-archive-format"]},
+            {"path": "unreadable", "error": False},
+        ],
+        "findings": [{"path": "archive.7z", "coverage_gaps": ["unsupported-archive-format"]}],
+    }
+    assert _coverage_rows(report) == [
+        ("unsupported-archive-format", 4, ["archive.7z"]),
+        ("entries-skipped", 2, ["unreadable"]),
+    ]
+
+
 @pytest.mark.skipif(not native_tk_display_available(),
                    reason="Native Tk display unavailable")
 @isolated_tk_test
@@ -183,6 +204,10 @@ def test_real_tk_page_scan_and_theme_rebuild_share_job_results(tmp_path, monkeyp
         assert panel.scan_gpu_var.get() == panel.gpu_labels["eco"]
         assert len(panel.tree.get_children()) == 1
         assert panel.rows["0"]["name"] == "Benign UI test fixture"
+        panel._show_coverage()
+        assert panel.coverage_window.title() == "Покрытие проверки"
+        root.update()
+        panel.coverage_window.destroy()
         panel.tree.selection_set("0")
         panel._selection_changed()
         assert str(panel.quarantine_button["state"]) == "normal"

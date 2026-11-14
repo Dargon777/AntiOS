@@ -37,10 +37,12 @@ class RiskContext:
     native_pre_execution: str
     native_execution_boundary_protected: bool | None
     evaluated_at: float
+    evidence_conflicts: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         value = asdict(self)
         value["behavior_rules"] = list(self.behavior_rules)
+        value["evidence_conflicts"] = list(self.evidence_conflicts)
         return value
 
 
@@ -101,12 +103,15 @@ def _scanner_summary(result: dict) -> tuple[str, bool, bool, bool, bool]:
     )
     catalog_verified = engine.get("signature_catalog_status") != "fallback"
     complete = coverage == "antios-local-inspection" and engine_ready and catalog_verified
-    enforcement_ready = verdict == "threats-found" and engine_ready and catalog_verified
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    interrupted = any(summary.get(key) for key in ("cancelled", "timed_out", "forced_stop"))
+    enforcement_ready = verdict == "threats-found" and engine_ready and catalog_verified and not interrupted
     return verdict, complete, confirmed, review, enforcement_ready
 
 
 def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[dict] = (),
                   evidence: Iterable[Evidence | dict] = (),
+                  evidence_conflicts: tuple[str, ...] = (),
                   native_pre_execution: bool | None = None,
                   now: float | None = None) -> RiskContext:
     verdict, complete, confirmed, review, enforcement_ready = _scanner_summary(scan_result)
@@ -155,8 +160,8 @@ def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[d
 
     if confirmed:
         classification = "confirmed-threat"
-        action = "quarantine-or-native-block" if enforcement_ready else "review-and-rescan"
-        automatic = enforcement_ready
+        automatic = enforcement_ready and not evidence_conflicts
+        action = "quarantine-or-native-block" if automatic else "review-and-rescan"
     elif score >= 90:
         classification = "critical-behavior"
         action = "review-immediately"
@@ -208,4 +213,5 @@ def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[d
         native_pre_execution=native_state,
         native_execution_boundary_protected=protected,
         evaluated_at=float(now if now is not None else time.time()),
+        evidence_conflicts=evidence_conflicts,
     )

@@ -1,4 +1,5 @@
 import errno
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -817,6 +818,37 @@ def test_guard_confirmed_threat_risk_allows_existing_auto_quarantine_only(tmp_pa
         assert context["score"] == 100
         assert context["automatic_enforcement_eligible"] is True
         assert len(isolated) == 1
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_guard_reports_trusted_file_conflict_and_keeps_file_for_review(tmp_path, unreadable):
+    from antios.signature_catalog import default_catalog_path, trust_file
+
+    content = b"inert-marker trusted-control"
+    baseline = tmp_path / "trusted.txt"
+    baseline.write_bytes(content)
+    assert trust_file(baseline) == hashlib.sha256(content).hexdigest()
+    if unreadable:
+        default_catalog_path().write_bytes(b"unreadable test database")
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path, auto_quarantine=True,
+        quarantine_factory=lambda: pytest.fail("Conflicting evidence triggered isolation"),
+    )
+    try:
+        target = root / "confirmed.exe"
+        target.write_bytes(content)
+        until(lambda: instance.status["detections"] == 1)
+        context = instance.status["risk"]["last"]
+        assert context["confirmed_threat"]
+        expected = "trusted-baseline-unavailable" if unreadable else "trusted-file-signature-conflict"
+        assert context["evidence_conflicts"] == [expected]
+        assert not context["automatic_enforcement_eligible"]
+        assert instance.status["quarantined"] == 0
+        assert target.read_bytes() == content
     finally:
         stop.set()
         thread.join(3)

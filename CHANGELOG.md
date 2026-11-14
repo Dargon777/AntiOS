@@ -4,6 +4,11 @@ This file summarizes user-visible changes. Detailed commit history remains avail
 
 ## Unreleased
 
+- Compare recorded whole-file hashes with a signed catalog offline, including clean files when explicitly captured in a scan report.
+- Keep confirmed findings visible and defer automatic quarantine when the local trusted baseline conflicts, cannot be read, or the scan worker was interrupted.
+- Show scan coverage and affected files in the Windows interface.
+- Match incident evidence to the observed process instance before using a file path, and distinguish a Guard startup exit from a heartbeat timeout.
+
 ## 3.0.4a1 — 2026-11-14
 
 - Keep earlier Windows quarantine records readable across consecutive isolations.

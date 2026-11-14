@@ -163,7 +163,7 @@ def format_node_details(row: dict) -> list[tuple[str, str]]:
         "pid", "ppid", "path", "image", "rule", "score", "severity", "summary",
         "classification", "scanner_verdict", "scanner_complete",
         "confirmed_threat", "behavior_score", "origin",
-        "native_pre_execution", "automatic_enforcement_eligible", "changed_at",
+        "native_pre_execution", "automatic_enforcement_eligible", "evidence_conflicts", "changed_at",
     )
     result: list[tuple[str, str]] = []
     for key in preferred:

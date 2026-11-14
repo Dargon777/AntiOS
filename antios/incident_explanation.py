@@ -26,6 +26,15 @@ _RULES = {
         "The same process had a PE header in private executable memory and an established TCP connection to a public address."),
 }
 
+_CONFLICTS = {
+    "trusted-file-signature-conflict": (
+        "Хэш файла есть и в доверенном списке, и в сигнатуре обнаружения. Guard оставил файл для ручной проверки.",
+        "The file hash appears in both the trusted baseline and the detection. Guard left it for manual review."),
+    "trusted-baseline-unavailable": (
+        "Guard не прочитал доверенный список и приостановил автоматическую изоляцию.",
+        "Guard could not read the trusted baseline and deferred automatic isolation."),
+}
+
 
 def explain_incident(incident: dict, language="ru") -> dict:
     ru = language == "ru"
@@ -49,8 +58,23 @@ def explain_incident(incident: dict, language="ru") -> dict:
                             "text": phrase[0 if ru else 1] if phrase else text(
                                 "В журнале есть дополнительный поведенческий сигнал. Посмотрите его подробности перед решением.",
                                 "The journal contains an additional behavior signal. Inspect its details before deciding.")})
-        if node.get("kind") == "risk" and data.get("scanner_complete") is False:
-            incomplete = True
+        if node.get("kind") == "risk":
+            incomplete |= data.get("scanner_complete") is False
+            conflicts = data.get("evidence_conflicts")
+            if isinstance(conflicts, (list, tuple)):
+                for code in conflicts[:8]:
+                    if isinstance(code, str) and code in _CONFLICTS and code not in seen:
+                        seen.add(code)
+                        reasons.insert(0, {"node_id": str(node.get("id", ""))[:160], "code": code,
+                                           "text": _CONFLICTS[code][0 if ru else 1]})
+    edges = incident.get("edges")
+    if isinstance(edges, list) and any(
+        isinstance(edge, dict) and edge.get("relation") == "spawned"
+        and edge.get("basis") == "process-instance" for edge in edges[:512]
+    ):
+        reasons.append({"node_id": "", "code": "observed-process-lineage", "text": text(
+            "В графе есть связь родителя и потомка по PID и времени создания процессов.",
+            "The graph links parent and child using their process IDs and creation times.")})
     confirmed = incident.get("confirmed_threat") is True
     title = text("Есть подтверждённое обнаружение", "A confirmed detection was recorded") if confirmed else text(
         "Активность требует проверки" if reasons else "Недостаточно данных для вывода",
