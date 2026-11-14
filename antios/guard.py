@@ -780,7 +780,28 @@ class Guard:
                             # A new file version gets its own transient retry budget.
                             self.transient_retries.pop(path, None)
                             self.pending[path] = (current, now + self._settle_delay(path))
-                    if priority_streak < _FAST_SCAN_BURST:
+                    # Continue after the last normal admission to prevent
+                    # repeated writes in the first entries from starving the rest.
+                    entries = tuple(files)
+                    start = next((index + 1 for index, path in enumerate(entries)
+                                  if path == self.queue_cursor), 0)
+                    ordered = entries[start:] + entries[:start]
+
+                    def needs_scan(path):
+                        known = self.known.get(path)
+                        return not (known and known[0] == files[path] and now - known[1] < known[2])
+
+                    if priority_streak >= _FAST_SCAN_BURST and not any(
+                        path not in self.priority_changes for path in self.pending
+                    ):
+                        ordinary = next((path for path in ordered
+                                         if path not in self.priority_changes and needs_scan(path)), None)
+                        if ordinary is not None:
+                            if len(self.pending) >= self.policy.max_queue:
+                                self.pending.popitem(last=True)
+                            self.pending[ordinary] = (files[ordinary], now + self._settle_delay(ordinary))
+                            self.queue_cursor = ordinary
+                    elif priority_streak < _FAST_SCAN_BURST:
                         # Reserve at most one slot for a settled new executable.
                         # Other entries return through ordinary inventory order.
                         priority = next(((path, deadline) for path, deadline in self.priority_changes.items()
@@ -794,24 +815,14 @@ class Guard:
                                     del self.pending[replace]
                             if len(self.pending) < self.policy.max_queue:
                                 self.pending[path] = (files[path], deadline)
-                    # Continue after the last admission. Repeated writes/cache
-                    # resets in the first entries must not starve the backlog.
-                    entries = list(files.items())
-                    start = next((index + 1 for index, (path, _) in enumerate(entries)
-                                  if path == self.queue_cursor), 0)
                     backlog = 0
-                    for offset in range(len(entries)):
-                        path, identity = entries[(start + offset) % len(entries)]
-                        known = self.known.get(path)
-                        if known and known[0] == identity and now - known[1] < known[2]:
-                            continue
-                        pending = self.pending.get(path)
-                        if pending is not None:
+                    for path in ordered:
+                        if path in self.pending or not needs_scan(path):
                             continue
                         if len(self.pending) >= self.policy.max_queue:
                             backlog += 1
                             continue
-                        self.pending[path] = (identity, now + self._settle_delay(path))
+                        self.pending[path] = (files[path], now + self._settle_delay(path))
                         self.queue_cursor = path
                     self.status['scan_backlog'] = backlog
                     self.status['capacity_exceeded'] = bool(
@@ -822,7 +833,9 @@ class Guard:
                 prefer_priority = priority_streak < _FAST_SCAN_BURST
                 ready = next(((path, item) for path, item in self.pending.items()
                               if now >= item[1] and (path in self.priority_changes) == prefer_priority), None)
-                if ready is None:
+                if ready is None and (prefer_priority or all(
+                    path in self.priority_changes for path in self.pending
+                )):
                     ready = next(((path, item) for path, item in self.pending.items()
                                   if now >= item[1]), None)
                 if ready and self.status['engine'].get('available') and not cancelled():

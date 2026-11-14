@@ -557,8 +557,18 @@ def test_repeated_root_rescans_do_not_starve_files_beyond_queue_capacity(tmp_pat
     assert not failures
 
 
-def test_new_script_takes_bounded_priority_over_bulk_scan(tmp_path):
+def test_new_script_takes_bounded_priority_over_bulk_scan(tmp_path, monkeypatch):
     watcher = Notifications()
+    # Give the inventory a fixed, unfavorable order after a priority burst.
+    # Directory enumeration order differs by filesystem.
+    actual_inventory = guard.inventory
+
+    def scripts_first(*args, **kwargs):
+        files, issues, limited = actual_inventory(*args, **kwargs)
+        ordered = sorted(files, key=lambda path: (path.suffix != ".ps1", path.name))
+        return {path: files[path] for path in ordered}, issues, limited
+
+    monkeypatch.setattr(guard, "inventory", scripts_first)
     root = tmp_path / 'watched'
     root.mkdir()
     ordinary = {root / f'file-{index}.txt' for index in range(6)}
