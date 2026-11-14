@@ -4,6 +4,8 @@ This file summarizes user-visible changes. Detailed commit history remains avail
 
 ## Unreleased
 
+## 3.0.5a1 — 2026-11-14
+
 - Detach the packaged Windows Guard from its console and preserve current-user access to regenerated SQLite state files.
 - Compare recorded whole-file hashes with a signed catalog offline, including clean files when explicitly captured in a scan report.
 - Keep confirmed findings visible and defer automatic quarantine when the local trusted baseline conflicts, cannot be read, or the scan worker was interrupted.
