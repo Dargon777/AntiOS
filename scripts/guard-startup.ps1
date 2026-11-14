@@ -156,9 +156,11 @@ function Get-GuardStartupStatus([string]$Path, [string]$Folder) {
 function Wait-GuardStartup([string]$Path, [string]$Folder, [double]$StartedAfter) {
     $first = $null
     $clock = [Diagnostics.Stopwatch]::StartNew()
+    $sawRunning = $false
     do {
         $task = Get-GuardTask
         if ($task -and $task.State -eq 'Running') {
+            $sawRunning = $true
             $status = Get-GuardStartupStatus $Path $Folder
             if ($status -and $status.kind -eq 'antivirus-guard' -and $status.running -eq $true -and
                 $status.run_id -and $status.state -in @('monitoring', 'scanning', 'attention', 'degraded') -and
@@ -170,6 +172,13 @@ function Wait-GuardStartup([string]$Path, [string]$Folder, [double]$StartedAfter
             }
         } else {
             $first = $null
+            if ($sawRunning -and $task -and $task.State -eq 'Ready') {
+                $info = Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+                if ($info -and $info.LastTaskResult -ne 0x41301) {
+                    $code = '0x{0:X8}' -f ([int64]$info.LastTaskResult -band 0xFFFFFFFFL)
+                    throw "Resident Guard task ended before startup verification. LastTaskResult=$code"
+                }
+            }
         }
         Start-Sleep -Milliseconds 500
     } while ($clock.Elapsed.TotalSeconds -lt 45)

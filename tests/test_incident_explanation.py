@@ -42,3 +42,13 @@ def test_unknown_or_malformed_evidence_is_bounded_without_inventing_a_rule():
     assert report["reasons"][0]["code"] == "new-rule"
     assert "дополнительный" in report["reasons"][0]["text"]
     assert "Недостаточно данных" in format_explanation({})
+
+
+def test_trust_conflict_preserves_confirmed_detection_and_explains_manual_review():
+    report = explain_incident({"confirmed_threat": True, "nodes": [
+        {"kind": "risk", "id": "risk:1",
+         "data": {"evidence_conflicts": ["trusted-file-signature-conflict"]}},
+    ]})
+    assert report["confirmed"]
+    assert report["reasons"][0]["node_id"] == "risk:1"
+    assert "ручной проверки" in report["reasons"][0]["text"]

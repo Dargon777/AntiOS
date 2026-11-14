@@ -12,4 +12,10 @@ Guard is post-write monitoring, not a Windows kernel minifilter. It does not cla
 
 Confirmed scanner evidence can be handled according to the configured quarantine policy. Behavior-only, sensor-only or posture-only findings remain review evidence.
 
+If a confirmed finding's exact file hash also appears in the local trusted-file
+baseline, Guard records an evidence conflict and leaves the file for review.
+Automatic quarantine also pauses if the baseline is unreadable or the scan
+worker was interrupted. The finding remains visible for a fresh scan and a
+manual decision.
+
 If Guard cannot maintain normal monitoring, it should expose a degraded or attention state instead of silently presenting full protection.

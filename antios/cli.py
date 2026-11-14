@@ -226,6 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="GPU hashing policy (default: cpu). Scan depth is selected separately.")
     av.add_argument("--no-cache", action="store_true",
                     help="Do not reuse clean results for unchanged files.")
+    av.add_argument("--include-hash-history", action="store_true",
+                    help="Include whole-file hashes for retrospective matching. Requires --json.")
     av.add_argument("--json", action="store_true")
 
     replay = sub.add_parser("virus-scan-replay", help="Recompute the verdict from an exported AntiOS JSON report.")
@@ -248,6 +250,10 @@ def build_parser() -> argparse.ArgumentParser:
     catalog_preflight = catalog_sub.add_parser("preflight", help="Check a signed update against trusted files.")
     catalog_preflight.add_argument("package", type=Path)
     catalog_preflight.add_argument("--json", action="store_true")
+    catalog_replay = catalog_sub.add_parser("replay", help="Compare a signed catalog with previously scanned file hashes.")
+    catalog_replay.add_argument("package", type=Path)
+    catalog_replay.add_argument("report", type=Path)
+    catalog_replay.add_argument("--json", action="store_true")
     catalog_trust = catalog_sub.add_parser("trust-file", help="Record the hash of a known-good file locally.")
     catalog_trust.add_argument("path", type=Path)
     catalog_untrust = catalog_sub.add_parser("untrust-hash", help="Remove a hash from the local baseline.")
@@ -569,6 +575,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "signatures":
             from .antivirus import load_managed_signatures
             from .signature_catalog import catalog_preflight, install_catalog, trust_file, untrust_hash
+            if args.signatures_command == "replay":
+                from .signature_catalog import replay_catalog
+                result = replay_catalog(args.package, args.report)
+                if args.json:
+                    _print_json(result)
+                else:
+                    print(f"Catalog v{result['version']} replay: {result['status']}")
+                    print(f"Whole-file hashes compared: {result['files_with_hash']} / {result['files_scanned']}")
+                    print(f"Original scan coverage: {result['historical_coverage']['status']}")
+                    for match in result["matches"]:
+                        print(f"{match['sha256'][:12]}  {match['label']} ({match['files']})")
+                if result["status"] == "matches":
+                    return 1
+                incomplete = (result["status"] == "no-hashes" or result["files_without_hash"]
+                              or result["historical_coverage"]["status"] != "complete")
+                return 3 if incomplete else 0
             if args.signatures_command == "trust-file":
                 print(trust_file(args.path))
                 return 0
@@ -599,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
             return 3 if metadata.get("signature_catalog_warning") else 0
 
         if args.command == "virus-scan":
+            if args.include_hash_history and not args.json:
+                raise ValueError("--include-hash-history requires --json")
             result = scan_files(args.path, signature_path=args.signatures,
                                 engine=args.engine,
                                 require_verified_peer=False,
@@ -610,6 +634,7 @@ def main(argv: list[str] | None = None) -> int:
                                 gpu_mode=args.gpu_mode,
                                 cache_path=default_scan_cache_path(),
                                 use_cache=not args.no_cache,
+                                include_hash_history=args.include_hash_history,
                                 excluded_paths=(default_quarantine_path(),))
             if sys.platform.startswith("linux"):
                 from .linux_companion import collect_linux_companion_status

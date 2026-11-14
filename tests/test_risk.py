@@ -38,6 +38,16 @@ def test_degraded_catalog_or_engine_pauses_automatic_action_for_a_detection():
         assert context.recommended_action == "review-and-rescan"
 
 
+def test_interrupted_worker_keeps_detection_for_review_only():
+    result = scan(verdict="threats-found", coverage="limited",
+                  findings=[{"kind": "threat", "name": "Inert.Test"}])
+    result["summary"] = {"forced_stop": True, "timed_out": True}
+    context = evaluate_risk(r"C:\Downloads\test.exe", result, now=1)
+    assert context.confirmed_threat
+    assert not context.automatic_enforcement_eligible
+    assert context.recommended_action == "review-and-rescan"
+
+
 def test_critical_behavior_never_becomes_automatic_block():
     context = evaluate_risk(
         r"C:\Users\Alice\AppData\Local\Temp\script.ps1",

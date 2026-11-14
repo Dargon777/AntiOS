@@ -1060,3 +1060,46 @@ MESSAGES["en"].update(protection_active="File monitoring is active",
 MESSAGES["ru"].update(protection_active="Мониторинг файлов активен",
                       protection_active_detail="AntiOS Guard отслеживает изменения файлов в фоне.",
                       limited="Ограниченное покрытие")
+
+_COVERAGE_KEYS = (
+    "coverage_title", "coverage_complete", "coverage_limited", "coverage_unknown",
+    "coverage_counts", "coverage_reason", "coverage_count", "coverage_unlisted",
+    "coverage_no_gaps", "coverage_no_details",
+)
+for _locale, _labels in {
+    "en": ("Scan coverage", "Inspection completed within the selected scope", "Inspection was limited",
+           "Coverage unavailable", "Files read: {files} · Engine results: {engine} · Partial: {partial}",
+           "Reason and affected files", "Count", "{count} additional entries", "No coverage gaps reported",
+           "No coverage details were recorded"),
+    "ru": ("Покрытие проверки", "Выбранная область проверена", "Проверка выполнена с ограничениями",
+           "Покрытие неизвестно", "Прочитано файлов: {files} · Ответов движка: {engine} · Частично: {partial}",
+           "Причина и затронутые файлы", "Количество", "Ещё записей: {count}", "Пропуски не зарегистрированы",
+           "Подробности покрытия отсутствуют"),
+    "es": ("Cobertura del análisis", "Análisis completado en el ámbito seleccionado", "Análisis limitado",
+           "Cobertura no disponible", "Archivos leídos: {files} · Resultados: {engine} · Parciales: {partial}",
+           "Motivo y archivos afectados", "Cantidad", "{count} entradas adicionales", "Sin omisiones registradas",
+           "Sin detalles de cobertura"),
+    "zh-CN": ("扫描覆盖范围", "已完成所选范围的扫描", "扫描范围受限", "覆盖情况未知",
+              "已读取：{files} · 引擎结果：{engine} · 部分检查：{partial}",
+              "原因及受影响的文件", "数量", "还有 {count} 条记录", "未报告覆盖缺口", "无覆盖详情"),
+    "fi": ("Tarkistuksen kattavuus", "Valitun kohteen tarkistus valmis", "Tarkistus oli rajallinen",
+           "Kattavuus ei tiedossa", "Luettu: {files} · Tulokset: {engine} · Osittaisia: {partial}",
+           "Syy ja tiedostot", "Määrä", "{count} muuta kohdetta", "Puuttuvia kohteita ei raportoitu",
+           "Ei kattavuustietoja"),
+    "pl": ("Zakres skanowania", "Ukończono skanowanie wybranego obszaru", "Skanowanie z ograniczeniami",
+           "Brak informacji o zakresie", "Odczytano: {files} · Wyniki: {engine} · Częściowe: {partial}",
+           "Przyczyna i pliki", "Liczba", "Dodatkowe wpisy: {count}", "Brak zgłoszonych pominięć",
+           "Brak szczegółów zakresu"),
+    "mn": ("Шалгалтын хамрах хүрээ", "Сонгосон хүрээг шалгасан", "Шалгалтын хүрээ хязгаарлагдсан",
+           "Хамрах хүрээ тодорхойгүй", "Уншсан: {files} · Үр дүн: {engine} · Хэсэгчилсэн: {partial}",
+           "Шалтгаан ба файлууд", "Тоо", "Нэмэлт {count} бичлэг", "Орхигдсон хэсэг бүртгэгдээгүй",
+           "Хамрах хүрээний дэлгэрэнгүй алга"),
+}.items():
+    MESSAGES[_locale].update(zip(_COVERAGE_KEYS, _labels))
+
+for _locale, _label in {
+    "en": "Evidence conflicts", "ru": "Конфликты доказательств", "es": "Conflictos de evidencia",
+    "zh-CN": "证据冲突", "fi": "Todisteiden ristiriidat", "pl": "Konflikty dowodów",
+    "mn": "Нотолгооны зөрчил",
+}.items():
+    MESSAGES[_locale]["incident_field_evidence_conflicts"] = _label

@@ -95,6 +95,24 @@ blocks activation and the active catalog stays in place. Use
 to exact hashes in signed update packages. With no entries the preview reports
 `no-baseline`. Adding a file does not exempt it from live scanning.
 
+To check whether a signed catalog matches files observed during an earlier
+scan, opt in to storing whole-file SHA-256 hashes in the exported report:
+
+    antios virus-scan PATH --include-hash-history --json > REPORT.json
+    antios signatures replay PACKAGE REPORT.json --json
+
+Replay authenticates the catalog and recomputes the saved scan receipt.
+The receipt checks report consistency and is unsigned.
+It compares historical whole-file hashes, including duplicates counted as
+separate files. Older receipts contain only hashes attached to findings.
+The replay reports how many scanned files lack a recorded hash. Archive
+member hashes and current disk contents are outside replay coverage.
+Matches describe historical evidence and can guide a fresh scan. The command
+leaves the candidate catalog inactive and does not access the original files.
+The replay exit status is 1 for a match, 3 for limited or missing historical
+coverage with no observed match, and 0 for a complete exact-hash comparison
+without a match.
+
 A rejected or unreadable update must not silently replace a verified catalog. AntiOS can fall back to a verified bundled catalog and report the degraded state.
 
 The starter exact-hash set includes indicators derived from public NCSC and CISA/FBI malware reporting. It is intentionally limited; exact-hash coverage should not be confused with broad malware-family detection.

@@ -4,10 +4,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 import hashlib
 import json
+import re
 
 
 _POLICY = "antios-scan-verdict-v1"
+_HISTORY_POLICY = "antios-scan-verdict-v2"
 MAX_REPLAY_BYTES = 64 * 1024 * 1024
+MAX_FILE_HASH_HISTORY = 50_000
+_SHA256 = re.compile(r"[a-f0-9]{64}")
 
 
 def _canonical(value) -> bytes:
@@ -98,15 +102,30 @@ def _decision_v1(evidence: dict) -> dict:
     }}
 
 
-def _derive_v1(report: dict) -> tuple[dict, dict]:
+def _derive(report: dict, policy: str) -> tuple[dict, dict]:
     evidence = _evidence_v1(report)
+    if policy == _HISTORY_POLICY:
+        history = report["file_hash_history"]
+        entries = history["entries"]
+        omitted = history["omitted"]
+        if (history["scope"] != "whole-file-sha256" or not isinstance(entries, list)
+                or len(entries) > MAX_FILE_HASH_HISTORY
+                or type(omitted) is not int or omitted < 0
+                or len(entries) + omitted != evidence["counts"]["files_scanned"]
+                or any(not isinstance(digest, str) or not _SHA256.fullmatch(digest) for digest in entries)):
+            raise ValueError("Invalid whole-file hash history")
+        evidence["file_hash_history"] = {
+            "scope": history["scope"], "count": len(entries), "omitted": omitted,
+            "sha256": _digest(sorted(entries)),
+        }
     decision = _decision_v1(evidence)
-    receipt = {"schema": 1, "policy": _POLICY, "evidence": evidence}
+    receipt = {"schema": 1, "policy": policy, "evidence": evidence}
     return decision, dict(receipt, sha256=_digest({**receipt, "decision": decision}))
 
 
 def apply_scan_verdict(report: dict) -> None:
-    decision, receipt = _derive_v1(report)
+    policy = _HISTORY_POLICY if "file_hash_history" in report else _POLICY
+    decision, receipt = _derive(report, policy)
     contract = receipt["evidence"]["coverage"]
     report.update(verdict=decision["verdict"], decision=decision, proof_receipt=receipt,
                   coverage_contract=contract,
@@ -119,10 +138,11 @@ def replay_scan_report(report: dict) -> dict:
             or report["schema"] != 1 or report.get("kind") != "antivirus-scan"):
         raise ValueError("Expected an AntiOS antivirus scan report")
     receipt = report.get("proof_receipt")
-    if not isinstance(receipt, dict) or receipt.get("policy") != _POLICY:
+    if not isinstance(receipt, dict) or receipt.get("policy") not in (_POLICY, _HISTORY_POLICY):
         raise ValueError("The scan report has no supported proof receipt")
+    policy = receipt["policy"]
     try:
-        decision, expected = _derive_v1(report)
+        decision, expected = _derive(report, policy)
         contract = expected["evidence"]["coverage"]
         legacy_coverage = "limited" if contract["status"] == "limited" else "antios-local-inspection"
         comparisons = (
@@ -135,11 +155,11 @@ def replay_scan_report(report: dict) -> dict:
         raise ValueError("Invalid scan report evidence") from exc
     if not matches:
         raise ValueError("Scan report does not match its proof receipt")
-    return {"kind": "antivirus-scan-replay", "verified": True, "policy": _POLICY,
+    return {"kind": "antivirus-scan-replay", "verified": True, "policy": policy,
             "receipt_sha256": expected["sha256"], **decision}
 
 
-def replay_scan_json(data: bytes) -> dict:
+def read_scan_report_json(data: bytes) -> dict:
     def unique_fields(pairs):
         fields = {}
         for key, value in pairs:
@@ -152,4 +172,10 @@ def replay_scan_json(data: bytes) -> dict:
         report = json.loads(data, object_pairs_hook=unique_fields)
     except (ValueError, RecursionError) as exc:
         raise ValueError("Invalid scan report JSON") from exc
-    return replay_scan_report(report)
+    if not isinstance(report, dict):
+        raise ValueError("Expected an AntiOS antivirus scan report")
+    return report
+
+
+def replay_scan_json(data: bytes) -> dict:
+    return replay_scan_report(read_scan_report_json(data))

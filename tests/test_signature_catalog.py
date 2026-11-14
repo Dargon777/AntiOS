@@ -4,6 +4,7 @@ from contextlib import closing
 import hashlib
 import json
 import sqlite3
+import zipfile
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import pytest
@@ -136,6 +137,110 @@ def test_trusted_baseline_before_first_update_preserves_bundled_status(publisher
     assert catalog.load_active_catalog().metadata()["signature_catalog_status"] == "bundled"
     assert catalog.catalog_preflight(package(2))["status"] == "passed"
     assert catalog.install_catalog(package(2)).version == 2
+
+
+def test_lookup_trusted_hashes_reads_exact_local_baseline_without_writes(publisher, tmp_path):
+    _, store = publisher
+    target = tmp_path / "trusted.txt"
+    target.write_text("ordinary known file", encoding="utf-8")
+    assert catalog.lookup_trusted_hashes(["0" * 64]) == set()
+    assert not store.parent.exists()
+    digest = catalog.trust_file(target)
+    before = store.read_bytes()
+    assert catalog.lookup_trusted_hashes([digest, "0" * 64, digest]) == {digest}
+    assert store.read_bytes() == before
+
+
+def test_catalog_replay_uses_verified_whole_file_history_without_touching_originals(
+    publisher, tmp_path, capsys,
+):
+    package, store = publisher
+    root = tmp_path / "watched"
+    root.mkdir()
+    match = b"harmless future match"
+    for name in ("one", "two"):
+        (root / name).write_bytes(match)
+    (root / "three").write_bytes(b"ordinary benign content")
+    candidate = package(2, "Fixture after a catalog update", match)
+    report = antivirus.scan_files(root, include_hash_history=True)
+    assert report["verdict"] == "no-threats-found"
+    assert not report["findings"]
+    history = tmp_path / "report.json"
+    history.write_text(json.dumps(report), encoding="utf-8")
+    for path in root.iterdir():
+        path.unlink()
+    root.rmdir()
+
+    replayed = catalog.replay_catalog(candidate, history)
+    assert replayed["status"] == "matches"
+    assert replayed["hash_source"] == "scan-hash-history"
+    assert replayed["receipt_sha256"] == report["proof_receipt"]["sha256"]
+    assert replayed["package_sha256"] == hashlib.sha256(candidate.read_bytes()).hexdigest()
+    assert replayed["scope"] == "whole-file-sha256"
+    assert replayed["files_scanned"] == replayed["files_with_hash"] == 3
+    assert replayed["files_without_hash"] == 0
+    assert replayed["archive_members"] == "not-replayed"
+    assert replayed["matches"] == [{
+        "sha256": hashlib.sha256(match).hexdigest(),
+        "label": "Fixture after a catalog update",
+        "files": 2,
+    }]
+    assert not store.parent.exists()
+    assert cli.main(["signatures", "replay", str(candidate), str(history), "--json"]) == 1
+    assert json.loads(capsys.readouterr().out) == replayed
+
+    report["file_hash_history"]["entries"][0] = "a" * 64
+    history.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(ValueError, match="proof receipt"):
+        catalog.replay_catalog(candidate, history)
+
+
+def test_catalog_replay_v1_uses_enclosing_hash_and_ignores_unbound_history(publisher, tmp_path):
+    package, _ = publisher
+    target = tmp_path / "scan"
+    target.mkdir()
+    match = b"inert fixture"
+    whole_archive = target / "record.zip"
+    with zipfile.ZipFile(whole_archive, "w") as archive:
+        archive.writestr("inner.txt", match)
+    (target / "ordinary.txt").write_bytes(b"ordinary content")
+    report = antivirus.scan_files(target)
+    assert report["verdict"] == "threats-found"
+    assert report["findings"][0]["sha256"] == hashlib.sha256(whole_archive.read_bytes()).hexdigest()
+    candidate = package(2, "Member-only exact signature", match)
+    report["file_hash_history"] = {
+        "scope": "whole-file-sha256", "entries": [hashlib.sha256(match).hexdigest()], "omitted": 1,
+    }
+    history = tmp_path / "report.json"
+    history.write_text(json.dumps(report), encoding="utf-8")
+
+    result = catalog.replay_catalog(candidate, history)
+    assert result["status"] == "no-matches"
+    assert result["hash_source"] == "findings-only"
+    assert result["files_with_hash"] == result["files_without_hash"] == 1
+    assert result["archive_members"] == "not-replayed"
+    candidate = package(3, "Archive container exact signature", whole_archive.read_bytes())
+    assert catalog.replay_catalog(candidate, history)["status"] == "matches"
+
+
+def test_catalog_replay_reports_no_hashes_and_requires_package_authentication(
+    publisher, tmp_path, capsys,
+):
+    package, _ = publisher
+    source = tmp_path / "clean.txt"
+    source.write_bytes(b"ordinary clean file")
+    prior = tmp_path / "report.json"
+    prior.write_text(json.dumps(antivirus.scan_files(source)), encoding="utf-8")
+    candidate = package(2)
+    result = catalog.replay_catalog(candidate, prior)
+    assert result["status"] == "no-hashes"
+    assert result["files_with_hash"] == 0
+    assert result["files_without_hash"] == 1
+    assert cli.main(["signatures", "replay", str(candidate), str(prior), "--json"]) == 3
+    assert json.loads(capsys.readouterr().out) == result
+    candidate.write_text(candidate.read_text().replace("Fixture v2", "Untrusted label"))
+    with pytest.raises(ValueError, match="authentication failed"):
+        catalog.replay_catalog(candidate, prior)
 
 
 def test_bad_update_creates_no_user_store(publisher):

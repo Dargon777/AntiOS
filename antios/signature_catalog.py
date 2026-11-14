@@ -1,6 +1,8 @@
 """Authenticated local catalog updates shared by all AntiOS scan entry points."""
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Iterable
 from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import date
@@ -233,6 +235,25 @@ def _trusted_hashes(db) -> tuple[str, ...]:
     return tuple(row[0] for row in rows)
 
 
+def _read_trusted_hashes() -> tuple[str, ...]:
+    target = _checked_catalog_store()
+    if target is None:
+        return ()
+    try:
+        with closing(sqlite3.connect(target.as_uri() + "?mode=ro", uri=True, timeout=5)) as db, db:
+            db.execute("PRAGMA trusted_schema=OFF")
+            db.execute("BEGIN")
+            return _trusted_hashes(db)
+    except sqlite3.Error as exc:
+        raise OSError("Trusted-file baseline could not be checked") from exc
+
+
+def lookup_trusted_hashes(digests: Iterable[str]) -> set[str]:
+    """Find exact local trust conflicts without writing to the catalog store."""
+    wanted = set(digests)
+    return wanted.intersection(_read_trusted_hashes()) if wanted else set()
+
+
 def _preflight(catalog: Catalog, trusted: tuple[str, ...]) -> dict:
     trusted_hashes = set(trusted)
     conflicts = [{"sha256": digest, "label": catalog.rules[digest]}
@@ -247,16 +268,64 @@ def _preflight(catalog: Catalog, trusted: tuple[str, ...]) -> dict:
 def catalog_preflight(path: str | Path) -> dict:
     """Verify a candidate and compare it with the explicitly curated local baseline."""
     _, candidate = _read_candidate(path)
-    target = _checked_catalog_store()
-    if target is None:
-        return _preflight(candidate, ())
-    try:
-        with closing(sqlite3.connect(target.as_uri() + "?mode=ro", uri=True, timeout=5)) as db, db:
-            db.execute("PRAGMA trusted_schema=OFF")
-            db.execute("BEGIN")
-            return _preflight(candidate, _trusted_hashes(db))
-    except sqlite3.Error as exc:
-        raise OSError("Trusted-file baseline could not be checked") from exc
+    return _preflight(candidate, _read_trusted_hashes())
+
+
+def replay_catalog(path: str | Path, report_path: str | Path) -> dict:
+    """Match a verified catalog against historical whole-file hashes, for review."""
+    from .antivirus import read_regular
+    from .scan_verdict import MAX_REPLAY_BYTES, read_scan_report_json, replay_scan_report
+
+    package, candidate = _read_candidate(path)
+    content, _ = read_regular(Path(report_path), MAX_REPLAY_BYTES)
+    report = read_scan_report_json(content)
+    replayed = replay_scan_report(report)
+    historical = report["proof_receipt"]["evidence"]
+    files_scanned = historical["counts"]["files_scanned"]
+    if type(files_scanned) is not int or files_scanned < 0:
+        raise ValueError("Invalid historical scan file count")
+
+    if replayed["policy"] == "antios-scan-verdict-v2":
+        hashes = Counter(report["file_hash_history"]["entries"])
+        source = "scan-hash-history"
+    else:
+        # v1 does not bind a history ledger. Its optional digest on each
+        # finding identifies the enclosing file, even for an archive hit.
+        by_path: dict[str, str] = {}
+        for finding in report["findings"]:
+            digest = finding.get("sha256")
+            reported_path = finding.get("path")
+            if (not isinstance(reported_path, str) or not reported_path or
+                    not isinstance(digest, str) or re.fullmatch(r"[a-f0-9]{64}", digest) is None):
+                continue
+            if by_path.setdefault(reported_path, digest) != digest:
+                raise ValueError("Conflicting historical hashes for the same reported file")
+        hashes = Counter(by_path.values())
+        source = "findings-only"
+
+    files_with_hash = sum(hashes.values())
+    if files_with_hash > files_scanned:
+        raise ValueError("Historical hash count exceeds the scan file count")
+    matches = [
+        {"sha256": digest, "label": candidate.rules[digest], "files": hashes[digest]}
+        for digest in sorted(candidate.rules.keys() & hashes.keys())
+    ]
+    return {
+        "schema": 1,
+        "kind": "signature-catalog-replay",
+        "version": candidate.version,
+        "package_sha256": hashlib.sha256(package).hexdigest(),
+        "receipt_sha256": replayed["receipt_sha256"],
+        "scope": "whole-file-sha256",
+        "hash_source": source,
+        "status": "matches" if matches else "no-matches" if files_with_hash else "no-hashes",
+        "historical_coverage": historical["coverage"],
+        "files_scanned": files_scanned,
+        "files_with_hash": files_with_hash,
+        "files_without_hash": files_scanned - files_with_hash,
+        "archive_members": "not-replayed",
+        "matches": matches,
+    }
 
 
 def trust_file(path: str | Path) -> str:

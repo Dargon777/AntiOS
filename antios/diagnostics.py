@@ -115,6 +115,22 @@ _HELP = {
                "Guard could not load its saved startup settings.",
                "Update AntiOS and enable Guard again to regenerate its settings."),
     },
+    "GUARD_TASK_OWNER_MISMATCH": {
+        "ru": ("Не удалось подтвердить владельца задачи Guard",
+               "Windows не подтвердила, что задача автозапуска Guard принадлежит текущей учётной записи.",
+               "Откройте AntiOS в той же учётной записи, где настроен Guard. Если ошибка повторится, экспортируйте отчёт."),
+        "en": ("Guard task owner could not be verified",
+               "Windows did not confirm that the Guard startup task belongs to the current account.",
+               "Open AntiOS under the account where Guard was configured. Export a report if the error recurs."),
+    },
+    "GUARD_TASK_EXITED": {
+        "ru": ("Задача Guard завершилась при запуске",
+               "Планировщик сообщил о завершении процесса до подтверждения работы Guard. Код Windows есть в деталях.",
+               "Сверьте время события с журналом планировщика Windows и экспортируйте диагностику при повторении."),
+        "en": ("Guard task exited during startup",
+               "Task Scheduler reported that Guard ended before startup could be verified. The Windows result code is in the details.",
+               "Compare the timestamp with Windows Task Scheduler history and export diagnostics if it recurs."),
+    },
     "GUARD_STATE_CHANGED": {
         "ru": ("Изменилось состояние Guard",
                "Состояние резидентной защиты изменилось. Это не всегда ошибка.",
@@ -164,6 +180,12 @@ def explanation(code: str, language: str = "en") -> tuple[str, str, str]:
 
 def classify_error(message: str, *, component: str = "") -> str:
     lower = str(message).lower()
+    if component in {"Guard", "Protection"}:
+        if "existing guard task belongs to a different windows user" in lower:
+            return "GUARD_TASK_OWNER_MISMATCH"
+        if ("guard task ended before startup verification" in lower or
+                "lasttaskresult=0xc000013a" in lower):
+            return "GUARD_TASK_EXITED"
     if ("authenticode" in lower or "digital signature" in lower or "цифров" in lower) and (
         "clam" in lower or "freshclam" in lower or "engine" in lower
     ):

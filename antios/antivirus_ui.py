@@ -13,6 +13,8 @@ import sys
 import threading
 import time
 import traceback
+from collections import defaultdict
+from itertools import chain
 from pathlib import Path
 from typing import Any, Callable
 
@@ -33,6 +35,50 @@ _ACTIVE_GUARD_STATES = {
     "attention",
 }
 _HEALTHY_GUARD_STATES = {"monitoring", "scanning"}
+_NON_FILE_REASONS = {
+    "partial-file-inspection",
+    "entries-skipped",
+    "scan-errors",
+}
+_COVERAGE_REASONS = {
+    "engine-unavailable": ("Движок недоступен", "Engine unavailable"),
+    "local-coverage-unverified": ("Проверка движком не подтверждена", "Engine coverage unverified"),
+    "no-files-scanned": ("Файлы не прочитаны", "No files read"),
+    "missing-engine-results": ("Нет результата движка", "Engine result missing"),
+    "partial-file-inspection": ("Содержимое проверено частично", "Content examined partially"),
+    "entries-skipped": ("Пропущенные записи", "Skipped entries"),
+    "scan-errors": ("Ошибки проверки", "Scan errors"),
+    "scan-scope-limit": ("Достигнут предел обхода", "Traversal limit reached"),
+    "scan-cancelled": ("Проверка остановлена", "Scan stopped"),
+    "scan-timed-out": ("Истекло время проверки", "Scan timed out"),
+    "unsupported-archive-format": ("Формат архива не поддерживается", "Unsupported archive format"),
+    "encrypted-archive-entry": ("Зашифрованное вложение", "Encrypted archive entry"),
+    "archive-depth-limit": ("Достигнут предел вложенности", "Archive nesting limit reached"),
+    "archive-budget-exceeded": ("Достигнут предел распаковки", "Archive inspection limit reached"),
+    "unreadable-archive": ("Не удалось прочитать архив", "Archive unreadable"),
+    "ole-streams-not-inspected": ("Потоки OLE не проверены", "OLE streams uninspected"),
+    "stream-preview-only": ("Проверена начальная часть файла", "File preview inspected"),
+}
+
+
+def _coverage_rows(report: dict) -> list[tuple[str, int | None, list[str]]]:
+    """Group recorded paths separately from the full report counters."""
+    contract = report.get("coverage_contract", {})
+    paths = defaultdict(dict)
+    for item in chain(report.get("issues", ()), report.get("findings", ())):
+        for code in item.get("coverage_gaps", ()):
+            paths[code][item["path"]] = None
+        if "error" in item and (item["error"] or not item.get("coverage_gaps")):
+            paths["scan-errors" if item["error"] else "entries-skipped"][item["path"]] = None
+    rows = [(code, count, list(paths[code])) for code, count in
+            sorted(contract.get("file_gaps", {}).items(), key=lambda item: (-item[1], item[0]))]
+    reasons = contract.get("reasons", ())
+    summary = report["summary"]
+    counts = {"entries-skipped": summary.get("skipped"), "scan-errors": summary.get("errors"),
+              "missing-engine-results": contract.get("files_without_engine_result")}
+    rows += [(code, counts.get(code), list(paths[code])) for code in reasons
+             if code not in _NON_FILE_REASONS or code in counts or not rows]
+    return rows
 
 
 def _diagnostic_changed(panel, key: str, value, *, repeat_after=None) -> bool:
@@ -82,6 +128,7 @@ class AntivirusPanel:
         self.layered_active = False
         self.guard_state = "not-running"
         self.advanced_visible = False
+        self.coverage_window = None
         self.buttons: list[Any] = []
         # All user-facing scans use the independent AntiOS Engine.
         self.engine_var = self.app.tk.StringVar(value="antios")
@@ -220,7 +267,12 @@ class AntivirusPanel:
 
         strip = tk.Frame(outer, bg=self.palette["bg"])
         strip.grid(row=1, column=0, sticky="ew", pady=(6, 10))
-        self.status = self._label(strip, self.t("ready"), bg=self.palette["bg"], color="muted")
+        scan_status_row = tk.Frame(strip, bg=self.palette["bg"])
+        scan_status_row.pack(fill="x")
+        self.coverage_button = self.app._button(
+            scan_status_row, self.t("coverage_title"), self._show_coverage, kind="ghost",
+        )
+        self.status = self._label(scan_status_row, self.t("ready"), bg=self.palette["bg"], color="muted")
         self.status.pack(fill="x", pady=4)
         self.scan_progress = self.app.ttk.Progressbar(
             strip, orient="horizontal", mode="indeterminate", style="AntiOS.Horizontal.TProgressbar")
@@ -609,12 +661,15 @@ class AntivirusPanel:
         self.restore_button.pack_forget()
         if findings:
             self.scan_card.grid()
+            if self.app.antivirus_result and not self.coverage_button.winfo_manager():
+                self.coverage_button.pack(side="right", before=self.status, padx=(4, 0))
             self.filter_choice.pack(side="right", before=self.results_hint)
             self.quarantine_button.pack(side="left", padx=(5, 0))
             if not self.export_button.winfo_manager():
                 self.export_button.pack(side="right", padx=(0, 4))
         else:
             self.scan_card.grid_remove()
+            self.coverage_button.pack_forget()
             self.filter_choice.pack_forget()
             self.export_button.pack_forget()
             self.restore_button.pack(side="left", padx=(5, 0))
@@ -668,6 +723,8 @@ class AntivirusPanel:
     def _render_result(self) -> None:
         result = self.app.antivirus_result
         if result:
+            if self.mode == "findings" and not self.coverage_button.winfo_manager():
+                self.coverage_button.pack(side="right", before=self.status, padx=(4, 0))
             metadata = result.get("engine", {})
             engine_text = metadata.get("version") or self.t("managed_engine")
             freshness = metadata.get("database_freshness")
@@ -749,6 +806,7 @@ class AntivirusPanel:
         active = not self.app.antivirus_busy and selected is not None
         self.details_button.configure(state="normal" if active else "disabled")
         self.export_button.configure(state="normal" if self.app.antivirus_result else "disabled")
+        self.coverage_button.configure(state="normal" if self.app.antivirus_result else "disabled")
         self.quarantine_button.configure(
             state=(
                 "normal"
@@ -778,6 +836,78 @@ class AntivirusPanel:
                 "AntiOS",
                 json.dumps(selected, indent=2, ensure_ascii=False),
             )
+
+    def _show_coverage(self) -> None:
+        result = self.app.antivirus_result
+        if not result:
+            return
+        if self.coverage_window is not None and self.coverage_window.winfo_exists():
+            self.coverage_window.destroy()
+
+        tk, ttk = self.app.tk, self.app.ttk
+        window = self.coverage_window = tk.Toplevel(self.parent)
+        window.title(self.t("coverage_title"))
+        window.transient(self.app.root)
+        window.geometry("720x440")
+        window.minsize(490, 330)
+        window.configure(bg=self.palette["bg"])
+        window.bind("<Escape>", lambda _event: window.destroy())
+
+        heading = tk.Frame(window, bg=self.palette["bg"])
+        heading.pack(fill="x", padx=16, pady=(13, 9))
+        contract = result.get("coverage_contract", {})
+        coverage = contract.get("status")
+        state = coverage if coverage in {"complete", "limited"} else "unknown"
+        self.app._section_title(heading, self.t("coverage_" + state)).pack(anchor="w")
+        summary = result["summary"]
+        profile = result.get("limits", {}).get("profile")
+        if profile in self.profile_labels:
+            self._label(heading, self.t("scan_profile") + " · " + self.t("scan_profile_" + profile),
+                        bg=self.palette["bg"], color="muted").pack(anchor="w")
+        self._label(
+            heading, self.t("coverage_counts", files=summary["files_scanned"],
+                            engine=summary.get("provider_scanned", "—"),
+                            partial=contract.get("files_with_partial_inspection", "—")),
+            bg=self.palette["bg"], color="muted",
+        ).pack(anchor="w", fill="x", pady=(5, 0))
+        scope = self._label(heading, str(result.get("path", "")),
+                            bg=self.palette["bg"], color="muted")
+        scope.pack(fill="x", pady=(3, 0))
+        heading.bind("<Configure>", lambda event: scope.configure(wraplength=max(180, event.width)))
+
+        card = self._card(window)
+        card.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        card.grid_rowconfigure(0, weight=1)
+        card.grid_columnconfigure(0, weight=1)
+        tree = ttk.Treeview(card, columns=("count",), style="AntiOS.Treeview")
+        tree.heading("#0", text=self.t("coverage_reason"), anchor="w")
+        tree.heading("count", text=self.t("coverage_count"), anchor="e")
+        tree.column("#0", width=610, minwidth=380, stretch=True)
+        tree.column("count", width=78, anchor="e", stretch=False)
+        tree.grid(row=0, column=0, sticky="nsew")
+        vertical = ttk.Scrollbar(card, command=tree.yview, style="AntiOS.Vertical.TScrollbar")
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal = ttk.Scrollbar(card, orient="horizontal", command=tree.xview,
+                                   style="AntiOS.Horizontal.TScrollbar")
+        horizontal.grid(row=1, column=0, sticky="ew")
+        tree.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+
+        rows = _coverage_rows(result)
+        for code, count, paths in rows:
+            label = _COVERAGE_REASONS.get(code, (code.replace("-", " "),) * 2)
+            label = label[0 if self.app.language == "ru" else 1]
+            category = tree.insert("", "end", text=label, values=("" if count is None else count,))
+            for path in paths:
+                tree.insert(category, "end", text=path)
+            if count is not None and count > len(paths) and code != "missing-engine-results":
+                tree.insert(category, "end", text=self.t("coverage_unlisted", count=count - len(paths)))
+        if not rows:
+            tree.insert("", "end", text=self.t("coverage_no_gaps" if state == "complete" else "coverage_no_details"))
+
+        footer = tk.Frame(window, bg=self.palette["bg"])
+        footer.pack(fill="x", padx=16, pady=(0, 10))
+        self.app._button(footer, self.app.t("work.close"), window.destroy, kind="ghost").pack(side="right")
+        tree.focus_set()
 
     def _export(self) -> None:
         from tkinter import filedialog
@@ -1234,6 +1364,9 @@ class AntivirusPanel:
 
     def _destroy(self, event: Any) -> None:
         if event.widget == self.parent:
+            if self.coverage_window is not None and self.coverage_window.winfo_exists():
+                self.coverage_window.destroy()
+            self.coverage_window = None
             if self.after_id is not None:
                 self.app.root.after_cancel(self.after_id)
                 self.after_id = None

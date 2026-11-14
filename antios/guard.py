@@ -28,6 +28,7 @@ from .guard_state import GuardState, default_guard_path, read_guard_state
 from .quarantine import Quarantine, default_quarantine_path
 from .risk import evaluate_risk
 from .scan_process import run_scan_process
+from .signature_catalog import lookup_trusted_hashes
 from .security_sensors import (
     CoverageSummary, ScanBudget, ScanContext, Surface, runtime_registry,
 )
@@ -458,9 +459,20 @@ class Guard:
     def _record_risk(self, path: Path, result: dict, store: GuardState):
         evidence = self.behavior.findings_for_subject(str(path), max_age=60)
         native = self._native_state(time.monotonic())
+        digests = {
+            finding["sha256"] for finding in result["findings"]
+            if finding.get("kind") == "threat" and isinstance(finding.get("sha256"), str)
+        }
+        conflicts = ()
+        if digests:
+            try:
+                if lookup_trusted_hashes(digests):
+                    conflicts = ("trusted-file-signature-conflict",)
+            except (OSError, ValueError):
+                conflicts = ("trusted-baseline-unavailable",)
         context = evaluate_risk(
             str(path), result, behavior_findings=evidence,
-            native_pre_execution=native,
+            native_pre_execution=native, evidence_conflicts=conflicts,
         ).to_dict()
         risk = self.status.get('risk', {})
         risk.update(

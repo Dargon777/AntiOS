@@ -13,11 +13,11 @@ from typing import Iterable
 
 from .behavior import ProcessEvent
 from .evidence import Evidence, coerce_evidence
-from .process_identity import process_identity
+from .process_identity import ProcessIdentity, process_identity
 
 
 def _path(value: str) -> str:
-    return ntpath.normcase(ntpath.normpath(value or ""))
+    return ntpath.normcase(ntpath.normpath(value)) if value else ""
 
 
 def _name(value: str) -> str:
@@ -56,6 +56,7 @@ class IncidentEdge:
     target: str
     relation: str
     at: float
+    basis: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -100,9 +101,8 @@ class IncidentGraph:
         self.recent_processes = deque(maxlen=512)
         self.incidents: dict[str, _Incident] = {}
         self.path_index: dict[str, str] = {}
-        # PID-only index is retained for collectors that cannot observe a
-        # creation stamp. Stable collectors use process_index and never fall
-        # back to a recycled PID.
+        # Keep PID-only correlations for legacy producers. An identified
+        # instance displaces any older PID-only entry.
         self.pid_index: dict[int, str] = {}
         self.process_index: dict[tuple[int, int], str] = {}
         self.pending_updates = deque(maxlen=100)
@@ -186,9 +186,23 @@ class IncidentGraph:
         if not pid:
             return
         identity = process_identity(pid, creation_time)
-        self.pid_index[identity.pid] = incident_id
         if identity.stable:
+            self.pid_index.pop(identity.pid, None)
             self.process_index[identity.lookup_key] = incident_id
+        else:
+            self.pid_index[identity.pid] = incident_id
+
+    def _path_incident(self, path: str, identity: ProcessIdentity) -> _Incident | None:
+        incident = self.incidents.get(self.path_index.get(path, "")) if path else None
+        if incident is not None and identity.stable and any(
+            node.kind == "process" and node.id != identity.node_id
+            and _path(node.data.get("path", "")) == path
+            for node in incident.nodes.values()
+        ):
+            # Several process instances can execute the same binary. Its path
+            # cannot establish which instance a sensor observed.
+            return None
+        return incident
 
     def _node(self, incident: _Incident, node: IncidentNode) -> bool:
         if node.id in incident.nodes:
@@ -201,12 +215,13 @@ class IncidentGraph:
         return True
 
     def _edge(self, incident: _Incident, source: str, target: str,
-              relation: str, at: float) -> bool:
+              relation: str, at: float, *, basis: str = "") -> bool:
         key = (source, target, relation)
-        if key in incident.edge_keys or len(incident.edges) >= self.max_edges:
+        if (source == target or source not in incident.nodes or target not in incident.nodes
+                or key in incident.edge_keys or len(incident.edges) >= self.max_edges):
             return False
         incident.edge_keys.add(key)
-        incident.edges.append(IncidentEdge(source, target, relation, at))
+        incident.edges.append(IncidentEdge(source, target, relation, at, basis))
         incident.touch(at)
         return True
 
@@ -229,7 +244,7 @@ class IncidentGraph:
 
     def _recent_change(self, normalized: str, now: float) -> float | None:
         for changed_at, path in reversed(self.recent_files):
-            if path == normalized and now - changed_at <= self.ttl:
+            if path == normalized and 0 <= now - changed_at <= self.ttl:
                 return changed_at
         return None
 
@@ -269,13 +284,20 @@ class IncidentGraph:
             default=0,
         )
 
-        incident = None
+        child_identity = process_identity(event.pid, event.creation_time)
+        parent_identity = process_identity(event.ppid, event.parent_creation_time)
+        valid_parent = event.ppid and event.ppid != event.pid and (
+            not (parent_identity.stable and child_identity.stable)
+            or parent_identity.creation_time <= child_identity.creation_time
+        )
+        instance_link = valid_parent and parent_identity.stable and child_identity.stable
+
+        incident = self._process_incident(event.pid, event.creation_time)
         changed_at = self._recent_change(child_path, now) if child_path else None
-        parent_incident = self._process_incident(event.ppid, event.parent_creation_time)
-        if parent_incident is not None:
-            incident = parent_incident
-        if incident is None and child_path in self.path_index:
-            incident = self.incidents.get(self.path_index[child_path])
+        if incident is None and valid_parent and (instance_link or not child_identity.stable):
+            incident = self._process_incident(event.ppid, event.parent_creation_time)
+        if incident is None:
+            incident = self._path_incident(child_path, child_identity)
         if incident is None and changed_at is not None:
             incident = self._new(now)
         if incident is None and behavior_score >= 60:
@@ -284,7 +306,6 @@ class IncidentGraph:
             self.recent_processes.append((now, event))
             return []
 
-        child_identity = process_identity(event.pid, event.creation_time)
         child_id = child_identity.node_id
         child_label = event.path or event.image or f"pid:{event.pid}"
         self._node(incident, IncidentNode(
@@ -298,8 +319,7 @@ class IncidentGraph:
         if child_path:
             self.path_index[child_path] = incident.id
 
-        if event.ppid:
-            parent_identity = process_identity(event.ppid, event.parent_creation_time)
+        if valid_parent:
             parent_id = parent_identity.node_id
             parent_label = event.parent_path or event.parent_image or f"pid:{event.ppid}"
             self._node(incident, IncidentNode(
@@ -308,10 +328,13 @@ class IncidentGraph:
                  "path": event.parent_path,
                  "creation_time": event.parent_creation_time},
             ))
-            self._index_process(event.ppid, event.parent_creation_time, incident.id)
-            if parent_path:
-                self.path_index[parent_path] = incident.id
-            self._edge(incident, parent_id, child_id, "spawned", now)
+            if instance_link or not child_identity.stable:
+                if self._process_incident(event.ppid, event.parent_creation_time) in (None, incident):
+                    self._index_process(event.ppid, event.parent_creation_time, incident.id)
+            if parent_path and (instance_link or not child_identity.stable):
+                self.path_index.setdefault(parent_path, incident.id)
+            self._edge(incident, parent_id, child_id, "spawned", now,
+                       basis="process-instance" if instance_link else "reported-parent")
 
         if changed_at is not None and child_path:
             file_id = f"file:{child_path}"
@@ -320,7 +343,8 @@ class IncidentGraph:
                 {"path": event.path, "changed_at": changed_at},
             ))
             self.path_index[child_path] = incident.id
-            self._edge(incident, file_id, child_id, "executed-as", now)
+            self._edge(incident, file_id, child_id, "executed-as", now,
+                       basis="path-and-time")
 
         for index, finding in enumerate(findings[:16]):
             rule = str(finding.get("rule") or "behavior")
@@ -358,7 +382,7 @@ class IncidentGraph:
 
             process = next((
                 event for seen_at, event in reversed(self.recent_processes)
-                if now - seen_at <= self.ttl and normalized and
+                if 0 <= now - seen_at <= self.ttl and normalized and
                 _path(event.path) == normalized
             ), None)
             if incident is None and process is not None:
@@ -393,7 +417,7 @@ class IncidentGraph:
             if rule in {"mass-file-changes", "interpreter-with-mass-file-changes"}:
                 recent = [
                     (changed_at, path) for changed_at, path in self.recent_files
-                    if now - changed_at <= 10.0
+                    if 0 <= now - changed_at <= 10.0
                 ][-32:]
                 for changed_at, changed_path in recent:
                     file_id = f"file:{changed_path}"
@@ -404,7 +428,7 @@ class IncidentGraph:
                     self.path_index[changed_path] = incident.id
                     self._edge(
                         incident, anchor_id or signal_id, file_id,
-                        "correlated-write", now
+                        "correlated-write", now, basis="time-window",
                     )
 
             incident.score = max(incident.score, min(95, max(0, score)))
@@ -436,9 +460,10 @@ class IncidentGraph:
                 creation_value if type(creation_value) is int and creation_value > 0 else 0
             )
 
-            incident = self.incidents.get(self.path_index.get(normalized, "")) if normalized else None
-            if incident is None and pid:
-                incident = self._process_incident(pid, creation_time)
+            identity = process_identity(pid, creation_time)
+            incident = self._process_incident(pid, creation_time) if pid else None
+            if incident is None:
+                incident = self._path_incident(normalized, identity)
             score = item.risk_score
             if incident is None and score >= 40:
                 incident = self._new(observed_at)
@@ -447,11 +472,11 @@ class IncidentGraph:
 
             anchor_id = ""
             if pid:
-                identity = process_identity(pid, creation_time)
                 anchor_id = identity.node_id
+                image = attrs.get("image") if isinstance(attrs.get("image"), str) else ""
                 self._node(incident, IncidentNode(
-                    anchor_id, "process", item.subject or f"pid:{pid}", observed_at,
-                    {"pid": pid, "creation_time": creation_time},
+                    anchor_id, "process", path_value or image or item.subject or f"pid:{pid}", observed_at,
+                    {"pid": pid, "creation_time": creation_time, "image": image, "path": path_value},
                 ))
                 self._index_process(pid, creation_time, incident.id)
             elif normalized:
@@ -510,6 +535,7 @@ class IncidentGraph:
                 "classification": context.get("classification"),
                 "scanner_verdict": context.get("scanner_verdict"),
                 "scanner_complete": context.get("scanner_complete"),
+                "evidence_conflicts": context.get("evidence_conflicts", []),
                 "confirmed_threat": confirmed,
                 "behavior_score": context.get("behavior_score"),
                 "behavior_rules": context.get("behavior_rules", []),

@@ -25,6 +25,19 @@ def test_engine_authenticode_error_is_actionable():
     assert diagnostics.classify_error("Guard unresponsive", component="Guard") == "GUARD_UNRESPONSIVE"
 
 
+@pytest.mark.parametrize(("message", "code"), [
+    ("Existing Guard task belongs to a different Windows user; refusing modification.",
+     "GUARD_TASK_OWNER_MISMATCH"),
+    ("Resident Guard task ended before startup verification. LastTaskResult=0xC000013A",
+     "GUARD_TASK_EXITED"),
+    ("Resident Guard did not publish advancing heartbeats after startup. LastTaskResult=0xC000013A",
+     "GUARD_TASK_EXITED"),
+])
+def test_guard_task_diagnostics_distinguish_owner_and_process_exit(message, code):
+    assert diagnostics.classify_error(message, component="Protection") == code
+    assert diagnostics.explanation(code, "ru") != diagnostics.explanation("OPERATION_FAILED", "ru")
+
+
 def test_events_written_read_with_bounded_schema(tmp_path):
     first = diagnostics.record_event(
         "ClamAV", "ERROR", "Authenticode failed", code="ENGINE_SIGNATURE_INVALID",

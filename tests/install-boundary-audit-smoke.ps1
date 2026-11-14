@@ -114,6 +114,19 @@ function Get-GuardStartupStatus([string]$Path, [string]$Folder) {
 Wait-GuardStartup $guardExe 'C:\Policy' 100
 if ($script:startupChecks -ne 4) { throw 'Guard startup accepted an old or repeated heartbeat.' }
 
+$taskName = 'Fixture only'
+$script:taskReads = 0
+function Get-GuardTask {
+    $script:taskReads++
+    [pscustomobject]@{State = $(if ($script:taskReads -eq 1) { 'Running' } else { 'Ready' })}
+}
+function Get-ScheduledTaskInfo { [pscustomobject]@{LastTaskResult = -1073741510} }
+$reported = $null
+try { Wait-GuardStartup $guardExe 'C:\Policy' 100 } catch { $reported = $_.Exception.Message }
+if ($reported -notlike 'Resident Guard task ended before startup verification*0xC000013A' -or $script:taskReads -ne 2) {
+    throw "Guard process exit was reported as a heartbeat timeout: $reported"
+}
+
 $stateDir = Join-Path $env:RUNNER_TEMP ("AntiOS-GuardACL-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stateDir | Out-Null
 try {

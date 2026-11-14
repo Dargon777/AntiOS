@@ -78,6 +78,38 @@ def test_replay_rejects_legacy_reports_and_duplicate_json_fields():
         replay_scan_json(b'{"schema":1,"schema":1}')
 
 
+def test_opt_in_hash_history_covers_clean_cache_hits_and_detects_changed_history(tmp_path):
+    folder = tmp_path / "scan"
+    folder.mkdir()
+    for name in ("a.txt", "b.txt"):
+        (folder / name).write_bytes(b"ordinary duplicate content")
+    cache = tmp_path / "scan-cache.sqlite3"
+    default = antivirus.scan_files(folder, cache_path=cache)
+    assert "file_hash_history" not in default
+    assert replay_scan_report(default)["policy"] == "antios-scan-verdict-v1"
+
+    report = antivirus.scan_files(folder, cache_path=cache, include_hash_history=True)
+    digest = hashlib.sha256(b"ordinary duplicate content").hexdigest()
+    assert report["summary"]["cache_hits"] == 2
+    assert report["file_hash_history"] == {
+        "scope": "whole-file-sha256", "entries": [digest, digest], "omitted": 0,
+    }
+    assert replay_scan_report(report)["policy"] == "antios-scan-verdict-v2"
+    report["file_hash_history"]["entries"][0] = "f" * 64
+    with pytest.raises(ValueError, match="proof receipt"):
+        replay_scan_report(report)
+
+
+def test_opt_in_hash_history_reports_omitted_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(antivirus, "MAX_FILE_HASH_HISTORY", 1)
+    for name in ("a.txt", "b.txt"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    report = antivirus.scan_files(tmp_path, include_hash_history=True)
+    assert len(report["file_hash_history"]["entries"]) == 1
+    assert report["file_hash_history"]["omitted"] == 1
+    assert replay_scan_report(report)["verified"]
+
+
 def test_benchmark_cli_checks_all_control_cases_and_stable_replay(capsys):
     assert cli.main(["virus-scan-benchmark", "--repeat", "2", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)

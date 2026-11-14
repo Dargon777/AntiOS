@@ -1,4 +1,5 @@
 from antios.behavior import ProcessEvent
+from antios.evidence import Evidence
 from antios.incident import IncidentGraph
 
 
@@ -39,6 +40,26 @@ def test_unrelated_process_does_not_create_incident():
         parent_image="explorer.exe",
     )) == []
     assert incidents.status()["active_incidents"] == 0
+
+
+def test_sensor_with_same_path_and_recycled_pid_seeds_distinct_incident():
+    incidents, clock = graph()
+    path = r"C:\Users\A\Downloads\example.exe"
+    incidents.observe_file_change(path)
+    first, = incidents.observe_process(ProcessEvent(
+        pid=200, ppid=100, image="example.exe", path=path, creation_time=10,
+        parent_image="parent.exe", parent_creation_time=5,
+    ))
+    assert any(edge["basis"] == "process-instance" for edge in first["edges"])
+    clock.advance(1)
+    second, = incidents.observe_evidence([Evidence(
+        source="fixture", kind="memory", subject="process:200:20",
+        maliciousness=.9, confidence=.9, severity=90,
+        attributes={"pid": 200, "creation_time": 20, "path": path},
+    )])
+    assert second["id"] != first["id"]
+    assert "process:200:20" in {node["id"] for node in second["nodes"]}
+    assert "process:200:10" not in {node["id"] for node in second["nodes"]}
 
 
 def test_behavior_signal_can_seed_incident_without_file_change():
