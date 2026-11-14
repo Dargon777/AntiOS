@@ -120,6 +120,10 @@ try {
     $database = Join-Path $stateDir 'guard.sqlite3'
     $wal = Join-Path $stateDir 'guard.sqlite3-wal'
     $unrelated = Join-Path $stateDir 'unrelated.txt'
+    $workspace = Join-Path $stateDir 'antios-scan-test1234'
+    New-Item -ItemType Directory -Path $workspace | Out-Null
+    $oldWorkerFile = Join-Path $workspace 'events.jsonl'
+    [IO.File]::WriteAllText($oldWorkerFile, 'preserve-old-worker-data')
     [IO.File]::WriteAllText($database, 'keep-guard-history')
     [IO.File]::WriteAllText($wal, 'keep-uncommitted-history')
     [IO.File]::WriteAllText($unrelated, 'keep-other-file')
@@ -149,7 +153,8 @@ try {
     }
     if ([IO.File]::ReadAllText($database) -cne 'keep-guard-history' -or
         [IO.File]::ReadAllText($wal) -cne 'keep-uncommitted-history' -or
-        [IO.File]::ReadAllText($unrelated) -cne 'keep-other-file') {
+        [IO.File]::ReadAllText($unrelated) -cne 'keep-other-file' -or
+        [IO.File]::ReadAllText($oldWorkerFile) -cne 'preserve-old-worker-data') {
         throw 'Guard ACL repair must preserve all file content.'
     }
     $afterUnrelatedAcl = @((Get-Acl -LiteralPath $unrelated).Access | ForEach-Object {

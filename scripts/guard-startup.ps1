@@ -46,6 +46,12 @@ function Restore-GuardUserAccess([string]$Directory) {
         $current = $current.Parent
     }
     foreach ($entry in Get-ChildItem -LiteralPath $Directory -Force -ErrorAction Stop) {
+        # A terminated scanner can leave a private workspace. The repair
+        # opens only fixed state files and never descends into workspaces.
+        if ($entry.PSIsContainer -and $entry.Name -cmatch '^antios-scan-[a-z0-9_]{8}$' -and
+            -not $entry.LinkType -and -not ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            continue
+        }
         if ($entry.PSIsContainer -or $entry.LinkType -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
             throw 'Guard state contains an unexpected directory or linked file.'
         }
@@ -252,6 +258,13 @@ if ($reuse) {
     if (-not $keepPolicy) {
         throw 'Existing Guard policy is missing. Configure Resident Guard with explicit roots to recreate it.'
     }
+    if ($existing.State -eq 'Running') {
+        $status = Get-GuardStartupStatus $exe $folder
+        if ($status -and $status.kind -eq 'antivirus-guard' -and $status.running -eq $true) {
+            return
+        }
+    }
+    if ($existing.State -in @('Running', 'Queued')) { Stop-GuardTaskAndWait }
 }
 if (-not $keepPolicy) {
     if ($Roots.Count -lt 1 -or $Roots.Count -gt 16) { throw 'Select 1..16 roots with -Roots.' }
@@ -303,13 +316,6 @@ if ((Test-Path -LiteralPath $policyPath) -and
 
 if ($reuse) {
     # Restart the verified registration without rewriting its policy or task settings.
-    if ($existing.State -eq 'Running') {
-        $status = Get-GuardStartupStatus $exe $folder
-        if ($status -and $status.kind -eq 'antivirus-guard' -and $status.running -eq $true) {
-            return
-        }
-    }
-    if ($existing.State -in @('Running', 'Queued')) { Stop-GuardTaskAndWait }
     $startedAfter = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000
     Start-ScheduledTask -TaskPath '\' -TaskName $taskName
     Wait-GuardStartup $exe $folder $startedAfter
