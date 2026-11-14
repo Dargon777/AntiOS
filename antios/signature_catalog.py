@@ -234,8 +234,9 @@ def _trusted_hashes(db) -> tuple[str, ...]:
 
 
 def _preflight(catalog: Catalog, trusted: tuple[str, ...]) -> dict:
+    trusted_hashes = set(trusted)
     conflicts = [{"sha256": digest, "label": catalog.rules[digest]}
-                 for digest in trusted if digest in catalog.rules]
+                 for digest in sorted(catalog.rules) if digest in trusted_hashes]
     return {
         "schema": 1, "kind": "signature-catalog-preflight", "version": catalog.version,
         "trusted_hashes_checked": len(trusted), "conflicts": conflicts,

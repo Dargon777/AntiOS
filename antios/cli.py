@@ -583,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Catalog v{result['version']} preflight: {result['status']} "
                           f"({result['trusted_hashes_checked']} trusted hashes checked)")
                     for conflict in result["conflicts"]:
-                        print(f"{conflict['sha256']}  {conflict['label']}")
+                        print(f"{conflict['sha256'][:12]}…  {conflict['label']}")
                 return 3 if result["status"] == "blocked" else 0
             if args.signatures_command == "install":
                 install_catalog(args.package)
