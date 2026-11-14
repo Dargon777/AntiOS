@@ -13,7 +13,8 @@ def _detach_console() -> None:
 
 def run_entry() -> int:
     args = sys.argv[1:]
-    if (os.name == "nt" and getattr(sys, "frozen", False) and args[:1] == ["run"]
+    packaged = getattr(sys, "frozen", False) or "__compiled__" in globals()
+    if (os.name == "nt" and packaged and args[:1] == ["run"]
             and not {"-h", "--help"}.intersection(args[1:])):
         # Task Scheduler executes this console-subsystem binary directly.
         # Detach before importing the engine so console closure cannot end Guard.

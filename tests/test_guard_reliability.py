@@ -124,7 +124,8 @@ def test_directory_helper_timeout_is_a_reportable_startup_error(tmp_path, monkey
     (["stop"], False, "guard output"),
     (["history"], False, "guard output"),
 ])
-def test_frozen_guard_only_detaches_when_running(args, detached, output, monkeypatch, capsys):
+@pytest.mark.parametrize("packager", ["pyinstaller", "nuitka"])
+def test_frozen_guard_only_detaches_when_running(args, detached, output, packager, monkeypatch, capsys):
     import sys
 
     import antios_guard_entry as entry
@@ -132,7 +133,9 @@ def test_frozen_guard_only_detaches_when_running(args, detached, output, monkeyp
 
     calls = []
     monkeypatch.setattr(entry, "os", SimpleNamespace(name="nt", devnull=os.devnull))
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "frozen", packager == "pyinstaller", raising=False)
+    if packager == "nuitka":
+        monkeypatch.setattr(entry, "__compiled__", object(), raising=False)
     monkeypatch.setattr(sys, "argv", ["AntiOS-Guard.exe", *args])
     monkeypatch.setattr(entry, "_detach_console", lambda: calls.append("detach"))
 
