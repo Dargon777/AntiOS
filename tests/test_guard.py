@@ -1,4 +1,5 @@
 import errno
+import io
 import json
 from pathlib import Path
 import queue
@@ -142,10 +143,14 @@ def test_failed_engine_keeps_pending_work_and_reports_degraded(tmp_path):
         for index in range(5):
             (root / str(index)).write_text('ordinary')
         until(lambda: instance.status['capacity_exceeded'])
-        until(lambda: read_guard_state(state).get('state') == 'degraded')
+        until(lambda: read_guard_state(state).get('state') == 'degraded'
+              and read_guard_state(state).get('scan_backlog') == 3)
         assert len(instance.pending) == 2
         assert instance.status['scanned'] == 0
-        assert read_guard_state(state)['engine']['available'] is False
+        status = read_guard_state(state)
+        assert status['engine']['available'] is False
+        assert status['inventory_limited'] is False
+        assert status['scan_backlog'] == 3
     finally:
         stop.set()
         thread.join(3)
@@ -213,6 +218,21 @@ def test_inventory_skips_links_vault_and_limits_directory_growth(tmp_path):
     assert all(vault not in path.parents for path in files)
 
 
+def test_inventory_counts_overlapping_roots_once_at_exact_file_limit(tmp_path):
+    nested = tmp_path / 'nested'
+    nested.mkdir()
+    first = tmp_path / 'one.txt'
+    second = nested / 'two.txt'
+    first.touch()
+    second.touch()
+
+    files, issues, limited = guard.inventory((tmp_path, nested), max_files=2)
+
+    assert set(files) == {first, second}
+    assert not issues
+    assert not limited
+
+
 def test_journal_has_exclusive_owner_bounded_history_and_stale_status(tmp_path):
     state = GuardState(tmp_path / 'state')
     other = GuardState(tmp_path / 'state')
@@ -249,6 +269,21 @@ def test_cli_status_is_available_without_windows_or_a_running_guard(tmp_path, ca
     from antios.cli import main
     assert main(['guard', 'status', '--state-dir', str(tmp_path / 'missing')]) == 0
     assert json.loads(capsys.readouterr().out)['state'] == 'not-running'
+
+
+def test_cli_status_preserves_unicode_on_ascii_console(tmp_path, monkeypatch):
+    location = str(tmp_path / '\u0437\u0430\u0449\u0438\u0442\u0430')
+    store = GuardState(tmp_path / 'state')
+    try:
+        store.publish({'state': 'stopped', 'running': False, 'roots': [location]})
+    finally:
+        store.close()
+    raw = io.BytesIO()
+    with monkeypatch.context() as patch, io.TextIOWrapper(raw, encoding='ascii') as stdout:
+        patch.setattr(guard.sys, 'stdout', stdout)
+        assert guard.main(['status', '--state-dir', str(tmp_path / 'state')]) == 0
+        stdout.flush()
+        assert json.loads(raw.getvalue())['roots'] == [location]
 
 
 @pytest.mark.parametrize(('complete', 'expected_state'), [(False, 'degraded'), (True, 'attention')])
@@ -428,6 +463,52 @@ def test_notification_during_scan_invalidates_just_computed_result(tmp_path, mon
     assert not failures
 
 
+def test_native_notifications_are_drained_while_worker_is_still_running(tmp_path, monkeypatch):
+    monkeypatch.setattr(guard, 'file_identity', lambda info: (info.st_dev, info.st_ino, info.st_size))
+    watcher = Notifications()
+    started, changed = threading.Event(), threading.Event()
+    calls, isolated = [], []
+
+    class Vault:
+        def add(self, finding, *, dry_run):
+            isolated.append(finding)
+            return {'id': 'test-backup'}
+
+    def slow_scan(path, **options):
+        result = scan(path, **options)
+        calls.append(path)
+        if len(calls) == 1:
+            started.set()
+            assert changed.wait(5)
+            until(lambda: options['cancelled']() or watcher.events.empty(), seconds=5)
+            assert not options['cancelled']()
+            assert instance.behavior.status()['file_events'] == 1
+        return result
+
+    root, state, instance, stop, thread, failures = launch(
+        tmp_path, scanner=slow_scan, watcher_factory=lambda roots: watcher,
+        auto_quarantine=True, quarantine_factory=Vault,
+    )
+    try:
+        target = root / 'fixture.ps1'
+        target.write_bytes(b'inert-marker')
+        assert started.wait(5)
+        target.write_bytes(b'ordinary----')
+        watcher.events.put(ChangeBatch(paths=(target,)))
+        changed.set()
+        until(lambda: target in instance.known)
+        assert calls == [target, target]
+        assert instance.status['scans_invalidated'] == 1
+        assert instance.status['detections'] == 1
+        assert not instance.threats
+        assert not isolated
+    finally:
+        changed.set()
+        stop.set()
+        thread.join(5)
+    assert not failures
+
+
 def test_subtree_events_reset_descendants_but_exclude_guard_storage(tmp_path):
     root = tmp_path / 'watched'
     root.mkdir()
@@ -470,6 +551,45 @@ def test_repeated_root_rescans_do_not_starve_files_beyond_queue_capacity(tmp_pat
     try:
         until(lambda: len(visited) == 6)
         assert len(instance.pending) <= 2
+    finally:
+        stop.set()
+        thread.join(3)
+    assert not failures
+
+
+def test_new_script_takes_bounded_priority_over_bulk_scan(tmp_path):
+    watcher = Notifications()
+    root = tmp_path / 'watched'
+    root.mkdir()
+    ordinary = {root / f'file-{index}.txt' for index in range(6)}
+    scripts = [root / f'delivery-{index}.ps1' for index in range(5)]
+    for path in ordinary:
+        path.write_text('ordinary')
+    calls = []
+
+    def slow_scan(path, **options):
+        calls.append(path)
+        if len(calls) == 1 or (path in scripts and scripts.index(path) + 1 < len(scripts)):
+            delivery = scripts[0 if path not in scripts else scripts.index(path) + 1]
+            delivery.write_text('ordinary')
+            watcher.events.put(ChangeBatch(paths=(delivery,)))
+            assert not options['cancelled']()
+            # The newly delivered script settles during this simulated scan.
+            time.sleep(0.18)
+        return scan(path, **options)
+
+    _, state, instance, stop, thread, failures = launch(
+        tmp_path, scanner=slow_scan, max_queue=1, watcher_factory=lambda roots: watcher,
+    )
+    try:
+        until(lambda: set(calls) == ordinary | set(scripts))
+        until(lambda: read_guard_state(state).get('state') == 'monitoring')
+        assert calls[0] in ordinary
+        assert calls[1:4] == scripts[:3]
+        assert calls[4] in ordinary
+        assert len(instance.pending) <= 1
+        assert instance.status['scan_backlog'] == 0
+        assert not instance.status['capacity_exceeded']
     finally:
         stop.set()
         thread.join(3)

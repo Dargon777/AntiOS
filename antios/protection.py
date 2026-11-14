@@ -126,6 +126,7 @@ def collect_protection_status(engine_service: str | None = None) -> dict:
         and not guard.get("capacity_exceeded")
         and not guard.get("inventory_issues")
         and not guard.get("behavior_alerts_dropped", 0)
+        and not guard.get("incident_tracking_dropped", 0)
     )
     behavior = guard.get("behavior", {}) if isinstance(guard.get("behavior"), dict) else {}
     risk = guard.get("risk", {}) if isinstance(guard.get("risk"), dict) else {}

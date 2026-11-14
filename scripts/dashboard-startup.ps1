@@ -26,7 +26,15 @@ function Assert-ControlCenterTaskOwned($Task, [string]$ExpectedExecutable) {
     if (-not $Task) { return }
     $account = [string]$Task.Principal.UserId
     if ($account -notin @($identity.Name, $identity.User.Value)) {
-        throw 'Existing Control Center task belongs to a different Windows user; refusing modification.'
+        try {
+            $sid = [Security.Principal.NTAccount]::new($account).Translate(
+                [Security.Principal.SecurityIdentifier]).Value
+        } catch {
+            $sid = $null
+        }
+        if ($sid -ne $identity.User.Value) {
+            throw 'Existing Control Center task belongs to a different Windows user; refusing modification.'
+        }
     }
     $actions = @($Task.Actions)
     if ($actions.Count -ne 1 -or -not $actions[0].Execute) {
@@ -55,7 +63,7 @@ function Assert-ManagedUnsignedDashboard([string]$Path) {
         throw 'Unsigned dashboard startup is allowed only for the machine-installed AntiOS-GUI.exe.'
     }
 
-    . (Join-Path $ScriptDirectory 'clamav-trust.ps1')
+    . (Join-Path $ScriptDirectory 'guard-trust.ps1')
     Assert-AntiOSProtectedInstallPath $expected
 }
 

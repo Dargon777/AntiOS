@@ -8,7 +8,7 @@ AntiOS uses read-only or bounded sensors to add system context to ordinary file 
 | --- | --- | --- |
 | Process | Partial baseline | process identity, parent, path, token integrity, loader module inventory and on-disk image Authenticode |
 | Persistence | Partial baseline | common autoruns, services, tasks, WMI and COM persistence |
-| Process memory | Partial baseline | executable private regions and bounded header probes |
+| Process memory | Partial baseline | executable private regions, bounded PE header probes and thread start addresses |
 | Loaded drivers | Partial baseline | loaded-driver inventory, Authenticode, exact blocklist and hash checks |
 | Boot / UEFI | Partial baseline | firmware type and Secure Boot posture |
 | TPM / VBS / Code Integrity | Partial baseline | TPM state, VBS, HVCI and Secure Launch posture |
@@ -46,6 +46,7 @@ Run `antios sensors` for coverage and observation counts, or `antios sensors --s
 - Network observations contain per-process TCP counts. Endpoint addresses, ports and traffic content are omitted. Short-lived connections, UDP, connection direction and unmatched process owners are outside this snapshot's coverage.
 - Browser observations include extension IDs and selected manifest permissions from standard Chrome and Edge profiles, plus force-install entries and native messaging registrations. Browser history, cookies, profile names, policy URLs and registered manifest paths are omitted. Activation, custom profiles and other browsers remain outside coverage.
 - Use `--surface gpu` or `--surface device_firmware` for display and disk metadata. These reports omit hardware serial numbers and cannot establish firmware integrity, GPU load or VRAM contents.
+- Use `--surface ram` for a read-only memory snapshot. The collector verifies process creation time and checks a bounded sample of thread start addresses. A thread starting in private executable memory is review evidence. The report records access and observation limits. It does not compare mapped images with the files on disk.
 - Guard can correlate an established public TCP peer with executable private memory containing a PE header in the same process instance. The correlation adds review evidence.
 
 ## Scope

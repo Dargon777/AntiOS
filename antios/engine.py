@@ -68,6 +68,9 @@ except ImportError:
         zstd = None
 _ZSTD_ERRORS = (zstd.ZstdError,) if zstd is not None else ()
 _OFFICE_MACROS = {"word/vbaproject.bin", "xl/vbaproject.bin", "ppt/vbaproject.bin"}
+_PAX_RECORD_LENGTH = re.compile(rb"([1-9][0-9]{0,6}) ")
+_PAX_METADATA = {b"atime", b"ctime", b"mtime", b"uid", b"gid", b"uname", b"gname", b"comment"}
+_TAR_EXTENDED_HEADERS = {tarfile.XHDTYPE, tarfile.XGLTYPE, tarfile.GNUTYPE_LONGNAME}
 _ARCHIVE_ERRORS = (zipfile.BadZipFile, RuntimeError, OSError, EOFError, ValueError,
                    NotImplementedError, zlib.error, struct.error, lzma.LZMAError, *_ZSTD_ERRORS)
 
@@ -218,6 +221,38 @@ def _archive_path_signal(name: str) -> ScanOutcome:
     if name.startswith("/") or ".." in parts or not parts or ":" in parts[0]:
         return _ARCHIVE_PATH.evaluate()
     return ScanOutcome()
+
+
+def _tar_extended_fields(kind: bytes, payload: bytes) -> tuple[str | None, int | None]:
+    if kind == tarfile.GNUTYPE_LONGNAME:
+        raw_name = payload.rstrip(b"\x00")
+        if not raw_name or len(raw_name) == len(payload) or b"\x00" in raw_name:
+            raise ValueError("Invalid GNU TAR long name")
+        return raw_name.decode("utf-8", errors="surrogateescape"), None
+
+    name, expected_size = None, None
+    offset = 0
+    while offset < len(payload):
+        length = _PAX_RECORD_LENGTH.match(payload, offset)
+        if length is None:
+            raise ValueError("Invalid PAX record length")
+        end = offset + int(length[1])
+        if not length.end() < end <= len(payload) or payload[end - 1] != 10:
+            raise ValueError("Truncated PAX record")
+        key, separator, value = payload[length.end():end - 1].partition(b"=")
+        if not key or not separator or b"\x00" in value:
+            raise ValueError("Invalid PAX record")
+        offset = end
+
+        if key in _PAX_METADATA:
+            continue
+        if key == b"path" and kind == tarfile.XHDTYPE and value and name is None:
+            name = value.decode("utf-8")
+        elif key == b"size" and kind == tarfile.XHDTYPE and expected_size is None and len(value) <= 20 and value.isdigit():
+            expected_size = int(value)
+        else:
+            raise NotImplementedError("Unsupported PAX field")
+    return name, expected_size
 
 
 def _entropy(sample: bytes) -> float:
@@ -593,11 +628,12 @@ class AntiOSEngine:
         block = tarfile.BLOCKSIZE
         offset = 0
         outcome = ScanOutcome()
+        next_member = None
         while offset + block <= len(data):
             header = data[offset:offset + block]
             if header == bytes(block):
                 remaining = len(data) - offset
-                if remaining >= 2 * block and data.count(b"\x00", offset) == remaining:
+                if next_member is None and remaining >= 2 * block and data.count(b"\x00", offset) == remaining:
                     return outcome
                 break
             if budget.members <= 0:
@@ -612,7 +648,29 @@ class AntiOSEngine:
             offset = start + (member.size + block - 1) // block * block
             if member.size < 0 or offset > len(data):
                 break
-            name = member.name.replace("\\", "/")
+            if member.type in _TAR_EXTENDED_HEADERS:
+                if next_member is not None:
+                    break
+                if member.size > min(self._limits.archive_directory_bytes, budget.bytes_left):
+                    return _preferred(outcome, _inspection_gap(
+                        "archive-budget-exceeded", "TAR metadata budget exceeded"))
+                budget.bytes_left -= member.size
+                try:
+                    fields = _tar_extended_fields(member.type, data[start:start + member.size])
+                except NotImplementedError:
+                    return _preferred(outcome, _inspection_gap(
+                        "unsupported-archive-entry", "Unsupported TAR metadata"))
+                except ValueError:
+                    break
+                if member.type != tarfile.XGLTYPE:
+                    next_member = fields
+                continue
+            name, expected_size = next_member if next_member is not None else (None, None)
+            next_member = None
+            if expected_size is not None and expected_size != member.size:
+                return _preferred(outcome, _inspection_gap(
+                    "unsupported-archive-entry", "TAR member uses a size override"))
+            name = (name or member.name).replace("\\", "/")
             if member.type == tarfile.DIRTYPE and not member.size and name == ".":
                 continue
             outcome = _preferred(outcome, _archive_path_signal(name))

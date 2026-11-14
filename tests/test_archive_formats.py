@@ -29,13 +29,57 @@ def _ar_entry(name, data):
     return header + data + b"\n" * (len(data) % 2)
 
 
-def _tar(name, data):
+def _tar(name, data, *, archive_format=tarfile.USTAR_FORMAT, pax_headers=None, entry_headers=None):
     output = io.BytesIO()
-    with tarfile.open(fileobj=output, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+    with tarfile.open(fileobj=output, mode="w", format=archive_format, pax_headers=pax_headers) as archive:
         info = tarfile.TarInfo(name)
         info.size = len(data)
+        if entry_headers:
+            info.pax_headers.update(entry_headers)
         archive.addfile(info, io.BytesIO(data))
     return output.getvalue()
+
+
+@pytest.mark.parametrize("archive_format", [tarfile.PAX_FORMAT, tarfile.GNU_FORMAT])
+def test_tar_extended_names_find_members_and_keep_clean_coverage(archive_format, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    name = "long-folder/" + "document-" * 13 + ".txt"
+    for data, expected in ((_FIXTURE, ScanOutcome("threat", "Inert control")), (b"ordinary", ScanOutcome())):
+        content = _tar(name, data, archive_format=archive_format)
+        assert _scanner().scan(content, "renamed") == expected
+        assert _scanner().scan(gzip.compress(content, mtime=0), "controls.tgz") == expected
+    assert not list(tmp_path.iterdir())
+
+
+def test_tar_pax_global_metadata_and_per_entry_name():
+    content = _tar("sample", b"ordinary", archive_format=tarfile.PAX_FORMAT,
+                   pax_headers={"comment": "ordinary archive"},
+                   entry_headers={"path": "../parent.txt", "mtime": "123.5", "size": "8"})
+    outcome = _scanner().scan(content, "fixture.tar")
+    assert outcome.rule_id == "archive.suspicious-entry-path"
+    assert outcome.complete
+
+
+def test_tar_extended_metadata_shares_inspection_budget(monkeypatch):
+    content = _tar("q" * 101, _FIXTURE, archive_format=tarfile.PAX_FORMAT)
+    monkeypatch.setattr(engine, "MAX_ARCHIVE_DIRECTORY_BYTES", 16)
+    outcome = _scanner().scan(content, "fixture.tar")
+    assert outcome.coverage_gaps == {"archive-budget-exceeded"}
+    assert outcome.kind != "threat"
+
+
+def test_tar_extended_metadata_without_member_has_incomplete_coverage():
+    content = _tar("q" * 101, _FIXTURE, archive_format=tarfile.PAX_FORMAT)
+    metadata = content[:2 * tarfile.BLOCKSIZE] + bytes(2 * tarfile.BLOCKSIZE)
+    assert _scanner().scan(metadata, "fixture.tar").coverage_gaps == {"unreadable-archive"}
+
+
+def test_tar_pax_keeps_unsupported_field_incomplete():
+    content = _tar("sample", _FIXTURE, archive_format=tarfile.PAX_FORMAT,
+                   entry_headers={"vendor.extension": "opaque metadata"})
+    outcome = _scanner().scan(content, "fixture.tar")
+    assert outcome.coverage_gaps == {"unsupported-archive-entry"}
+    assert outcome.kind != "threat"
 
 
 def _cpio_entry(name, data=b"", *, mode=stat.S_IFREG | 0o644, checksum=None):

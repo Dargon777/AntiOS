@@ -38,16 +38,22 @@ from .security_sensors import (
     default_descriptors,
     sensor_evidence,
 )
-from .windows_behavior import WindowsProcessSampler
+from .windows_behavior import FILETIME, INVALID_HANDLE_VALUE, WindowsProcessSampler
 from .windows_process import hidden_process_kwargs, system_executable, windows_powershell_env
 from .windows_process_metadata import (
-    ProcessMetadata, WindowsProcessMetadataProvider, integrity_name, read_process_identity,
+    ProcessMetadata, WindowsProcessMetadataProvider, _creation_time, integrity_name,
+    read_process_identity,
 )
 
 
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_VM_READ = 0x0010
+THREAD_QUERY_INFORMATION = 0x0040
+TH32CS_SNAPTHREAD = 0x0004
+_THREAD_START_ADDRESS = 9
+_THREAD_SNAPSHOT_LIMIT = 16_384
+_THREADS_PER_PROCESS = 32
 
 MEM_COMMIT = 0x1000
 MEM_PRIVATE = 0x20000
@@ -154,6 +160,18 @@ class MemoryInspection:
     query_errors: int = 0
     read_errors: int = 0
     access_denied: bool = False
+    truncated: bool = False
+    identity_unverified: bool = False
+    private_thread_starts: tuple[tuple[int, MemoryRegion], ...] = ()
+    threads_checked: int = 0
+    thread_errors: int = 0
+    threads_truncated: bool = False
+
+
+@dataclass(frozen=True)
+class ThreadSnapshot:
+    by_pid: dict[int, tuple[int, ...]]
+    errors: int = 0
     truncated: bool = False
 
 
@@ -782,6 +800,18 @@ class MEMORY_BASIC_INFORMATION(ctypes.Structure):
     ]
 
 
+class THREADENTRY32(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("cntUsage", wintypes.DWORD),
+        ("th32ThreadID", wintypes.DWORD),
+        ("th32OwnerProcessID", wintypes.DWORD),
+        ("tpBasePri", wintypes.LONG),
+        ("tpDeltaPri", wintypes.LONG),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
 class WindowsMemoryProvider:
     """Read-only VirtualQueryEx/ReadProcessMemory collector."""
 
@@ -789,7 +819,7 @@ class WindowsMemoryProvider:
         if os.name != "nt":
             raise OSError("Windows process-memory inspection is only available on Windows")
         self.header_bytes = max(64, min(int(header_bytes), 64 * 1024))
-        self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True, winmode=0x800)
         self.kernel32.OpenProcess.argtypes = (
             wintypes.DWORD, wintypes.BOOL, wintypes.DWORD,
         )
@@ -811,15 +841,119 @@ class WindowsMemoryProvider:
         self.kernel32.ReadProcessMemory.restype = wintypes.BOOL
         self.kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
         self.kernel32.CloseHandle.restype = wintypes.BOOL
+        self.kernel32.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (
+            ctypes.POINTER(FILETIME),
+        ) * 4
+        self.kernel32.GetProcessTimes.restype = wintypes.BOOL
+        self.kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+        self.kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        for operation in (self.kernel32.Thread32First, self.kernel32.Thread32Next):
+            operation.argtypes = (wintypes.HANDLE, ctypes.POINTER(THREADENTRY32))
+            operation.restype = wintypes.BOOL
+        self.kernel32.OpenThread.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        self.kernel32.OpenThread.restype = wintypes.HANDLE
+        self.kernel32.GetProcessIdOfThread.argtypes = (wintypes.HANDLE,)
+        self.kernel32.GetProcessIdOfThread.restype = wintypes.DWORD
+        try:
+            query = ctypes.WinDLL("ntdll.dll", winmode=0x800).NtQueryInformationThread
+        except (OSError, AttributeError):
+            query = None
+        if query is not None:
+            query.argtypes = (
+                wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
+                ctypes.POINTER(wintypes.ULONG),
+            )
+            query.restype = wintypes.LONG
+        self._query_thread = query
 
-    def inspect(self, process: ProcessRecord, budget: BudgetGuard) -> MemoryInspection:
+    def snapshot_threads(self, budget: BudgetGuard) -> ThreadSnapshot:
+        if self._query_thread is None:
+            return ThreadSnapshot({}, errors=1)
+        handle = self.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+        if handle in (None, 0, INVALID_HANDLE_VALUE):
+            return ThreadSnapshot({}, errors=1)
+        by_pid: dict[int, list[int]] = {}
+        entry = THREADENTRY32()
+        entry_size = ctypes.sizeof(entry)
+        min_size = THREADENTRY32.th32OwnerProcessID.offset + ctypes.sizeof(wintypes.DWORD)
+        entry.dwSize = entry_size
+        seen = 0
+        errors = 0
+        try:
+            valid = self.kernel32.Thread32First(handle, ctypes.byref(entry))
+            while valid and seen < _THREAD_SNAPSHOT_LIMIT and not budget.expired():
+                if entry.dwSize < min_size:
+                    errors += 1
+                elif entry.th32OwnerProcessID and entry.th32ThreadID:
+                    by_pid.setdefault(int(entry.th32OwnerProcessID), []).append(
+                        int(entry.th32ThreadID)
+                    )
+                seen += 1
+                entry.dwSize = entry_size
+                valid = self.kernel32.Thread32Next(handle, ctypes.byref(entry))
+            if not valid and ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                errors += 1
+        finally:
+            self.kernel32.CloseHandle(handle)
+        return ThreadSnapshot({pid: tuple(ids) for pid, ids in by_pid.items()}, errors, bool(valid))
+
+    def _thread_start(self, pid: int, tid: int) -> int | None:
+        if self._query_thread is None:
+            return None
+        handle = self.kernel32.OpenThread(THREAD_QUERY_INFORMATION, False, tid)
+        if not handle:
+            return None
+        try:
+            if self.kernel32.GetProcessIdOfThread(handle) != pid:
+                return None
+            address = ctypes.c_void_p()
+            status = self._query_thread(
+                handle, _THREAD_START_ADDRESS, ctypes.byref(address),
+                ctypes.sizeof(address), None,
+            )
+            return address.value if status >= 0 else None
+        finally:
+            self.kernel32.CloseHandle(handle)
+
+    def _inspect_thread_starts(self, handle, pid, tids, budget):
+        evidence = []
+        checked = errors = 0
+        truncated = len(tids) > _THREADS_PER_PROCESS
+        for tid in tids[:_THREADS_PER_PROCESS]:
+            if not budget.take():
+                truncated = True
+                break
+            address = self._thread_start(pid, tid)
+            mbi = MEMORY_BASIC_INFORMATION()
+            if not address or not self.kernel32.VirtualQueryEx(
+                handle, ctypes.c_void_p(address), ctypes.byref(mbi), ctypes.sizeof(mbi),
+            ):
+                errors += 1
+                continue
+            region = MemoryRegion(
+                int(mbi.BaseAddress or 0), int(mbi.RegionSize), int(mbi.State),
+                int(mbi.Protect), int(mbi.Type),
+            )
+            if not region.base_address <= address < region.base_address + region.size:
+                errors += 1
+                continue
+            checked += 1
+            if region.committed and region.private and region.executable:
+                evidence.append((tid, region))
+        return tuple(evidence), checked, errors, truncated
+
+    def inspect(
+        self, process: ProcessRecord, budget: BudgetGuard, *, threads: tuple[int, ...] = (),
+    ) -> MemoryInspection:
         handle = self.kernel32.OpenProcess(
             PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
             False,
             process.pid,
         )
         if not handle:
-            return MemoryInspection(access_denied=True)
+            if ctypes.get_last_error() == 5:  # ERROR_ACCESS_DENIED
+                return MemoryInspection(access_denied=True)
+            return MemoryInspection(identity_unverified=True)
 
         regions: list[MemoryRegion] = []
         bytes_read = 0
@@ -829,6 +963,11 @@ class WindowsMemoryProvider:
         address = 0
         pointer_limit = (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1
         try:
+            if not process.creation_time or _creation_time(self.kernel32, handle) != process.creation_time:
+                return MemoryInspection(identity_unverified=True)
+            starts, threads_checked, thread_errors, threads_truncated = self._inspect_thread_starts(
+                handle, process.pid, threads, budget,
+            )
             while address < pointer_limit:
                 if not budget.take(items=1):
                     truncated = True
@@ -906,6 +1045,10 @@ class WindowsMemoryProvider:
             query_errors=query_errors,
             read_errors=read_errors,
             truncated=truncated,
+            private_thread_starts=starts,
+            threads_checked=threads_checked,
+            thread_errors=thread_errors,
+            threads_truncated=threads_truncated,
         )
 
 
@@ -1171,7 +1314,7 @@ class WindowsMemorySensor:
         Acquisition.SNAPSHOT,
         minimum_privilege=Privilege.ADMIN,
         capability=CapabilityState.AVAILABLE,
-        version=1,
+        version=2,
         experimental=True,
     )
 
@@ -1186,25 +1329,64 @@ class WindowsMemorySensor:
     def collect(self, context: ScanContext) -> SensorReport:
         guard = BudgetGuard(context.budget)
         snapshot = self.process_provider.snapshot(context.budget.max_items)
+        thread_provider = getattr(self.memory_provider, "snapshot_threads", None)
+        threads = thread_provider(guard) if thread_provider else ThreadSnapshot({})
         evidence = []
         inspected_regions = 0
         inspected_bytes = 0
         denied = 0
+        identity_unverified = 0
         errors = 0
+        threads_checked = 0
+        thread_errors = threads.errors
+        threads_truncated = threads.truncated
         truncated = snapshot.truncated
 
         for process in snapshot.processes:
-            if guard.expired():
+            if not guard.can_take():
                 truncated = True
                 break
-            inspection = self.memory_provider.inspect(process, guard)
+            if thread_provider:
+                inspection = self.memory_provider.inspect(
+                    process, guard, threads=threads.by_pid.get(process.pid, ()),
+                )
+            else:
+                inspection = self.memory_provider.inspect(process, guard)
             if inspection.access_denied:
                 denied += 1
+                continue
+            if inspection.identity_unverified:
+                identity_unverified += 1
                 continue
             inspected_regions += len(inspection.regions)
             inspected_bytes += inspection.bytes_read
             errors += inspection.query_errors + inspection.read_errors
             truncated = truncated or inspection.truncated
+            threads_checked += inspection.threads_checked
+            thread_errors += inspection.thread_errors
+            threads_truncated = threads_truncated or inspection.threads_truncated
+
+            for tid, region in inspection.private_thread_starts:
+                evidence.append(sensor_evidence(
+                    self.descriptor, context, subject=process.subject, kind="memory",
+                    rule_id="memory.thread-start-private-executable",
+                    detail="Thread start address points into committed private executable memory",
+                    maliciousness=.70, confidence=.83, severity=80,
+                    complete=not (
+                        threads.truncated or threads.errors or inspection.threads_truncated
+                        or inspection.thread_errors
+                    ),
+                    correlation_group=f"memory-private-exec:{process.subject}",
+                    attributes={
+                        "pid": process.pid,
+                        "creation_time": process.creation_time,
+                        "path": process.path,
+                        "image": process.image,
+                        "thread_id": tid,
+                        "region_size": region.size,
+                        "writable_executable": region.writable_executable,
+                    },
+                ))
 
             for region in inspection.regions:
                 if not (
@@ -1257,11 +1439,20 @@ class WindowsMemorySensor:
                 ))
 
         reasons = [
-            "baseline memory inspection does not yet validate thread start "
-            "addresses, remote-write telemetry or image-vs-disk mappings"
+            "remote-write telemetry and image-vs-disk mappings are outside coverage"
         ]
+        if thread_provider:
+            reasons.append(f"{threads_checked} thread start address(es) checked")
+        else:
+            reasons.append("thread start inspection unavailable")
+        if thread_errors:
+            reasons.append(f"{thread_errors} thread snapshot, access or lookup error(s)")
+        if threads_truncated:
+            reasons.append("thread start inspection reached an observation limit")
         if denied:
             reasons.append(f"{denied} process(es) denied memory access")
+        if identity_unverified:
+            reasons.append(f"{identity_unverified} process instance(s) could not be verified")
         if errors:
             reasons.append(f"{errors} memory query/read error(s)")
         if truncated:
@@ -1277,8 +1468,8 @@ class WindowsMemorySensor:
             reason="; ".join(reasons),
             inspected_items=inspected_regions,
             inspected_bytes=inspected_bytes,
-            skipped_items=denied + snapshot.unresolved_paths,
-            error_items=errors,
+            skipped_items=denied + identity_unverified + snapshot.unresolved_paths,
+            error_items=errors + thread_errors,
         )
 
 

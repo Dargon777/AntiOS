@@ -79,7 +79,7 @@ def _behavior_summary(findings: Iterable[dict]) -> tuple[int, tuple[str, ...]]:
     return highest, tuple(rules[:16])
 
 
-def _scanner_summary(result: dict) -> tuple[str, bool, bool, bool]:
+def _scanner_summary(result: dict) -> tuple[str, bool, bool, bool, bool]:
     verdict = str(result.get("verdict") or "unknown")
     coverage = str(result.get("coverage") or "limited")
     findings = result.get("findings") if isinstance(result.get("findings"), list) else []
@@ -99,15 +99,17 @@ def _scanner_summary(result: dict) -> tuple[str, bool, bool, bool]:
         engine.get("failed_during_scan") is not True and
         engine.get("database_freshness") == "local"
     )
-    complete = coverage == "antios-local-inspection" and engine_ready
-    return verdict, complete, confirmed, review
+    catalog_verified = engine.get("signature_catalog_status") != "fallback"
+    complete = coverage == "antios-local-inspection" and engine_ready and catalog_verified
+    enforcement_ready = verdict == "threats-found" and engine_ready and catalog_verified
+    return verdict, complete, confirmed, review, enforcement_ready
 
 
 def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[dict] = (),
                   evidence: Iterable[Evidence | dict] = (),
                   native_pre_execution: bool | None = None,
                   now: float | None = None) -> RiskContext:
-    verdict, complete, confirmed, review = _scanner_summary(scan_result)
+    verdict, complete, confirmed, review, enforcement_ready = _scanner_summary(scan_result)
     behavior_items = tuple(behavior_findings)
     behavior_score, behavior_rules = _behavior_summary(behavior_items)
     raw_evidence = tuple(evidence)
@@ -153,8 +155,8 @@ def evaluate_risk(path: str, scan_result: dict, *, behavior_findings: Iterable[d
 
     if confirmed:
         classification = "confirmed-threat"
-        action = "quarantine-or-native-block"
-        automatic = True
+        action = "quarantine-or-native-block" if enforcement_ready else "review-and-rescan"
+        automatic = enforcement_ready
     elif score >= 90:
         classification = "critical-behavior"
         action = "review-immediately"

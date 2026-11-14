@@ -62,6 +62,21 @@ def test_stale_signatures_and_unreadable_guard_are_visible():
     assert next(row for row in result["checks"] if row["id"] == "engine")["state"] == "failed"
 
 
+def test_catalog_fallback_and_dropped_incidents_are_visible(monkeypatch):
+    monkeypatch.setattr(checks, "load_managed_signatures", lambda: ({}, {
+        "signature_catalog_status": "fallback",
+        "signature_catalog_warning": "Installed signature catalog failed validation",
+    }))
+    monkeypatch.setattr(checks, "AntiOSEngine", lambda **kwargs: Engine())
+    result = checks.run_checks(guard_reader=lambda: dict(guard(), incident_tracking_dropped=1))
+    states = {row["id"]: row for row in result["checks"]}
+    assert result["status"] == "attention"
+    assert states["test-detection"]["state"] == "passed"
+    assert states["database"]["state"] == "warning"
+    assert "fallback" in checks.describe_check(states["database"], "en")[2]
+    assert states["guard-status"]["state"] == "warning"
+
+
 def test_cancellation_closes_engine_without_running_later_steps():
     engine = Engine()
     progress = []

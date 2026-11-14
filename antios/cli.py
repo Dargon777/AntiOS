@@ -115,8 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     coexist_cmd.add_argument("--json", action="store_true")
 
-    sensors = sub.add_parser("sensors", help="Inspect local browser, TCP and hardware sensor coverage.")
-    sensors.add_argument("--surface", choices=_INSPECTABLE_SENSORS, action="append")
+    sensors = sub.add_parser("sensors", help="Inspect read-only local security sensor coverage.")
+    sensors.add_argument("--surface", choices=(*_INSPECTABLE_SENSORS, "ram"), action="append")
     sensors.add_argument("--json", action="store_true")
 
     version_cmd = sub.add_parser("version", help="Show AntiOS and Python versions.")
@@ -245,6 +245,13 @@ def build_parser() -> argparse.ArgumentParser:
     catalog_install = catalog_sub.add_parser("install")
     catalog_install.add_argument("package", type=Path)
     catalog_install.add_argument("--json", action="store_true")
+    catalog_preflight = catalog_sub.add_parser("preflight", help="Check a signed update against trusted files.")
+    catalog_preflight.add_argument("package", type=Path)
+    catalog_preflight.add_argument("--json", action="store_true")
+    catalog_trust = catalog_sub.add_parser("trust-file", help="Record the hash of a known-good file locally.")
+    catalog_trust.add_argument("path", type=Path)
+    catalog_untrust = catalog_sub.add_parser("untrust-hash", help="Remove a hash from the local baseline.")
+    catalog_untrust.add_argument("sha256")
 
     quarantine_cmd = sub.add_parser("quarantine", help="Inspect, isolate or restore encrypted threats.")
     quarantine_sub = quarantine_cmd.add_subparsers(dest="quarantine_command", required=True)
@@ -361,9 +368,14 @@ def main(argv: list[str] | None = None) -> int:
             return guard_main(args.guard_args)
         if args.command == "sensors":
             from .security_sensors import ScanBudget, ScanContext, Surface, runtime_registry
+            surfaces = args.surface or _INSPECTABLE_SENSORS
             context = ScanContext(
-                requested_surfaces=frozenset(Surface(name) for name in (args.surface or _INSPECTABLE_SENSORS)),
-                budget=ScanBudget(max_items=4096, max_bytes=8 * 1024 * 1024, max_seconds=10, max_depth=5),
+                requested_surfaces=frozenset(Surface(name) for name in surfaces),
+                budget=ScanBudget(
+                    max_items=20_000 if "ram" in surfaces else 4096,
+                    max_bytes=8 * 1024 * 1024, max_seconds=10, max_depth=5,
+                    allow_privileged="ram" in surfaces,
+                ),
             )
             reports = runtime_registry().collect_all(context)
             if args.json:
@@ -556,7 +568,23 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "signatures":
             from .antivirus import load_managed_signatures
-            from .signature_catalog import install_catalog
+            from .signature_catalog import catalog_preflight, install_catalog, trust_file, untrust_hash
+            if args.signatures_command == "trust-file":
+                print(trust_file(args.path))
+                return 0
+            if args.signatures_command == "untrust-hash":
+                print("Trusted hash removed" if untrust_hash(args.sha256) else "Trusted hash not found")
+                return 0
+            if args.signatures_command == "preflight":
+                result = catalog_preflight(args.package)
+                if args.json:
+                    _print_json(result)
+                else:
+                    print(f"Catalog v{result['version']} preflight: {result['status']} "
+                          f"({result['trusted_hashes_checked']} trusted hashes checked)")
+                    for conflict in result["conflicts"]:
+                        print(f"{conflict['sha256']}  {conflict['label']}")
+                return 3 if result["status"] == "blocked" else 0
             if args.signatures_command == "install":
                 install_catalog(args.package)
             rules, metadata = load_managed_signatures()

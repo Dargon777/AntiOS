@@ -6,6 +6,7 @@ param(
     [string]$RootsJson,
     [ValidateSet('notify', 'quarantine')][string]$Mode = 'notify',
     [switch]$AllowManagedUnsigned,
+    [switch]$ReuseExisting,
     [switch]$RepairStateAccess,
     [switch]$Uninstall,
     [switch]$Apply
@@ -67,10 +68,16 @@ if ($RepairStateAccess) {
 function Assert-GuardTaskOwned($Task, [string]$ExpectedExecutable) {
     if (-not $Task) { return }
     $account = [string]$Task.Principal.UserId
-    if ($account -in @('', $null) -or
-        $account -inotmatch '^.+$' -or
-        $account -notin @($identity.Name, $identity.User.Value)) {
-        throw 'Existing Guard task belongs to a different Windows user; refusing modification.'
+    if ($account -notin @($identity.Name, $identity.User.Value)) {
+        try {
+            $sid = [Security.Principal.NTAccount]::new($account).Translate(
+                [Security.Principal.SecurityIdentifier]).Value
+        } catch {
+            $sid = $null
+        }
+        if ($sid -ne $identity.User.Value) {
+            throw 'Existing Guard task belongs to a different Windows user; refusing modification.'
+        }
     }
     $actions = @($Task.Actions)
     if ($actions.Count -ne 1 -or -not $actions[0].Execute) {
@@ -85,6 +92,85 @@ function Assert-GuardTaskOwned($Task, [string]$ExpectedExecutable) {
     if ($actual -ine $expected) {
         throw 'Existing Guard task points to another executable; refusing modification.'
     }
+}
+
+function Get-GuardTask {
+    try {
+        Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
+    } catch {
+        if ($_.FullyQualifiedErrorId -ne 'CmdletizationQuery_NotFound,Get-ScheduledTask') { throw }
+    }
+}
+
+function Assert-GuardTaskCanRestart($Task, [string]$Arguments, [string]$Directory) {
+    if ($Task.Principal.LogonType -ne 'Interactive' -or $Task.Principal.RunLevel -ne 'Limited' -or
+        $Task.Actions[0].Arguments -ine $Arguments -or $Task.Actions[0].WorkingDirectory -ine $Directory) {
+        throw 'Existing Guard task has unexpected arguments, working directory, or privileges.'
+    }
+    if ($Task.State -eq 'Disabled') { throw 'Existing Guard task is disabled in Task Scheduler.' }
+}
+
+function Stop-GuardTaskAndWait {
+    Stop-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        $task = Get-GuardTask
+        if (-not $task -or $task.State -notin @('Running', 'Queued')) { return }
+        Start-Sleep -Milliseconds 100
+    }
+    throw 'Existing Resident Guard task did not stop.'
+}
+
+function Get-GuardStartupStatus([string]$Path, [string]$Folder) {
+    $process = [Diagnostics.Process]::new()
+    try {
+        $process.StartInfo.FileName = $Path
+        $process.StartInfo.Arguments = 'status --state-dir "{0}"' -f $Folder
+        $process.StartInfo.WorkingDirectory = [IO.Path]::GetDirectoryName($Path)
+        $process.StartInfo.CreateNoWindow = $true
+        $process.StartInfo.UseShellExecute = $false
+        $process.StartInfo.RedirectStandardOutput = $true
+        $process.StartInfo.RedirectStandardError = $true
+        [void]$process.Start()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(5000)) {
+            $process.Kill()
+            return
+        }
+        if ($process.ExitCode -eq 0 -and $stdout.Wait(250) -and $stderr.Wait(250)) {
+            $stdout.Result | ConvertFrom-Json -ErrorAction Stop
+        }
+    } catch {
+        # A new Guard may not have created readable state yet.
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Wait-GuardStartup([string]$Path, [string]$Folder, [double]$StartedAfter) {
+    $first = $null
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $task = Get-GuardTask
+        if ($task -and $task.State -eq 'Running') {
+            $status = Get-GuardStartupStatus $Path $Folder
+            if ($status -and $status.kind -eq 'antivirus-guard' -and $status.running -eq $true -and
+                $status.run_id -and $status.state -in @('monitoring', 'scanning', 'attention', 'degraded') -and
+                $status.started_at -ge $StartedAfter -and $status.heartbeat -ge $StartedAfter) {
+                if ($first -and $status.run_id -eq $first.run_id -and $status.heartbeat -gt $first.heartbeat) {
+                    return
+                }
+                $first = $status
+            }
+        } else {
+            $first = $null
+        }
+        Start-Sleep -Milliseconds 500
+    } while ($clock.Elapsed.TotalSeconds -lt 20)
+
+    $info = Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+    $last = if ($info) { '0x{0:X8}' -f ([int64]$info.LastTaskResult -band 0xFFFFFFFFL) } else { '(unavailable)' }
+    throw "Resident Guard did not publish advancing heartbeats after startup. LastTaskResult=$last"
 }
 
 function Stop-ManagedGuardProcess([string]$Path) {
@@ -113,7 +199,7 @@ if ($Uninstall) {
         return
     }
     $uninstallExe = if ($Executable) { $Executable } else { Join-Path $ScriptDirectory 'AntiOS-Guard.exe' }
-    $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+    $task = Get-GuardTask
     if ($task) {
         Assert-GuardTaskOwned -Task $task -ExpectedExecutable $uninstallExe
         Stop-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
@@ -131,17 +217,6 @@ $exe = (Resolve-Path -LiteralPath $Executable).Path
 if ([IO.Path]::GetFileName($exe) -ne 'AntiOS-Guard.exe') {
     throw 'Use the dedicated AntiOS-Guard.exe companion.'
 }
-if ($Roots.Count -lt 1 -or $Roots.Count -gt 16) {
-    throw 'Select 1..16 roots with -Roots.'
-}
-$resolvedRoots = @($Roots | ForEach-Object {
-    $item = Get-Item -LiteralPath $_ -Force
-    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Not a regular directory: $_"
-    }
-    $item.FullName
-})
-
 $folder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AntiOS\Guard'
 $policyPath = Join-Path $folder 'startup-policy.json'
 $signature = Get-AuthenticodeSignature -LiteralPath $exe
@@ -158,25 +233,7 @@ function Assert-ManagedUnsignedGuard([string]$Path) {
     Assert-AntiOSProtectedInstallPath $expected
 }
 
-[pscustomobject]@{
-    Task = $taskName
-    User = $identity.Name
-    Executable = $exe
-    Signer = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '(none)' }
-    Signature = $signature.Status
-    Roots = ($resolvedRoots -join ', ')
-    Mode = $Mode
-    Engine = 'AntiOS Engine'
-    Policy = $policyPath
-    Privilege = 'Limited'
-    Trigger = 'Current user logon'
-} | Format-List
-
-if (-not $Apply) {
-    Write-Output 'Preview only. Use -Apply after reviewing the executable, signer, roots and mode.'
-    return
-}
-if ($signature.Status -ne 'Valid') {
+if ($Apply -and $signature.Status -ne 'Valid') {
     if (-not $AllowManagedUnsigned) {
         throw 'Automatic startup requires a valid Authenticode signature. Manual development runs remain available.'
     }
@@ -184,8 +241,47 @@ if ($signature.Status -ne 'Valid') {
 }
 
 # Check the existing task before rewriting policy files or stopping anything.
-$existing = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+$existing = if ($Apply) { Get-GuardTask }
 if ($existing) { Assert-GuardTaskOwned -Task $existing -ExpectedExecutable $exe }
+$arguments = 'run --policy "{0}"' -f $policyPath
+$workingDirectory = [IO.Path]::GetDirectoryName($exe)
+$reuse = $ReuseExisting -and $existing
+$keepPolicy = $Apply -and $ReuseExisting -and (Test-Path -LiteralPath $policyPath)
+if ($reuse) {
+    Assert-GuardTaskCanRestart $existing $arguments $workingDirectory
+    if (-not $keepPolicy) {
+        throw 'Existing Guard policy is missing. Configure Resident Guard with explicit roots to recreate it.'
+    }
+}
+if (-not $keepPolicy) {
+    if ($Roots.Count -lt 1 -or $Roots.Count -gt 16) { throw 'Select 1..16 roots with -Roots.' }
+    $resolvedRoots = @($Roots | ForEach-Object {
+        $item = Get-Item -LiteralPath $_ -Force
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Not a regular directory: $_"
+        }
+        $item.FullName
+    })
+
+    [pscustomobject]@{
+        Task = $taskName
+        User = $identity.Name
+        Executable = $exe
+        Signer = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '(none)' }
+        Signature = $signature.Status
+        Roots = ($resolvedRoots -join ', ')
+        Mode = $Mode
+        Engine = 'AntiOS Engine'
+        Policy = $policyPath
+        Privilege = 'Limited'
+        Trigger = 'Current user logon'
+    } | Format-List
+
+    if (-not $Apply) {
+        Write-Output 'Preview only. Use -Apply after reviewing the executable, signer, roots and mode.'
+        return
+    }
+}
 
 $existingParent = $folder
 while (-not (Test-Path -LiteralPath $existingParent)) {
@@ -205,36 +301,34 @@ if ((Test-Path -LiteralPath $policyPath) -and
     throw 'Policy path must not be a reparse point.'
 }
 
-$policyData = @{
-    schema = 1
-    roots = $resolvedRoots
-    auto_quarantine = ($Mode -eq 'quarantine')
-    scan_engine = 'antios'
+if ($reuse) {
+    # Restart the verified registration without rewriting its policy or task settings.
+    if ($existing.State -eq 'Running') {
+        $status = Get-GuardStartupStatus $exe $folder
+        if ($status -and $status.kind -eq 'antivirus-guard' -and $status.running -eq $true) {
+            return
+        }
+    }
+    if ($existing.State -in @('Running', 'Queued')) { Stop-GuardTaskAndWait }
+    $startedAfter = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000
+    Start-ScheduledTask -TaskPath '\' -TaskName $taskName
+    Wait-GuardStartup $exe $folder $startedAfter
+    Write-Output "Restarted '$taskName' using the existing Guard policy."
+    return
 }
-$policy = $policyData | ConvertTo-Json
-[IO.File]::WriteAllText($policyPath, $policy, [Text.UTF8Encoding]::new($false))
 
-$action = New-ScheduledTaskAction -Execute $exe -Argument ('run --policy "{0}"' -f $policyPath) -WorkingDirectory ([IO.Path]::GetDirectoryName($exe))
+$action = New-ScheduledTaskAction -Execute $exe -Argument $arguments -WorkingDirectory $workingDirectory
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
 $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
 # Reconfiguring resident protection must never leave an old task instance
 # holding guard.lock. Stop the existing task first, then replace its definition.
-$existing = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+$existing = Get-GuardTask
 if ($existing) {
     Assert-GuardTaskOwned -Task $existing -ExpectedExecutable $exe
-    Stop-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
-    $state = $existing.State
-    for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        Start-Sleep -Milliseconds 100
-        $currentTask = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
-        $state = if ($currentTask) { $currentTask.State } else { $null }
-        if ($state -ne 'Running') { break }
-    }
-    if ($state -eq 'Running') {
-        throw "Existing Resident Guard task did not stop before reconfiguration."
-    }
+    if ($ReuseExisting) { throw 'Guard task was configured concurrently. Retry startup without replacing its policy.' }
+    Stop-GuardTaskAndWait
 }
 
 # A task from an older build can have lost scheduler ownership while its
@@ -242,37 +336,18 @@ if ($existing) {
 # managed Guard executable, so a stale lock cannot block the replacement.
 Stop-ManagedGuardProcess $exe
 
+if (-not $keepPolicy) {
+    $policy = @{
+        schema = 1
+        roots = $resolvedRoots
+        auto_quarantine = ($Mode -eq 'quarantine')
+        scan_engine = 'antios'
+    } | ConvertTo-Json
+    [IO.File]::WriteAllText($policyPath, $policy, [Text.UTF8Encoding]::new($false))
+}
 Register-ScheduledTask -TaskPath '\' -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AntiOS Engine local post-write monitoring; no pre-execution blocking.' -Force | Out-Null
 $startedAfter = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000
 Start-ScheduledTask -TaskPath '\' -TaskName $taskName
-
-# Task Scheduler can report Running before Guard has opened its state database.
-# Require a heartbeat from the new run before reporting a successful start.
-$observedRunning = $false
-$startupClock = [Diagnostics.Stopwatch]::StartNew()
-do {
-    $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($task -and $task.State -eq 'Running') {
-        try {
-            $rawStatus = & $exe status --state-dir $folder 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                $status = $rawStatus | ConvertFrom-Json
-                if ($status.kind -eq 'antivirus-guard' -and $status.running -eq $true -and $status.state -ne 'starting' -and
-                    $status.started_at -ge $startedAfter -and $status.heartbeat -ge $startedAfter) {
-                    $observedRunning = $true
-                    break
-                }
-            }
-        } catch {
-            # State can be absent or unreadable while the new process starts.
-        }
-    }
-    Start-Sleep -Milliseconds 500
-} while ($startupClock.Elapsed.TotalSeconds -lt 20)
-if (-not $observedRunning) {
-    $info = Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
-    $last = if ($info) { $info.LastTaskResult } else { '(unavailable)' }
-    throw "Resident Guard did not publish a fresh heartbeat after startup. LastTaskResult=$last"
-}
+Wait-GuardStartup $exe $folder $startedAfter
 
 Write-Output "Started '$taskName'. Stop: AntiOS-Guard.exe stop. Remove startup: guard-startup.ps1 -Uninstall -Apply."

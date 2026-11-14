@@ -86,6 +86,15 @@ Use:
     antios signatures status --json
     antios signatures install PACKAGE
 
+Before installing a signed update, you can register known-good files with
+`antios signatures trust-file FILE` and preview the comparison with
+`antios signatures preflight PACKAGE --json`. AntiOS records only local SHA-256
+hashes and checks them again inside the installation transaction. Any conflict
+blocks activation and the active catalog stays in place. Use
+`antios signatures untrust-hash SHA256` to remove an entry. This baseline applies
+to exact hashes in signed update packages. With no entries the preview reports
+`no-baseline`. Adding a file does not exempt it from live scanning.
+
 A rejected or unreadable update must not silently replace a verified catalog. AntiOS can fall back to a verified bundled catalog and report the degraded state.
 
 The starter exact-hash set includes indicators derived from public NCSC and CISA/FBI malware reporting. It is intentionally limited; exact-hash coverage should not be confused with broad malware-family detection.

@@ -31,6 +31,8 @@ function Should-Throw([scriptblock]$Block, [string]$Description) {
 $ScriptDirectory = (Resolve-Path (Join-Path $PSScriptRoot '..\scripts')).Path
 Import-OneFunction '..\scripts\guard-startup.ps1' 'Restore-GuardUserAccess'
 Import-OneFunction '..\scripts\guard-startup.ps1' 'Assert-GuardTaskOwned'
+Import-OneFunction '..\scripts\guard-startup.ps1' 'Assert-GuardTaskCanRestart'
+Import-OneFunction '..\scripts\guard-startup.ps1' 'Wait-GuardStartup'
 Import-OneFunction '..\scripts\dashboard-startup.ps1' 'Assert-ControlCenterTaskOwned'
 
 $identity = [pscustomobject]@{
@@ -82,6 +84,36 @@ foreach ($case in @(
 # Repair the file-specific DACL from an old elevated Guard run without
 # modifying data, broad system principals or unrelated user files.
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$unqualifiedName = $identity.Name.Split('\')[-1]
+$unqualifiedTask = [pscustomobject]@{
+    Principal = [pscustomobject]@{UserId = $unqualifiedName; LogonType = 'Interactive'; RunLevel = 'Limited'}
+    Actions = @([pscustomobject]@{Execute = $guardExe; Arguments = 'run --policy "C:\Policy"'; WorkingDirectory = 'C:\Program Files\AntiOS'})
+    State = 'Ready'
+}
+Assert-GuardTaskOwned -Task $unqualifiedTask -ExpectedExecutable $guardExe
+Assert-GuardTaskCanRestart $unqualifiedTask 'run --policy "C:\Policy"' 'C:\Program Files\AntiOS'
+Should-Throw { Assert-GuardTaskCanRestart $unqualifiedTask 'history' 'C:\Program Files\AntiOS' } 'untrusted startup arguments'
+$unqualifiedTask.Principal.RunLevel = 'Highest'
+Should-Throw { Assert-GuardTaskCanRestart $unqualifiedTask 'run --policy "C:\Policy"' 'C:\Program Files\AntiOS' } 'elevated Guard task'
+$unqualifiedTask.Actions[0].Execute = $dashboardExe
+Assert-ControlCenterTaskOwned -Task $unqualifiedTask -ExpectedExecutable $dashboardExe
+
+# Fake Scheduler/status reads. A heartbeat left by another run or repeated
+# status snapshot must not be sufficient to report a successful startup.
+$script:startupChecks = 0
+function Get-GuardTask { [pscustomobject]@{State = 'Running'} }
+function Get-GuardStartupStatus([string]$Path, [string]$Folder) {
+    $script:startupChecks++
+    $started = if ($script:startupChecks -eq 1) { 99 } else { 100 }
+    $heartbeat = if ($script:startupChecks -lt 4) { 101 } else { 102 }
+    [pscustomobject]@{
+        kind = 'antivirus-guard'; running = $true; run_id = 'test-run'; state = 'monitoring'
+        started_at = $started; heartbeat = $heartbeat
+    }
+}
+Wait-GuardStartup $guardExe 'C:\Policy' 100
+if ($script:startupChecks -ne 4) { throw 'Guard startup accepted an old or repeated heartbeat.' }
+
 $stateDir = Join-Path $env:RUNNER_TEMP ("AntiOS-GuardACL-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stateDir | Out-Null
 try {
@@ -92,10 +124,9 @@ try {
     [IO.File]::WriteAllText($wal, 'keep-uncommitted-history')
     [IO.File]::WriteAllText($unrelated, 'keep-other-file')
 
-    $dbInfo = Get-Item -LiteralPath $database -Force
-    $dbAcl = $dbInfo.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+    $dbAcl = Get-Acl -LiteralPath $database
     $dbAcl.SetAccessRuleProtection($true, $false) # imitate old protected file DACL
-    $dbInfo.SetAccessControl($dbAcl)
+    Set-Acl -LiteralPath $database -AclObject $dbAcl
     $unrelatedAcl = @((Get-Acl -LiteralPath $unrelated).Access | ForEach-Object {
         '{0}|{1}|{2}|{3}' -f $_.IdentityReference.Value, $_.FileSystemRights,
             $_.AccessControlType, $_.IsInherited
