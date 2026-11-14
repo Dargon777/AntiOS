@@ -128,7 +128,7 @@ def configure_resident_guard(*, roots: tuple[Path, ...] | None = None) -> dict:
     ]
     if roots is None:
         args.append("-ReuseExisting")
-    result = _run_startup_script(*args)
+    result = _run_startup_script(*args, timeout=65)
     return dict(result, configured=True, roots=[str(path) for path in selected])
 
 

@@ -172,7 +172,7 @@ function Wait-GuardStartup([string]$Path, [string]$Folder, [double]$StartedAfter
             $first = $null
         }
         Start-Sleep -Milliseconds 500
-    } while ($clock.Elapsed.TotalSeconds -lt 20)
+    } while ($clock.Elapsed.TotalSeconds -lt 45)
 
     $info = Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
     $last = if ($info) { '0x{0:X8}' -f ([int64]$info.LastTaskResult -band 0xFFFFFFFFL) } else { '(unavailable)' }

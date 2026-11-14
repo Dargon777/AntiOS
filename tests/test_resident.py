@@ -60,7 +60,7 @@ def test_default_guard_start_preserves_existing_task_and_policy(monkeypatch, tmp
     previous_root = str(tmp_path / "existing")
     monkeypatch.setattr(resident, "default_resident_roots", lambda: (default_root,))
     monkeypatch.setattr(resident, "_guard_executable", lambda: tmp_path / "AntiOS-Guard.exe")
-    monkeypatch.setattr(resident, "_run_startup_script", lambda *args: calls.append(args) or {})
+    monkeypatch.setattr(resident, "_run_startup_script", lambda *args, **kwargs: calls.append(args) or {})
     states = iter([
         {"state": "unresponsive", "running": False},
         {"state": "monitoring", "running": True, "roots": [previous_root], "mode": "quarantine"},
