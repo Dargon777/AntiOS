@@ -117,6 +117,39 @@ def test_directory_helper_timeout_is_a_reportable_startup_error(tmp_path, monkey
         guard_state._grant_creator_access(tmp_path)
 
 
+@pytest.mark.parametrize(("args", "detached", "output"), [
+    (["run", "--policy", "policy.json"], True, ""),
+    (["run", "--help"], False, "guard output"),
+    (["status"], False, "guard output"),
+    (["stop"], False, "guard output"),
+    (["history"], False, "guard output"),
+])
+@pytest.mark.parametrize("packager", ["pyinstaller", "nuitka"])
+def test_frozen_guard_only_detaches_when_running(args, detached, output, packager, monkeypatch, capsys):
+    import sys
+
+    import antios_guard_entry as entry
+    from antios import guard
+
+    calls = []
+    monkeypatch.setattr(entry, "os", SimpleNamespace(name="nt", devnull=os.devnull))
+    monkeypatch.setattr(sys, "frozen", packager == "pyinstaller", raising=False)
+    if packager == "nuitka":
+        monkeypatch.setattr(entry, "__compiled__", object(), raising=False)
+    monkeypatch.setattr(sys, "argv", ["AntiOS-Guard.exe", *args])
+    monkeypatch.setattr(entry, "_detach_console", lambda: calls.append("detach"))
+
+    def main():
+        calls.append("run")
+        print("guard output")
+        return 7
+
+    monkeypatch.setattr(guard, "main", main)
+    assert entry.run_entry() == 7
+    assert calls == (["detach", "run"] if detached else ["run"])
+    assert capsys.readouterr().out.strip() == output
+
+
 @pytest.mark.parametrize("text,expected", [
     ("[WinError 5] Zugriff verweigert", "ACCESS_DENIED"),
     ("[WinError 50] unsupported", "OPERATION_FAILED"),
@@ -166,14 +199,17 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
     $failure = ''
     try { Restore-GuardUserAccess $env:ANTIOS_TEST_FOLDER } catch { $rejected = $true; $failure = $_.Exception.ToString() }
     $acl = Get-Acl -LiteralPath $env:ANTIOS_TEST_FOLDER
-    $rules = @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]) | Where-Object {
+    $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
         $_.IdentityReference -eq $identity.User -and $_.AccessControlType -eq 'Allow' -and
+        $_.InheritanceFlags -eq $inherit -and
         ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq [Security.AccessControl.FileSystemRights]::FullControl
     })
     $ruleDetails = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {
         '{0}:{1}:inherited={2}' -f $_.IdentityReference.Value,$_.FileSystemRights,$_.IsInherited
     })
-    @{rejected=$rejected; failure=$failure; explicit_user=($rules.Count -gt 0); folder_rules=$ruleDetails; folder_sddl=$acl.Sddl; outside_unchanged=($before -eq (Get-Acl -LiteralPath $env:ANTIOS_TEST_OUTSIDE).Sddl)} | ConvertTo-Json -Compress
+    @{rejected=$rejected; failure=$failure; inheritable_user=($rules.Count -gt 0); folder_rules=$ruleDetails; folder_sddl=$acl.Sddl; outside_unchanged=($before -eq (Get-Acl -LiteralPath $env:ANTIOS_TEST_OUTSIDE).Sddl)} | ConvertTo-Json -Compress
     '''
     env = dict(os.environ, ANTIOS_TEST_SCRIPT=str(Path("scripts/guard-startup.ps1").absolute()),
                ANTIOS_TEST_FOLDER=str(folder), ANTIOS_TEST_OUTSIDE=str(outside),
@@ -190,7 +226,7 @@ def test_startup_acl_repair_is_scoped_to_regular_state_files(tmp_path, linked):
     assert data["rejected"] is linked, data["failure"]
     assert data["outside_unchanged"] is True
     if not linked:
-        assert data["explicit_user"] is True, data
+        assert data["inheritable_user"] is True, data
     assert state_file.read_bytes() == before_bytes
     if not linked:
         with sqlite3.connect(state_file) as db:
